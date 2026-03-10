@@ -2,3 +2,8 @@ Django
 djangorestframework
 requests
 kafka-python
+clickhouse-driver
+prometheus_client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp

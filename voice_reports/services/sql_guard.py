@@ -9,6 +9,8 @@ import re
 import logging
 from typing import Dict, List, Tuple
 
+from voice_reports.utils import normalize_sql_table_references
+
 logger = logging.getLogger(__name__)
 
 
@@ -173,28 +175,9 @@ class SQLGuard:
             return sql
         
         try:
-            # Add database prefix to tables without one
-            # This is a simple implementation - enhance as needed
-            sql_modified = sql
-            
-            # Find FROM clauses and add database if missing
-            from_pattern = r'FROM\s+([a-zA-Z0-9_]+)(?!\.)'
-            sql_modified = re.sub(
-                from_pattern,
-                f'FROM {self.workspace_database}.\\1',
-                sql_modified,
-                flags=re.IGNORECASE
-            )
-            
-            # Find JOIN clauses and add database if missing
-            join_pattern = r'JOIN\s+([a-zA-Z0-9_]+)(?!\.)'
-            sql_modified = re.sub(
-                join_pattern,
-                f'JOIN {self.workspace_database}.\\1',
-                sql_modified,
-                flags=re.IGNORECASE
-            )
-            
+            # Deterministic normalization prevents malformed references such as:
+            # etl.etl.table -> etl.table
+            sql_modified = normalize_sql_table_references(sql, self.workspace_database)
             return sql_modified
         
         except Exception as e:

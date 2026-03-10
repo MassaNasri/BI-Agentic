@@ -1,0 +1,31 @@
+{
+  "tables": [
+    {
+      "source_name": "customers",
+      "columns": ["customer_id", "name", "email", "phone", "address", "created_at"]
+    },
+    {
+      "source_name": "orders",
+      "columns": ["order_id", "customer_id", "product_id", "quantity", "price", "order_date", "status"]
+    },
+    {
+      "source_name": "products",
+      "columns": ["product_id", "name", "description", "category", "price", "stock_quantity"]
+    },
+    {
+      "source_name": "events",
+      "columns": ["event_id", "event_type", "user_id", "timestamp", "payload"],
+      "partition_by": "toYYYYMMDD(_extracted_at)",
+      "order_by": ["_extracted_at", "_row_id"]
+    },
+    {
+      "source_name": "logs",
+      "columns": ["log_id", "level", "message", "timestamp", "source"],
+      "partition_by": "toYYYYMMDD(_extracted_at)",
+      "order_by": ["_extracted_at", "_batch_id"],
+      "settings": {
+        "index_granularity": 4096
+      }
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+transformation_rules:
+  - rule_id: "trim_strings_v1"
+    rule_type: "CLEAN"
+    priority: 1
+    description: "Trim whitespace from all string fields"
+    condition:
+      type: "always"
+    action:
+      type: "trim_strings"
+  
+  - rule_id: "cast_age_to_int_v1"
+    rule_type: "TRANSFORM"
+    priority: 2
+    description: "Cast age field from string to integer"
+    condition:
+      type: "field_type"
+      field_name: "age"
+      expected_type: "string"
+    action:
+      type: "cast_to_int"
+      field_name: "age"
+      on_error: "skip"
+  
+  - rule_id: "validate_email_v1"
+    rule_type: "VALIDATE"
+    priority: 3
+    description: "Validate email format using regex"
+    condition:
+      type: "field_exists"
+      field_name: "email"
+    action:
+      type: "trim_field"
+      field_name: "email"
+  
+  - rule_id: "add_full_name_v1"
+    rule_type: "ENRICH"
+    priority: 4
+    description: "Add full_name field from first_name and last_name"
+    condition:
+      type: "all_fields_exist"
+      field_names: ["first_name", "last_name"]
+    action:
+      type: "copy_field"
+      source_name: "first_name"
+      dest_name: "given_name"

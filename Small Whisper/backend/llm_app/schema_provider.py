@@ -1,101 +1,116 @@
-import clickhouse_connect
+import logging
 import os
 import re
+import time
+from typing import Any
+
+import clickhouse_connect
+
+from shared.schema_utils import is_date_type, is_dimension_type, is_numeric_type, unqualify_table_name
+
+logger = logging.getLogger(__name__)
+
+_SCHEMA_CACHE: dict[str, list[dict[str, Any]]] | None = None
+_SCHEMA_CACHE_AT = 0.0
+SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "60"))
 
 
 def sanitize_sql_for_http(sql: str) -> str:
-    """
-    Sanitize SQL for ClickHouse HTTP execution.
-    
-    Removes incompatible syntax:
-    - FORMAT Native (not supported via HTTP)
-    - Semicolons (causes multi-statement errors)
-    - Extra whitespace
-    
-    Args:
-        sql: Raw SQL string
-    
-    Returns:
-        Clean SQL safe for HTTP execution
-    """
     if not sql:
         return ""
-    
-    # Remove FORMAT Native (case-insensitive)
-    clean_sql = re.sub(r'\s+FORMAT\s+Native\s*', ' ', sql, flags=re.IGNORECASE)
-    
-    # Remove all semicolons
-    clean_sql = clean_sql.replace(';', '')
-    
-    # Remove extra whitespace and trim
-    clean_sql = ' '.join(clean_sql.split())
-    clean_sql = clean_sql.strip()
-    
-    return clean_sql
+    clean_sql = re.sub(r"\s+FORMAT\s+Native\s*", " ", sql, flags=re.IGNORECASE)
+    clean_sql = clean_sql.replace(";", "")
+    clean_sql = " ".join(clean_sql.split())
+    return clean_sql.strip()
 
 
 def get_query_clickhouse_client():
-    """Get ClickHouse client for query execution using HTTP protocol."""
-    return clickhouse_connect.get_client(
-        host=os.getenv("CLICKHOUSE_HOST", "localhost"),
-        port=int(os.getenv("CLICKHOUSE_HTTP_PORT", "8123")),
-        username=os.getenv("CLICKHOUSE_QUERY_USER", os.getenv("CLICKHOUSE_USER", "etl_user")),
-        password=os.getenv("CLICKHOUSE_QUERY_PASSWORD", os.getenv("CLICKHOUSE_PASSWORD", "etl_pass123")),
-        database=os.getenv("CLICKHOUSE_DATABASE", "etl")
-    )
+    host = os.getenv("CLICKHOUSE_HOST", "localhost")
+    port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
+    username = os.getenv("CLICKHOUSE_USER", "etl_user")
+    password = os.getenv("CLICKHOUSE_PASSWORD", "etl_pass123")
+    database = os.getenv("CLICKHOUSE_DATABASE", "etl")
 
-def get_schema() -> dict:
-    """
-    Load ClickHouse schema for the active database.
+    logger.info("Connecting to ClickHouse for schema read: %s:%s db=%s", host, port, database)
 
-    IMPORTANT DESIGN RULE:
-    - Schema exposes TABLE NAMES ONLY (no database, no schema)
-    - Database context is handled by the ClickHouse connection itself
-    """
+    try:
+        return clickhouse_connect.get_client(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            database=database,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"ClickHouse connection error (schema read): host={host}, port={port}, db={database}. {exc}"
+        ) from exc
 
+
+def _classify_column(column: str, col_type: str) -> dict[str, Any]:
+    return {
+        "name": column,
+        "type": col_type,
+        "is_numeric": is_numeric_type(col_type),
+        "is_date": is_date_type(col_type),
+        "is_dimension": is_dimension_type(col_type),
+    }
+
+
+def _fetch_schema_from_clickhouse() -> dict[str, list[dict[str, Any]]]:
     client = get_query_clickhouse_client()
 
-    # Fetch schema for the active database only
     schema_query = """
         SELECT table, name, type
         FROM system.columns
         WHERE database = currentDatabase()
-        ORDER BY table;
+        ORDER BY table, position;
     """
-
-    # Sanitize before execution (HTTP-safe)
     clean_query = sanitize_sql_for_http(schema_query)
-    result = client.query(clean_query)
-    rows = result.result_rows
 
-    schema = {}
+    try:
+        result = client.query(clean_query)
+    except Exception as exc:
+        raise RuntimeError(f"ClickHouse schema query failed: {exc}") from exc
 
-    for table, column, col_type in rows:
-        schema.setdefault(table, []).append({
-            "name": column,
-            "type": col_type
-        })
+    schema: dict[str, list[dict[str, Any]]] = {}
+    for table, column, col_type in result.result_rows:
+        normalized_table = unqualify_table_name(str(table))
+        schema.setdefault(normalized_table, []).append(_classify_column(column, col_type))
 
-    # Debug output (optional but recommended)
-    print("\n--- CLICKHOUSE SCHEMA WITH TYPES LOADED ---")
-    for table, columns in schema.items():
-        print(f"\n{table}")
-        for col in columns:
-            print(f"  - {col['name']} ({col['type']})")
+    if not schema:
+        raise RuntimeError("No tables found in current ClickHouse database")
 
     return schema
 
 
-def is_question_matching_schema(question: str, schema: dict) -> bool:
-    question = question.lower()
+def get_schema(*, force_refresh: bool = False) -> dict[str, list[dict[str, Any]]]:
+    global _SCHEMA_CACHE, _SCHEMA_CACHE_AT
+
+    now = time.time()
+    cache_valid = (
+        not force_refresh
+        and _SCHEMA_CACHE is not None
+        and (now - _SCHEMA_CACHE_AT) < SCHEMA_CACHE_TTL_SECONDS
+    )
+    if cache_valid:
+        return _SCHEMA_CACHE
+
+    schema = _fetch_schema_from_clickhouse()
+    _SCHEMA_CACHE = schema
+    _SCHEMA_CACHE_AT = now
+    return schema
+
+
+def is_question_matching_schema(question: str, schema: dict[str, list[dict[str, Any]]]) -> bool:
+    question_lower = question.lower()
     tokens = set()
 
     for table, columns in schema.items():
         tokens.add(table.split(".")[-1].lower())
-
         for col in columns:
             col_name = col["name"].lower()
             tokens.add(col_name)
             tokens.add(col_name.replace("_", " "))
 
-    return any(token in question for token in tokens)
+    return any(token in question_lower for token in tokens)

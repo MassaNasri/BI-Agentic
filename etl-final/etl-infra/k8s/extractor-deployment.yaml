@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: extractor-service
+  namespace: etl
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: extractor-service
+  template:
+    metadata:
+      labels:
+        app: extractor-service
+    spec:
+      containers:
+        - name: extractor-service
+          image: etl-final/extractor-service:latest
+          ports:
+            - containerPort: 8003
+            - containerPort: 8083
+          envFrom:
+            - configMapRef:
+                name: etl-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 10
+            periodSeconds: 20

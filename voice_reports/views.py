@@ -12,22 +12,43 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
 import logging
 import os
 import requests
 
 from .models import VoiceReport, SQLEditHistory
+from .constants import ChartType, normalize_chart_type, to_metabase_display
 from .services import (
     get_small_whisper_client,
     get_clickhouse_executor,
     SQLGuard,
-    get_metabase_service,
-    get_jwt_service
+    get_metabase_service
 )
 from .services.clickhouse_executor import sanitize_query_results
 from users.permissions import IsManager, IsAnalyst, IsExecutive
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_chart_payload(chart_payload):
+    """
+    Normalize chart payloads coming from external components (e.g., Small Whisper).
+    """
+    if not isinstance(chart_payload, dict):
+        return chart_payload
+    raw_type = chart_payload.get("type")
+    normalized_type = normalize_chart_type(raw_type, default=ChartType.TABLE)
+    if raw_type and raw_type != normalized_type:
+        logger.info(
+            "Chart type mapping applied: source=%s mapped=%s",
+            raw_type,
+            normalized_type,
+        )
+    normalized_payload = dict(chart_payload)
+    normalized_payload["type"] = normalized_type
+    return normalized_payload
 
 
 def get_user_workspace(user):
@@ -47,6 +68,27 @@ def get_user_workspace(user):
         if membership:
             return membership.workspace
         return None
+
+
+def get_report_embed_url(report, metabase_service=None):
+    """
+    Generate a fresh Metabase question embed URL for every response.
+    """
+    if not report.metabase_question_id:
+        return ""
+
+    metabase = metabase_service or get_metabase_service()
+    embed_url = metabase.get_question_embed_url(report.metabase_question_id)
+    if embed_url:
+        return embed_url
+
+    logger.warning(
+        "Failed to generate dynamic embed URL for report=%s question=%s error=%s",
+        report.id,
+        report.metabase_question_id,
+        metabase.last_error
+    )
+    return ""
 
 
 class VoiceUploadView(APIView):
@@ -124,7 +166,11 @@ class VoiceUploadView(APIView):
                 intent_json=whisper_result.get('intent'),
                 generated_sql=sql or '',  # Empty string if no SQL
                 final_sql=sql or '',  # Initially same
-                status='pending_execution' if (question_type == 'analytical' and sql) else 'uploaded'
+                status=(
+                    VoiceReport.STATUS_PENDING
+                    if (question_type == 'analytical' and sql)
+                    else VoiceReport.STATUS_UPLOADED
+                )
             )
             
             # Handle conversational questions (no SQL needed)
@@ -139,7 +185,7 @@ class VoiceUploadView(APIView):
                     'message': whisper_result.get('message', 'Question does not require data analysis'),
                     'intent': whisper_result.get('intent'),
                     'requires_sql': False,
-                    'status': 'uploaded'
+                    'status': VoiceReport.STATUS_UPLOADED
                 })
             
             # TODO: Create history entry when ReportHistory model is added
@@ -154,6 +200,8 @@ class VoiceUploadView(APIView):
             # )
             
             logger.info(f"Voice report created: {report.id}")
+
+            normalized_chart = normalize_chart_payload(whisper_result.get('chart'))
             
             return Response({
                 'success': True,
@@ -163,10 +211,10 @@ class VoiceUploadView(APIView):
                 'question_type': question_type,
                 'intent': whisper_result.get('intent'),
                 'sql': sql,
-                'chart': whisper_result.get('chart'),
+                'chart': normalized_chart,
                 'confidence': whisper_result.get('confidence'),
                 'message': 'Audio processed successfully. Ready to execute.',
-                'status': 'pending_execution'
+                'status': VoiceReport.STATUS_PENDING
             })
         
         except Exception as e:
@@ -235,7 +283,7 @@ class QueryExecuteView(APIView):
             is_valid, error_msg, clean_sql = guard.validate_and_sanitize(sql_to_execute)
             
             if not is_valid:
-                report.status = 'failed'
+                report.status = VoiceReport.STATUS_FAILED
                 report.error_message = f"SQL validation failed: {error_msg}"
                 report.save()
                 
@@ -246,18 +294,18 @@ class QueryExecuteView(APIView):
             
             report.sql_validated = True
             report.final_sql = clean_sql
+            report.status = VoiceReport.STATUS_PROCESSING
+            report.error_message = ''
             report.save()
             
             # Execute on ClickHouse
-            report.status = 'executing'
-            report.save()
             
             try:
                 executor = get_clickhouse_executor()
                 query_result = executor.execute_query(clean_sql)
                 
                 if not query_result['success']:
-                    report.status = 'failed'
+                    report.status = VoiceReport.STATUS_FAILED
                     report.error_message = query_result['error']
                     report.save()
                     
@@ -273,7 +321,7 @@ class QueryExecuteView(APIView):
                         status=status.HTTP_502_BAD_GATEWAY
                     )
             except Exception as e:
-                report.status = 'failed'
+                report.status = VoiceReport.STATUS_FAILED
                 report.error_message = f"ClickHouse connection error: {str(e)}"
                 report.save()
                 
@@ -294,10 +342,19 @@ class QueryExecuteView(APIView):
             # This is defense-in-depth - results are already sanitized in executor,
             # but we sanitize again here to ensure PostgreSQL storage never fails
             sanitized_rows = sanitize_query_results(query_result['rows'])
-            report.query_result = sanitized_rows
+            report.query_result = {
+                'columns': query_result.get('columns', []),
+                'rows': sanitized_rows
+            }
             report.execution_time_ms = query_result['execution_time_ms']
             report.row_count = query_result['row_count']
-            report.status = 'executed'
+            report.status = VoiceReport.STATUS_EXECUTED
+            logger.info(
+                "ClickHouse result ready for report %s: columns=%s row_count=%s",
+                report.id,
+                len(query_result.get('columns', [])),
+                query_result['row_count']
+            )
             
             # 🔒 NaN-SAFE: Catch JSON serialization errors during save
             # This is a final safety net in case any NaN/Infinity values slip through
@@ -309,12 +366,15 @@ class QueryExecuteView(APIView):
                 logger.error(f"This indicates NaN/Infinity values weren't properly sanitized")
                 # Try one more sanitization pass and save again
                 sanitized_rows = sanitize_query_results(sanitized_rows)
-                report.query_result = sanitized_rows
+                report.query_result = {
+                    'columns': query_result.get('columns', []),
+                    'rows': sanitized_rows
+                }
                 try:
                     report.save()
                 except Exception as final_error:
                     # If it still fails after re-sanitization, return error
-                    report.status = 'failed'
+                    report.status = VoiceReport.STATUS_FAILED
                     report.error_message = f"Data serialization error: {str(final_error)}"
                     report.save()
                     return Response(
@@ -332,53 +392,94 @@ class QueryExecuteView(APIView):
                 query_result['rows'],
                 report.intent_json
             )
+            report.chart_type = chart_type
             
             # Create Metabase question
             metabase = get_metabase_service()
             
             if not metabase.authenticate():
-                logger.warning("Metabase authentication failed")
-                return Response({
-                    'success': True,
-                    'report_id': report.id,
-                    'row_count': query_result['row_count'],
-                    'execution_time_ms': query_result['execution_time_ms'],
-                    'chart_type': chart_type,
-                    'warning': 'Query executed but Metabase unavailable'
-                })
+                return self._metabase_failure_response(
+                    report=report,
+                    chart_type=chart_type,
+                    row_count=query_result['row_count'],
+                    execution_time_ms=query_result['execution_time_ms'],
+                    failure_reason='authentication_failed',
+                    details=metabase.last_error,
+                    http_status=status.HTTP_502_BAD_GATEWAY
+                )
             
             # Create question in Metabase
+            metabase_display = to_metabase_display(chart_type)
+            logger.info(
+                "Metabase chart display selected: chart_type=%s metabase_display=%s",
+                chart_type,
+                metabase_display
+            )
             question_id = metabase.create_question(
                 name=f"Voice Report #{report.id}: {report.transcription[:50]}",
                 sql=clean_sql,
-                visualization_settings={'display': chart_type}
+                visualization_settings={'display': metabase_display}
             )
             
-            if question_id:
-                report.metabase_question_id = question_id
-                
-                # Enable embedding
-                metabase.enable_question_embedding(question_id)
-                
-                # Get or create workspace dashboard
-                dashboard_id = self._get_or_create_dashboard(
-                    report.workspace,
-                    metabase
+            if not question_id:
+                return self._metabase_failure_response(
+                    report=report,
+                    chart_type=chart_type,
+                    row_count=query_result['row_count'],
+                    execution_time_ms=query_result['execution_time_ms'],
+                    failure_reason='question_creation_failed',
+                    details=metabase.last_error,
+                    http_status=status.HTTP_502_BAD_GATEWAY
                 )
-                
-                if dashboard_id:
-                    # Add to dashboard
-                    metabase.add_question_to_dashboard(question_id, dashboard_id)
+
+            report.metabase_question_id = question_id
+            report.save(update_fields=['metabase_question_id', 'updated_at'])
+            
+            # Enable embedding (best effort)
+            if not metabase.enable_question_embedding(question_id):
+                logger.warning(
+                    "Failed to enable embedding for Metabase question %s (report %s)",
+                    question_id,
+                    report.id
+                )
+            
+            # Get or create workspace dashboard
+            dashboard_id = self._get_or_create_dashboard(
+                report.workspace,
+                metabase
+            )
+            
+            if dashboard_id:
+                # Add to dashboard (best effort)
+                if metabase.add_question_to_dashboard(question_id, dashboard_id):
                     report.metabase_dashboard_id = dashboard_id
-                
-                # Generate embed URL
-                jwt_service = get_jwt_service()
-                embed_url = jwt_service.get_question_embed_url(
-                    question_id=question_id,
-                    workspace_id=report.workspace.id
+                else:
+                    logger.warning(
+                        "Failed to add question %s to dashboard %s for report %s",
+                        question_id,
+                        dashboard_id,
+                        report.id
+                    )
+            
+            # Generate a fresh embed URL (do not persist JWT token in DB).
+            embed_url = metabase.get_question_embed_url(question_id=question_id)
+            if not embed_url:
+                embed_error = metabase.last_error or 'unknown_error'
+                embed_status = (
+                    status.HTTP_500_INTERNAL_SERVER_ERROR
+                    if 'METABASE_SECRET_KEY' in embed_error
+                    else status.HTTP_502_BAD_GATEWAY
                 )
-                
-                report.embed_url = embed_url
+                return self._metabase_failure_response(
+                    report=report,
+                    chart_type=chart_type,
+                    row_count=query_result['row_count'],
+                    execution_time_ms=query_result['execution_time_ms'],
+                    failure_reason='embed_generation_failed',
+                    details=embed_error,
+                    http_status=embed_status,
+                    clear_question=False
+                )
             
             # TODO: Save chart inference when ChartInference model is added
             # ChartInference.objects.create(
@@ -392,7 +493,9 @@ class QueryExecuteView(APIView):
             # )
             
             report.chart_type = chart_type
-            report.status = 'completed'
+            report.status = VoiceReport.STATUS_VISUALIZATION_CREATED
+            report.error_message = ''
+            report.embed_url = ''
             report.save()
             
             # TODO: Create history entry when ReportHistory model is added
@@ -415,7 +518,8 @@ class QueryExecuteView(APIView):
                 'row_count': query_result['row_count'],
                 'execution_time_ms': query_result['execution_time_ms'],
                 'chart_type': chart_type,
-                'embed_url': report.embed_url,
+                'status': report.status,
+                'embed_url': embed_url,
                 'metabase_question_id': question_id
             })
         
@@ -425,33 +529,82 @@ class QueryExecuteView(APIView):
                 {'success': False, 'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    def _metabase_failure_response(
+        self,
+        *,
+        report,
+        chart_type,
+        row_count,
+        execution_time_ms,
+        failure_reason,
+        http_status,
+        details=None,
+        clear_question=True
+    ):
+        """Persist visualization failure and return a structured API error."""
+        logger.error(
+            "Metabase visualization failed for report %s: reason=%s details=%s",
+            report.id,
+            failure_reason,
+            details
+        )
+        report.status = VoiceReport.STATUS_FAILED
+        report.error_message = (
+            f"metabase_visualization_failed: {failure_reason}"
+            if not details
+            else f"metabase_visualization_failed: {failure_reason} ({details})"
+        )
+        report.embed_url = ''
+        if clear_question:
+            report.metabase_question_id = None
+            report.metabase_dashboard_id = None
+        report.save()
+
+        response_payload = {
+            'success': False,
+            'error': 'metabase_visualization_failed',
+            'report_id': report.id,
+            'row_count': row_count,
+            'execution_time_ms': execution_time_ms,
+            'chart_type': chart_type,
+        }
+        if details:
+            response_payload['details'] = details
+
+        return Response(response_payload, status=http_status)
     
     def _infer_chart_type(self, columns, rows, intent):
         """Infer appropriate chart type from data and intent."""
+        raw_chart_type = ChartType.TABLE
+
         if not rows:
-            return 'table'
+            return ChartType.TABLE
         
         num_columns = len(columns)
         
         # Single value -> number display
         if num_columns == 1 and len(rows) == 1:
-            return 'scalar'
-        
-        # Two columns -> likely x/y chart
-        if num_columns == 2:
+            raw_chart_type = 'scalar'
+        elif num_columns == 2:
             # Check if first column is date/time
             first_col_name = columns[0].lower()
             if any(term in first_col_name for term in ['date', 'time', 'year', 'month', 'day']):
-                return 'line'
+                raw_chart_type = ChartType.LINE
             else:
-                return 'bar'
+                raw_chart_type = ChartType.BAR
+        elif num_columns > 2:
+            # Multiple numeric columns -> bar chart
+            raw_chart_type = ChartType.BAR
         
-        # Multiple numeric columns -> bar chart
-        if num_columns > 2:
-            return 'bar'
-        
-        # Default
-        return 'table'
+        normalized_chart_type = normalize_chart_type(raw_chart_type, default=ChartType.TABLE)
+        if raw_chart_type != normalized_chart_type:
+            logger.info(
+                "Chart type mapping applied in QueryExecuteView: source=%s mapped=%s",
+                raw_chart_type,
+                normalized_chart_type,
+            )
+        return normalized_chart_type
     
     def _get_or_create_dashboard(self, workspace, metabase):
         """Get or create Metabase dashboard for workspace."""
@@ -504,7 +657,7 @@ class SQLEditView(APIView):
             
             # Validate new SQL
             guard = SQLGuard(
-                workspace_database=os.getenv('CLICKHOUSE_DATABASE', 'etl')
+                workspace_database=os.getenv('CLICKHOUSE_DATABASE', 'default')
             )
             
             is_valid, error_msg, clean_sql = guard.validate_and_sanitize(new_sql)
@@ -523,7 +676,7 @@ class SQLEditView(APIView):
             report.sql_edited = True
             report.edited_by = request.user
             report.sql_validated = True
-            report.status = 'pending_execution'  # Needs re-execution
+            report.status = VoiceReport.STATUS_PENDING  # Needs re-execution
             report.save()
             
             # TODO: Create history entry when ReportHistory model is added
@@ -579,8 +732,10 @@ class ReportListView(APIView):
                 reports = reports.filter(created_by=request.user)
             # Analyst and Executive see all workspace reports
             
+            metabase = get_metabase_service()
             data = []
             for report in reports:
+                embed_url = get_report_embed_url(report, metabase_service=metabase)
                 data.append({
                     'id': report.id,
                     'transcription': report.transcription,
@@ -591,9 +746,16 @@ class ReportListView(APIView):
                     'row_count': report.row_count,
                     'execution_time_ms': report.execution_time_ms,
                     'sql': report.final_sql,
-                    'embed_url': report.embed_url,
+                    'embed_url': embed_url,
+                    'metabase_question_id': report.metabase_question_id,
                     'can_edit': request.user.role == 'analyst'
                 })
+            logger.info(
+                "Report list loaded for user=%s workspace=%s count=%s",
+                request.user.id,
+                workspace.id,
+                len(data)
+            )
             
             return Response({
                 'success': True,
@@ -639,6 +801,7 @@ class ReportDetailView(APIView):
             #     'changes': h.changes
             # } for h in history]
             history_data = []  # Placeholder until ReportHistory is added
+            embed_url = get_report_embed_url(report)
             
             return Response({
                 'success': True,
@@ -655,7 +818,9 @@ class ReportDetailView(APIView):
                     'row_count': report.row_count,
                     'execution_time_ms': report.execution_time_ms,
                     'chart_type': report.chart_type,
-                    'embed_url': report.embed_url,
+                    'metabase_question_id': report.metabase_question_id,
+                    'metabase_dashboard_id': report.metabase_dashboard_id,
+                    'embed_url': embed_url,
                     'error_message': report.error_message,
                     'created_at': report.created_at,
                     'created_by': report.created_by.email,
@@ -738,12 +903,16 @@ class WorkspaceDashboardView(APIView):
                     'error': 'No dashboard available yet. Create some reports first.'
                 }, status=status.HTTP_404_NOT_FOUND)
             
-            # Generate JWT embed URL for dashboard
-            jwt_service = get_jwt_service()
-            embed_url = jwt_service.get_dashboard_embed_url(
-                dashboard_id=report.metabase_dashboard_id,
-                workspace_id=workspace.id
+            # Generate fresh JWT embed URL for dashboard.
+            metabase = get_metabase_service()
+            embed_url = metabase.get_dashboard_embed_url(
+                dashboard_id=report.metabase_dashboard_id
             )
+            if not embed_url:
+                return Response({
+                    'success': False,
+                    'error': metabase.last_error or 'Failed to generate dashboard embed URL'
+                }, status=status.HTTP_502_BAD_GATEWAY)
             
             return Response({
                 'success': True,
@@ -753,6 +922,72 @@ class WorkspaceDashboardView(APIView):
         
         except Exception as e:
             logger.error(f"Error in WorkspaceDashboardView: {e}", exc_info=True)
+            return Response(
+                {'success': False, 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class DashboardStatsView(APIView):
+    """
+    Return dashboard counters for the current user scope.
+    """
+    permission_classes = [IsAuthenticated]
+
+    SUCCESS_STATUSES = (
+        VoiceReport.STATUS_VISUALIZATION_CREATED,
+        VoiceReport.STATUS_EXECUTED,
+        VoiceReport.STATUS_COMPLETED,  # legacy
+    )
+
+    PROCESSING_STATUSES = (
+        VoiceReport.STATUS_PENDING,
+        VoiceReport.STATUS_PROCESSING,
+        VoiceReport.STATUS_PENDING_EXECUTION,  # legacy
+        VoiceReport.STATUS_EXECUTING,  # legacy
+    )
+
+    def get(self, request):
+        try:
+            workspace = get_user_workspace(request.user)
+            if not workspace:
+                return Response(
+                    {'success': False, 'error': 'User must belong to a workspace'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            reports = VoiceReport.objects.filter(workspace=workspace)
+
+            # Preserve list visibility semantics:
+            # managers only see their own reports; others see workspace reports.
+            if request.user.role == 'manager':
+                reports = reports.filter(created_by=request.user)
+
+            total_reports = reports.count()
+            completed_reports = reports.filter(status__in=self.SUCCESS_STATUSES).count()
+            failed_reports = reports.filter(status=VoiceReport.STATUS_FAILED).count()
+            processing_reports = reports.filter(status__in=self.PROCESSING_STATUSES).count()
+            total_rows = reports.aggregate(
+                total_rows=Coalesce(Sum('row_count'), 0)
+            )['total_rows']
+
+            payload = {
+                'success': True,
+                'total_reports': total_reports,
+                'completed_reports': completed_reports,
+                'failed_reports': failed_reports,
+                'processing_reports': processing_reports,
+                'total_rows': int(total_rows or 0),
+            }
+            logger.info(
+                "Dashboard stats loaded for user=%s workspace=%s payload=%s",
+                request.user.id,
+                workspace.id,
+                payload
+            )
+            return Response(payload)
+        except Exception as e:
+            logger.error("Error in DashboardStatsView: %s", e, exc_info=True)
             return Response(
                 {'success': False, 'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

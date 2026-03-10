@@ -1,6 +1,15 @@
+raw_data
+transformed_data
+load_requests
+metadata_updates
+errors
+quarantine
 connection_topic
 schema_topic
 extracted_rows_topic
 clean_rows_topic
 load_rows_topic
 metadata_topic
+extracted_rows_dlq
+clean_rows_dlq
+load_rows_dlq

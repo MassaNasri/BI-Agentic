@@ -1,74 +1,69 @@
-from openai import OpenAI
-from openai import APIError, AuthenticationError
 import os
+import time
 
-# ============================================================
-# 🔐 OpenRouter Configuration
-# STATELESS: No user context, no Django auth, pure API call
-# ============================================================
+from openai import APIError, APITimeoutError, AuthenticationError, OpenAI, RateLimitError
 
-# Load API key from environment variable (preferred) or use hardcoded fallback
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-3n-e4b-it:free")
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
-# STATELESS CLIENT: No user information, no authentication headers
-# This is a pure AI worker - only needs API key for OpenRouter
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
     default_headers={
-        "HTTP-Referer": "http://localhost",   # Required by OpenRouter
-        "X-Title": "BI Voice Agent",           # Project identifier
-        # NO Authorization header - OpenRouter uses api_key parameter
-        # NO user_id or user_email - completely stateless
-    }
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "BI Voice Agent",
+    },
 )
 
-# ============================================================
-# 🔁 Same Interface, New Backend
-# ============================================================
 
 def call_llm(prompt: str) -> str:
-    """
-    Call LLM via OpenRouter.
-    
-    STATELESS: This function does NOT use any Django user context.
-    It is a pure AI worker that only needs the prompt text.
-    
-    Args:
-        prompt: The text prompt to send to the LLM
-        
-    Returns:
-        Raw text response from the LLM
-        
-    Raises:
-        ValueError: If OpenRouter API key is invalid or expired
-        RuntimeError: For other API errors
-    """
-    try:
-        response = client.chat.completions.create(
-            model=OPENROUTER_MODEL,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.0,
-            max_tokens=500,
-        )
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY is not configured")
 
-        return response.choices[0].message.content
-    
-    except AuthenticationError as e:
-        # OpenRouter API key is invalid or expired
-        # This is NOT a Django authentication issue
-        error_msg = f"OpenRouter API authentication failed: {str(e)}. Please check OPENROUTER_API_KEY."
-        raise ValueError(error_msg) from e
-    
-    except APIError as e:
-        # Other OpenRouter API errors
-        error_msg = f"OpenRouter API error: {str(e)}"
-        raise RuntimeError(error_msg) from e
-    
-    except Exception as e:
-        # Unexpected errors
-        error_msg = f"LLM service error: {str(e)}"
-        raise RuntimeError(error_msg) from e
+    delay_seconds = 1.0
+    last_error: Exception | None = None
+
+    for attempt in range(LLM_MAX_RETRIES + 1):
+        try:
+            response = client.chat.completions.create(
+                model=OPENROUTER_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=500,
+            )
+            content = response.choices[0].message.content
+            if not content:
+                raise RuntimeError("LLM returned an empty response")
+            return content
+        except AuthenticationError as exc:
+            raise ValueError(f"OpenRouter authentication failed: {exc}") from exc
+        except RateLimitError as exc:
+            last_error = exc
+            if attempt >= LLM_MAX_RETRIES:
+                break
+            time.sleep(delay_seconds)
+            delay_seconds *= 2
+        except APITimeoutError as exc:
+            last_error = exc
+            if attempt >= LLM_MAX_RETRIES:
+                break
+            time.sleep(delay_seconds)
+            delay_seconds *= 2
+        except APIError as exc:
+            last_error = exc
+            if attempt >= LLM_MAX_RETRIES:
+                break
+            time.sleep(delay_seconds)
+            delay_seconds *= 2
+        except Exception as exc:
+            raise RuntimeError(f"LLM service error: {exc}") from exc
+
+    if isinstance(last_error, RateLimitError):
+        raise RuntimeError(f"LLM rate limit exceeded after retries: {last_error}") from last_error
+    if isinstance(last_error, APITimeoutError):
+        raise RuntimeError(f"LLM timeout after retries: {last_error}") from last_error
+    if isinstance(last_error, APIError):
+        raise RuntimeError(f"LLM API error after retries: {last_error}") from last_error
+    raise RuntimeError("LLM call failed after retries")

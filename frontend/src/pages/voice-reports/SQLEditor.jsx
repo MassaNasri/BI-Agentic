@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'react-hot-toast'
+import { useSearchParams } from 'react-router-dom'
 import { 
   Code, 
   Play, 
   Save,
-  RefreshCw,
   Database,
   Clock,
   BarChart3,
@@ -19,8 +19,16 @@ import AnimatedPage from '../../components/AnimatedPage'
 import Card from '../../components/Card'
 import Button from '../../components/Button'
 import { fadeIn, slideInBottom } from '../../animations/variants'
+import {
+  isReportCompleted,
+  isReportFailed,
+  getReportStatusBadgeClass,
+  formatReportStatus,
+} from '../../utils/reportStatus'
 
 function SQLEditor() {
+  const [searchParams] = useSearchParams()
+  const selectedReportIdParam = searchParams.get('reportId')
   const [reports, setReports] = useState([])
   const [selectedReport, setSelectedReport] = useState(null)
   const [editedSQL, setEditedSQL] = useState('')
@@ -63,6 +71,17 @@ function SQLEditor() {
       toast.error('Failed to load report')
     }
   }
+
+  useEffect(() => {
+    if (!selectedReportIdParam) {
+      return
+    }
+    const parsedReportId = Number(selectedReportIdParam)
+    if (Number.isNaN(parsedReportId)) {
+      return
+    }
+    handleLoadReport(parsedReportId)
+  }, [selectedReportIdParam])
 
   const handleSQLChange = (value) => {
     setEditedSQL(value)
@@ -178,11 +197,9 @@ function SQLEditor() {
                         </span>
                         <span className={`
                           px-2 py-0.5 text-xs rounded-full font-medium
-                          ${report.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : ''}
-                          ${report.status === 'pending_execution' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : ''}
-                          ${report.status === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' : ''}
+                          ${getReportStatusBadgeClass(report.status)}
                         `}>
-                          {report.status.replace('_', ' ')}
+                          {formatReportStatus(report.status)}
                         </span>
                       </div>
                       <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
@@ -224,13 +241,11 @@ function SQLEditor() {
                     </div>
                     <span className={`
                       px-3 py-1 text-sm rounded-full font-medium flex items-center gap-1
-                      ${selectedReport.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : ''}
-                      ${selectedReport.status === 'pending_execution' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : ''}
-                      ${selectedReport.status === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' : ''}
+                      ${getReportStatusBadgeClass(selectedReport.status)}
                     `}>
-                      {selectedReport.status === 'completed' && <CheckCircle className="w-4 h-4" />}
-                      {selectedReport.status === 'failed' && <AlertCircle className="w-4 h-4" />}
-                      {selectedReport.status.replace('_', ' ')}
+                      {isReportCompleted(selectedReport.status) && <CheckCircle className="w-4 h-4" />}
+                      {isReportFailed(selectedReport.status) && <AlertCircle className="w-4 h-4" />}
+                      {formatReportStatus(selectedReport.status)}
                     </span>
                   </div>
 
@@ -300,7 +315,7 @@ function SQLEditor() {
                 </Card>
 
                 {/* Execution Results */}
-                {selectedReport.status === 'completed' && selectedReport.row_count && (
+                {isReportCompleted(selectedReport.status) && selectedReport.row_count && (
                   <Card>
                     <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
                       Execution Results

@@ -17,6 +17,7 @@ import MembersList from './pages/workspace/MembersList'
 import InviteMember from './pages/workspace/InviteMember'
 import AcceptInvite from './pages/workspace/AcceptInvite'
 import Dashboard from './pages/dashboard/Dashboard'
+import LineageExplorer from './pages/dashboard/LineageExplorer'
 import DatabaseManagement from './pages/database/DatabaseManagement'
 import VoiceReportManager from './pages/voice-reports/VoiceReportManager'
 import SQLEditor from './pages/voice-reports/SQLEditor'
@@ -64,6 +65,7 @@ function App() {
           }
         >
           <Route index element={<Dashboard />} />
+          <Route path="lineage" element={<LineageExplorer />} />
           <Route path="profile" element={<Profile />} />
           
           {/* Database Route (Manager only) */}

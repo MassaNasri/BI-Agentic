@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: etl
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - connector-deployment.yaml
+  - connector-service.yaml
+  - extractor-deployment.yaml
+  - extractor-service.yaml
+  - transformer-deployment.yaml
+  - transformer-service.yaml
+  - loader-deployment.yaml
+  - loader-service.yaml
+  - metadata-deployment.yaml
+  - metadata-service.yaml
+  - detector-deployment.yaml
+  - detector-service.yaml
+  - hpa-connector.yaml
+  - hpa-extractor.yaml
+  - hpa-transformer.yaml
+  - hpa-loader.yaml
+  - hpa-metadata.yaml

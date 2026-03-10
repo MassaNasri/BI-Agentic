@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from workspace.models import Workspace
+from .constants import ChartType
 
 
 class VoiceReport(models.Model):
@@ -11,24 +12,48 @@ class VoiceReport(models.Model):
     """
     
     CHART_CHOICES = [
-        ('line', 'Line Chart'),
-        ('bar', 'Bar Chart'),
-        ('pie', 'Pie Chart'),
-        ('number', 'Number/KPI'),
-        ('table', 'Table'),
+        (ChartType.LINE, 'Line Chart'),
+        (ChartType.BAR, 'Bar Chart'),
+        (ChartType.PIE, 'Pie Chart'),
+        (ChartType.KPI, 'KPI'),
+        (ChartType.TABLE, 'Table'),
+        # Legacy chart values kept for backward compatibility with old rows.
+        ('number', 'Legacy Number/KPI'),
+        ('scalar', 'Legacy Scalar'),
+        ('grouped_bar', 'Legacy Grouped Bar'),
     ]
-    
+
+    STATUS_UPLOADED = 'uploaded'
+    STATUS_TRANSCRIBING = 'transcribing'
+    STATUS_TRANSCRIBED = 'transcribed'
+    STATUS_GENERATING_SQL = 'generating_sql'
+    STATUS_SQL_GENERATED = 'sql_generated'
+
+    STATUS_PENDING = 'pending'
+    STATUS_PROCESSING = 'processing'
+    STATUS_EXECUTED = 'executed'
+    STATUS_VISUALIZATION_CREATED = 'visualization_created'
+    STATUS_FAILED = 'failed'
+
+    # Legacy execution statuses kept for backward compatibility.
+    STATUS_PENDING_EXECUTION = 'pending_execution'
+    STATUS_EXECUTING = 'executing'
+    STATUS_COMPLETED = 'completed'
+
     STATUS_CHOICES = [
-        ('uploaded', 'Audio Uploaded'),
-        ('transcribing', 'Transcribing'),
-        ('transcribed', 'Transcribed'),
-        ('generating_sql', 'Generating SQL'),
-        ('sql_generated', 'SQL Generated'),
-        ('pending_execution', 'Pending Execution'),
-        ('executing', 'Executing Query'),
-        ('executed', 'Executed'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
+        (STATUS_UPLOADED, 'Audio Uploaded'),
+        (STATUS_TRANSCRIBING, 'Transcribing'),
+        (STATUS_TRANSCRIBED, 'Transcribed'),
+        (STATUS_GENERATING_SQL, 'Generating SQL'),
+        (STATUS_SQL_GENERATED, 'SQL Generated'),
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_PROCESSING, 'Processing'),
+        (STATUS_EXECUTED, 'Executed'),
+        (STATUS_VISUALIZATION_CREATED, 'Visualization Created'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_PENDING_EXECUTION, 'Legacy Pending Execution'),
+        (STATUS_EXECUTING, 'Legacy Executing Query'),
+        (STATUS_COMPLETED, 'Legacy Completed'),
     ]
     
     # Ownership & Workspace Isolation
@@ -84,7 +109,11 @@ class VoiceReport(models.Model):
     embed_url = models.TextField(blank=True, help_text='JWT-signed embed URL')
     
     # Status & Timestamps
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded')
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_UPLOADED
+    )
     error_message = models.TextField(blank=True)
     
     created_at = models.DateTimeField(default=timezone.now)

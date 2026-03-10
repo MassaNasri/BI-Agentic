@@ -25,6 +25,7 @@ urlpatterns = [
     path('<int:report_id>/', views.ReportDetailView.as_view(), name='report-detail'),
     
     # Workspace dashboard (Executive view)
+    path('dashboard/stats/', views.DashboardStatsView.as_view(), name='dashboard-stats'),
     path('dashboard/', views.WorkspaceDashboardView.as_view(), name='workspace-dashboard'),
 ]
 

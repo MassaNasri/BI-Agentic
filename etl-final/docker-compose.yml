@@ -25,9 +25,11 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -43,22 +45,42 @@ services:
   surrealdb:
     image: surrealdb/surrealdb:latest
     container_name: surrealdb
-    command: start --user root --pass root --log debug file:/data/db
+    command: start --user root --pass root --log debug memory
     ports:
       - "8000:8000"
     volumes:
-      - ./etl-infra/surreal_data:/data
+      - surreal_data:/data
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: clickhouse
+    environment:
+      CLICKHOUSE_DB: etl
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: etl_pass123
     ports:
       - "8123:8123"
       - "9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
-      - ./etl-infra/clickhouse/config/users.d/etl_user.xml:/etc/clickhouse-server/users.d/etl_user.xml:ro
+
+  clamav:
+    image: clamav/clamav:latest
+    container_name: clamav
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    environment:
+      # ClamAV configuration
+      CLAMAV_NO_FRESHCLAM: "false"  # Enable automatic virus definition updates
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s  # ClamAV needs time to download virus definitions
 
   # ============================
   # DJANGO MICROSERVICES
@@ -74,27 +96,50 @@ services:
     volumes:
       - uploaded-files:/app/uploaded_files
     environment:
-      PYTHONPATH: "/app/shared:/app"
+      PYTHONPATH: "/app"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: "raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: "etl_pass123"
+      CLICKHOUSE_DATABASE: etl
       SURREAL_URL: "http://surrealdb:8000/sql"
       SURREAL_USER: "root"
       SURREAL_PASS: "root"
       SURREAL_NS: "bi_etl"
       SURREAL_DB: "etl_logs"
+      # Virus scanning configuration
+      VIRUS_SCAN_ENABLED: "true"
+      VIRUS_SCAN_BACKEND: "clamav"
+      CLAMAV_HOST: "clamav"
+      CLAMAV_PORT: "3310"
+      CLAMAV_TIMEOUT: "30"
     depends_on:
       - kafka
       - surrealdb
+      - clamav
 
   detector-service:
     build:
       context: .
       dockerfile: detector-service/Dockerfile
     container_name: detector-service
+    profiles:
+      - optional
     ports:
       - "8002:8000"
     environment:
-      PYTHONPATH: "/app/shared:/app"
+      PYTHONPATH: "/app"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: "raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: "etl_pass123"
+      CLICKHOUSE_DATABASE: etl
       SURREAL_URL: "http://surrealdb:8000/sql"
       SURREAL_USER: "root"
       SURREAL_PASS: "root"
@@ -114,8 +159,16 @@ services:
     volumes:
       - uploaded-files:/app/uploaded_files
     environment:
-      PYTHONPATH: "/app/shared:/app"
+      PYTHONPATH: "/app"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: "raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq"
+      EXTRACTOR_DLQ_TOPIC: errors
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: "etl_pass123"
+      CLICKHOUSE_DATABASE: etl
       SURREAL_URL: "http://surrealdb:8000/sql"
       SURREAL_USER: "root"
       SURREAL_PASS: "root"
@@ -133,8 +186,16 @@ services:
     ports:
       - "8004:8000"
     environment:
-      PYTHONPATH: "/app/shared:/app"
+      PYTHONPATH: "/app"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: "raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq"
+      TRANSFORMER_DLQ_TOPIC: errors
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: "etl_pass123"
+      CLICKHOUSE_DATABASE: etl
       SURREAL_URL: "http://surrealdb:8000/sql"
       SURREAL_USER: "root"
       SURREAL_PASS: "root"
@@ -152,12 +213,15 @@ services:
     ports:
       - "8005:8000"
     environment:
-      PYTHONPATH: "/app/shared:/app"
+      PYTHONPATH: "/app"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: "raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq"
+      LOADER_DLQ_TOPIC: errors
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 9000  # Native protocol for clickhouse_driver
       CLICKHOUSE_USER: etl_user
-      CLICKHOUSE_PASSWORD: etl_pass123
+      CLICKHOUSE_PASSWORD: "etl_pass123"
       CLICKHOUSE_DATABASE: etl
       SURREAL_URL: "http://surrealdb:8000/sql"
       SURREAL_USER: "root"
@@ -165,6 +229,7 @@ services:
       SURREAL_NS: "bi_etl"
       SURREAL_DB: "etl_logs"
     depends_on:
+      - kafka
       - clickhouse
       - surrealdb
 
@@ -176,16 +241,22 @@ services:
     ports:
       - "8006:8000"
     environment:
-      PYTHONPATH: "/app/shared:/app"
+      PYTHONPATH: "/app"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: "raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq"
       SURREAL_URL: "http://surrealdb:8000/sql"
       SURREAL_USER: "root"
       SURREAL_PASS: "root"
       SURREAL_NS: "bi_etl"
       SURREAL_DB: "etl_logs"
     depends_on:
+      - kafka
       - surrealdb
 
 volumes:
   uploaded-files:
+  surreal_data:
   clickhouse_data:
   clickhouse_logs:
+  clamav_data:

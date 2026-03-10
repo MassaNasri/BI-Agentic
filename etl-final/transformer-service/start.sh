@@ -12,7 +12,7 @@ python -c "
 import sys
 import time
 sys.path.insert(0, '/app/transformer-service/transformer')
-sys.path.insert(0, '/app/shared')
+sys.path.insert(0, '/app')
 
 max_retries = 10
 retry_count = 0

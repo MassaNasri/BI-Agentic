@@ -50,8 +50,6 @@ INSTALLED_APPS = [
     'voice_reports',
 ]
 
-print("CLICKHOUSE_PORT =", os.getenv("CLICKHOUSE_PORT"))
-
 # ==============================================================================
 # MIDDLEWARE
 # ==============================================================================
@@ -392,7 +390,7 @@ SMALL_WHISPER_URL = os.environ.get('SMALL_WHISPER_URL', 'http://127.0.0.1:8001')
 # ClickHouse
 # ===============================
 
-CLICKHOUSE_DATABASE = os.environ.get("CLICKHOUSE_DATABASE", "etl")
+CLICKHOUSE_DATABASE = os.environ.get("CLICKHOUSE_DATABASE", "default")
 
 # ===============================
 # Metabase (Self-Hosted ONLY)

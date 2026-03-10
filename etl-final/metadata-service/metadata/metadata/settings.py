@@ -11,6 +11,11 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from shared.utils.logging_utils import configure_logging
+from shared.utils.tracing import configure_tracing
+
+configure_logging()
+configure_tracing("metadata-service")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -54,6 +59,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'shared.utils.django_middleware.CorrelationIdMiddleware',
+    'shared.utils.django_middleware.MetricsMiddleware',
 ]
 
 ROOT_URLCONF = 'metadata.urls'

@@ -1,3 +1,9 @@
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
 def recommend_chart(intent: dict, data: dict | None = None) -> dict:
     """
     Recommend a chart type based on the analytical intent.
@@ -39,8 +45,9 @@ def recommend_chart(intent: dict, data: dict | None = None) -> dict:
 
     # ---- Grouped Bar ----
     if num_metrics > 1 and num_dimensions == 1:
+        logger.info("Chart recommendation mapped: grouped_bar -> bar")
         return {
-            "type": "grouped_bar",
+            "type": "bar",
             "x": dimensions[0],
             "ys": [m["alias"] for m in metrics]
         }

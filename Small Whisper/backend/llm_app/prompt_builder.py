@@ -1,81 +1,69 @@
 def build_prompt(question: str, schema: dict) -> str:
     schema_lines = []
-
     for table, columns in schema.items():
         schema_lines.append(f"Table: {table}")
         for col in columns:
-            schema_lines.append(f"  - {col['name']} ({col['type']})")
+            flags = []
+            if col.get("is_numeric"):
+                flags.append("numeric")
+            if col.get("is_dimension"):
+                flags.append("dimension")
+            if col.get("is_date"):
+                flags.append("date")
+            flags_text = f" [{', '.join(flags)}]" if flags else ""
+            schema_lines.append(f"  - {col['name']} ({col['type']}){flags_text}")
 
     schema_text = "\n".join(schema_lines)
 
     return f"""
-You are a BI intent extraction engine.
+You are an intent extraction model for analytical BI questions.
 
-Your task is to convert a natural language analytical question
-into a structured, machine-readable analytical intent.
+Output JSON only. Do not generate SQL. Do not include explanations.
 
-The intent must be suitable for automatic SQL generation
-against a ClickHouse database.
+Return the best candidate intent using ONLY schema fields.
+The deterministic planner will finalize aggregation and ranking rules after you.
+Your output should be semantically rich but conservative.
 
-====================
-GENERAL RULES
-====================
-- Use ONLY tables and columns from the provided database schema
-- DO NOT invent tables or columns
-- DO NOT generate SQL
-- DO NOT explain the result
-- Output ONLY valid JSON that strictly follows the output format
+Analytical semantics to respect:
+- If question asks average/mean -> use AVG.
+- If question asks count/how many -> use COUNT.
+- If question asks total/sum -> use SUM.
+- If question asks most/highest/largest/top -> choose metric + dimension and include descending order hint.
+- If question asks lowest/smallest/least/bottom -> choose metric + dimension and include ascending order hint.
+- If ranking is implied and no number is provided, set limit to 1.
+- Metrics should prefer numeric columns.
+- Dimensions should prefer categorical/date columns.
 
-====================
-SEMANTIC CONSTRAINTS
-====================
-- Metrics MUST use numeric columns only (Int, Float, Decimal)
-- Dimensions MUST use categorical columns only (String, Enum)
-- Date or time filters MUST use Date / DateTime columns
-- Aggregations SUM, AVG, MIN, MAX MUST NOT be applied to non-numeric columns
-- COUNT may be applied to any column
-- If the question implies grouping (e.g. breakdown, grouping, comparison, per, by),
-  the grouping MUST be done using the most appropriate categorical identifier
-- If no grouping is implied, the dimensions list MUST be empty
-- Filters represent WHERE conditions derived from the question
-- order_by and limit are OPTIONAL and must be included only if implied
-
-====================
-DATABASE SCHEMA
-====================
+Schema:
 {schema_text}
 
-====================
-OUTPUT FORMAT
-====================
+Output format:
 {{
-  "table": string,
+  "table": "table_name",
   "metrics": [
     {{
-      "column": string,
+      "column": "column_name_or_*",
       "aggregation": "SUM|COUNT|AVG|MIN|MAX",
-      "alias": string
+      "alias": "optional_alias"
     }}
   ],
-  "dimensions": [string],
+  "dimensions": ["dimension_column"],
   "filters": [
     {{
-      "column": string,
-      "operator": string,
-      "value": string|number
+      "column": "column_name",
+      "operator": "=|!=|>|<|>=|<=|IN|LIKE",
+      "value": "value"
     }}
   ],
   "order_by": [
     {{
-      "column": string,
+      "column": "metric_or_dimension",
       "direction": "ASC|DESC"
     }}
   ],
-  "limit": number|null
+  "limit": 1
 }}
 
-====================
-USER QUESTION
-====================
+Question:
 {question}
 """.strip()

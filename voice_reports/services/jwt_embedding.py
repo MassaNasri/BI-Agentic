@@ -11,6 +11,7 @@ import time
 import os
 import logging
 from typing import Dict, Optional
+from django.core.exceptions import ImproperlyConfigured
 
 logger = logging.getLogger(__name__)
 
@@ -22,59 +23,121 @@ class JWTEmbeddingService:
     """
     
     def __init__(self):
-        """Initialize from environment (METABASE_SECRET_KEY optional)."""
+        """Initialize from environment (METABASE_SECRET_KEY required for embedding)."""
         self.secret_key = os.getenv("METABASE_SECRET_KEY")
-        self.issuer = os.getenv("JWT_ISSUER", "bi-voice-agent")
-        self.audience = os.getenv("JWT_AUDIENCE", "metabase")
+        self.embed_exp_seconds = int(
+            os.getenv("METABASE_EMBED_EXP_SECONDS", str(60 * 60 * 24))
+        )
         self.metabase_url = (os.getenv("METABASE_URL") or "http://localhost:3000").rstrip("/")
-        
+
         if not self.secret_key:
-            logger.debug("METABASE_SECRET_KEY not set - embedding URLs will not be signed")
+            logger.error("METABASE_SECRET_KEY is missing; secure embedding is disabled")
     
     def _ensure_secret(self) -> None:
         if not self.secret_key:
-            raise ValueError(
-                "METABASE_SECRET_KEY is not set. Set it in .env to match "
-                "Metabase Admin > Settings > Embedding secret for JWT embedding."
+            raise ImproperlyConfigured(
+                "METABASE_SECRET_KEY must be set for embedding charts"
             )
 
+    def _to_metabase_resource(self, resource: Dict) -> Dict[str, int]:
+        """
+        Normalize resource payload to Metabase signed-embed format:
+        {"question": <id>} or {"dashboard": <id>}.
+        """
+        if not isinstance(resource, dict):
+            raise ValueError("Resource must be a dictionary")
+
+        # Backward-compatible input shape: {"type": "...", "id": ...}
+        if "type" in resource and "id" in resource:
+            resource_type = str(resource["type"]).strip().lower()
+            resource_id = resource["id"]
+            if resource_type not in ("dashboard", "question"):
+                raise ValueError("Resource type must be 'dashboard' or 'question'")
+            if not isinstance(resource_id, int):
+                raise ValueError("Resource id must be an integer")
+            return {resource_type: resource_id}
+
+        # Native Metabase input shape: {"question": ...} or {"dashboard": ...}
+        for key in ("question", "dashboard"):
+            if key in resource:
+                resource_id = resource[key]
+                if not isinstance(resource_id, int):
+                    raise ValueError("Resource id must be an integer")
+                return {key: resource_id}
+
+        raise ValueError(
+            "Resource must have either {'type','id'} or {'question'|'dashboard': id}"
+        )
+
+    def _validate_resource(self, resource: Dict) -> None:
+        if not isinstance(resource, dict):
+            raise ValueError("Payload resource must be a dictionary")
+        if len(resource) != 1:
+            raise ValueError("Payload resource must include exactly one key")
+        resource_type = next(iter(resource.keys()))
+        resource_id = resource[resource_type]
+        if resource_type not in ("dashboard", "question"):
+            raise ValueError("Payload resource key must be 'dashboard' or 'question'")
+        if not isinstance(resource_id, int):
+            raise ValueError("Payload resource id must be an integer")
+
+    def _validate_payload(self, payload: Dict) -> None:
+        """
+        Validate JWT payload structure before signing.
+        """
+        required_keys = {"resource", "params", "iat", "exp"}
+        missing_keys = required_keys.difference(payload.keys())
+        if missing_keys:
+            raise ValueError(f"Invalid embed payload structure. Missing: {missing_keys}")
+        if not isinstance(payload["resource"], dict):
+            raise ValueError("Payload resource must be a dictionary")
+        if not isinstance(payload["params"], dict):
+            raise ValueError("Payload params must be a dictionary")
+        if not isinstance(payload["iat"], int) or not isinstance(payload["exp"], int):
+            raise ValueError("Payload iat/exp must be integers")
+        if payload["exp"] <= payload["iat"]:
+            raise ValueError("Payload exp must be greater than iat")
+        self._validate_resource(payload["resource"])
+
     def generate_embed_token(self, resource: Dict, params: Optional[Dict] = None,
-                            exp_minutes: int = 10) -> str:
+                            exp_seconds: Optional[int] = None) -> str:
         """
         Generate JWT token for embedding.
         
         Args:
             resource: {'type': 'dashboard'|'question', 'id': int}
-            params: Optional parameters (filters, workspace_id, etc.)
-            exp_minutes: Token expiration in minutes (default: 10)
+            params: Optional parameters (must match Metabase embed filters)
+            exp_seconds: Token expiration in seconds (default: 24 hours)
         
         Returns:
             str: JWT token
         
         Raises:
-            ValueError: If resource is invalid or METABASE_SECRET_KEY not set
+            ValueError: If resource/payload is invalid
+            ImproperlyConfigured: If METABASE_SECRET_KEY is missing
         """
         self._ensure_secret()
-        if not isinstance(resource, dict):
-            raise ValueError("Resource must be a dictionary")
-        if "type" not in resource or "id" not in resource:
-            raise ValueError("Resource must have 'type' and 'id'")
-        if resource["type"] not in ("dashboard", "question"):
-            raise ValueError("Resource type must be 'dashboard' or 'question'")
+        metabase_resource = self._to_metabase_resource(resource)
+        if params is not None and not isinstance(params, dict):
+            raise ValueError("Params must be a dictionary")
 
         current_time = int(time.time())
+        expires_in_seconds = exp_seconds if exp_seconds is not None else self.embed_exp_seconds
+        if expires_in_seconds <= 0:
+            raise ValueError("Token expiration must be greater than 0 seconds")
         payload = {
-            "resource": resource,
+            "resource": metabase_resource,
             "params": params or {},
             "iat": current_time,
-            "exp": current_time + (exp_minutes * 60),
-            "iss": self.issuer,
-            "aud": self.audience,
+            "exp": current_time + expires_in_seconds,
         }
+        self._validate_payload(payload)
         token = jwt.encode(payload, self.secret_key, algorithm="HS256")
         if isinstance(token, bytes):
             token = token.decode("utf-8")
-        logger.info("Generated JWT token for %s %s", resource["type"], resource["id"])
+        resource_type = next(iter(metabase_resource.keys()))
+        resource_id = metabase_resource[resource_type]
+        logger.info("Generated JWT token for %s %s", resource_type, resource_id)
         return token
     
     def generate_dashboard_token(self, dashboard_id: int, params: Optional[Dict] = None) -> str:
@@ -88,7 +151,7 @@ class JWTEmbeddingService:
         Returns:
             str: JWT token
         """
-        resource = {'type': 'dashboard', 'id': dashboard_id}
+        resource = {'dashboard': dashboard_id}
         return self.generate_embed_token(resource, params)
     
     def generate_question_token(self, question_id: int, params: Optional[Dict] = None) -> str:
@@ -102,7 +165,7 @@ class JWTEmbeddingService:
         Returns:
             str: JWT token
         """
-        resource = {'type': 'question', 'id': question_id}
+        resource = {'question': question_id}
         return self.generate_embed_token(resource, params)
     
     def get_embed_url(self, resource_type: str, resource_id: int,
@@ -112,37 +175,21 @@ class JWTEmbeddingService:
         """
         resource = {"type": resource_type, "id": resource_id}
         token = self.generate_embed_token(resource, params)
-        embed_url = f"{self.metabase_url}/embed/{resource_type}/{token}"
-        if params and "theme" in params:
-            embed_url += f"#theme={params['theme']}"
+        embed_url = f"{self.metabase_url}/embed/{resource_type}/{token}#bordered=true&titled=true"
         logger.info("Generated embed URL for %s %s", resource_type, resource_id)
         return embed_url
     
-    def get_dashboard_embed_url(self, dashboard_id: int,
-                                workspace_id: Optional[int] = None) -> str:
+    def get_dashboard_embed_url(self, dashboard_id: int) -> str:
         """
-        Dashboard URL: JWT embed if METABASE_SECRET_KEY set, else direct Metabase URL.
+        Dashboard URL using secure JWT embed only.
         """
-        params = {}
-        if workspace_id:
-            params["workspace_id"] = workspace_id
-        try:
-            return self.get_embed_url("dashboard", dashboard_id, params)
-        except ValueError:
-            return f"{self.metabase_url}/dashboard/{dashboard_id}"
+        return self.get_embed_url("dashboard", dashboard_id, params={})
 
-    def get_question_embed_url(self, question_id: int,
-                              workspace_id: Optional[int] = None) -> str:
+    def get_question_embed_url(self, question_id: int) -> str:
         """
-        Question URL: JWT embed if METABASE_SECRET_KEY set, else direct Metabase URL.
+        Question URL using secure JWT embed only.
         """
-        params = {}
-        if workspace_id:
-            params["workspace_id"] = workspace_id
-        try:
-            return self.get_embed_url("question", question_id, params)
-        except ValueError:
-            return f"{self.metabase_url}/question/{question_id}"
+        return self.get_embed_url("question", question_id, params={})
     
     def verify_token(self, token: str) -> Optional[Dict]:
         """Verify and decode JWT token; returns None if secret not set or invalid."""
@@ -153,8 +200,7 @@ class JWTEmbeddingService:
                 token,
                 self.secret_key,
                 algorithms=["HS256"],
-                audience=self.audience,
-                issuer=self.issuer,
+                options={"require": ["exp", "iat"]},
             )
             return payload
         except jwt.ExpiredSignatureError:

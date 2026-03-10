@@ -1,0 +1,29 @@
+groups:
+  - name: etl_pipeline_alerts
+    rules:
+      - alert: ETLErrorRateHigh
+        expr: rate(etl_errors_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High ETL error rate"
+          description: "Errors per second exceed threshold over 5 minutes."
+
+      - alert: ETLLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(etl_processing_latency_seconds_bucket[5m])) by (le)) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ETL processing latency high (p95 > 1s)"
+          description: "Processing latency exceeded 1s at p95."
+
+      - alert: ETLThroughputLow
+        expr: rate(etl_rows_processed_total[5m]) < 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ETL throughput low"
+          description: "Rows processed per second below expected baseline."

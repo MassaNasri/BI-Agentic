@@ -1,6 +1,8 @@
 import psycopg2
 import pymysql
 
+from shared.utils.db_type_utils import normalize_db_type
+
 
 def test_db_connection(db_type, host, user, password, database, port):
     """
@@ -9,7 +11,9 @@ def test_db_connection(db_type, host, user, password, database, port):
 
     try:
 
-        if db_type == "mysql":
+        normalized_db_type = normalize_db_type(db_type)
+
+        if normalized_db_type == "mysql":
             conn = pymysql.connect(
                 host=host,
                 user=user,
@@ -18,7 +22,7 @@ def test_db_connection(db_type, host, user, password, database, port):
                 port=int(port),
             )
 
-        elif db_type == "postgres":
+        elif normalized_db_type == "postgres":
             conn = psycopg2.connect(
                 host=host,
                 user=user,

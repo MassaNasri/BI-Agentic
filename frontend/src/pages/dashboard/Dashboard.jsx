@@ -1,16 +1,27 @@
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '../../store/auth'
 import { BarChart3, Mic, Upload, Loader, AlertCircle, TrendingUp, Database, Clock } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { toast } from 'react-hot-toast'
 import { Card, Badge, AnimatedPage } from '../../components'
 import { headerTitle, scaleFade } from '../../animations/uiVariants'
 import { voiceReportsAPI } from '../../api/endpoints'
+import {
+  isReportCompleted,
+  isReportProcessing,
+  getReportStatusBadgeClass,
+  formatReportStatus
+} from '../../utils/reportStatus'
 
 function Dashboard() {
-  const { user, workspace } = useAuthStore()
+  const { user } = useAuthStore()
+  const navigate = useNavigate()
   const [reports, setReports] = useState([])
+  const [stats, setStats] = useState({
+    total_reports: 0,
+    completed_reports: 0,
+    total_rows: 0,
+  })
   const [isLoading, setIsLoading] = useState(true)
   const [dashboardUrl, setDashboardUrl] = useState(null)
 
@@ -21,11 +32,31 @@ function Dashboard() {
   const loadDashboardData = async () => {
     setIsLoading(true)
     try {
+      let fetchedReports = []
+
       // Load reports for all roles
       const reportsResponse = await voiceReportsAPI.listReports()
       if (reportsResponse.data.success) {
-        const completedReports = (reportsResponse.data.reports || []).filter(r => r.status === 'completed')
-        setReports(completedReports)
+        fetchedReports = reportsResponse.data.reports || []
+        setReports(fetchedReports)
+      }
+
+      // Load aggregate stats
+      try {
+        const statsResponse = await voiceReportsAPI.getDashboardStats()
+        if (statsResponse.data.success) {
+          setStats({
+            total_reports: statsResponse.data.total_reports || 0,
+            completed_reports: statsResponse.data.completed_reports || 0,
+            total_rows: statsResponse.data.total_rows || 0,
+          })
+        }
+      } catch {
+        setStats({
+          total_reports: fetchedReports.length,
+          completed_reports: fetchedReports.filter((report) => isReportCompleted(report.status)).length,
+          total_rows: fetchedReports.reduce((sum, report) => sum + (report.row_count || 0), 0),
+        })
       }
 
       // Load dashboard URL for Executive
@@ -43,6 +74,20 @@ function Dashboard() {
       console.error('Failed to load dashboard data:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const openReport = (reportId) => {
+    if (user?.role === 'manager') {
+      navigate(`/dashboard/voice-reports?reportId=${reportId}`)
+      return
+    }
+    if (user?.role === 'analyst') {
+      navigate(`/dashboard/sql-editor?reportId=${reportId}`)
+      return
+    }
+    if (user?.role === 'executive') {
+      navigate(`/dashboard/analytics?reportId=${reportId}`)
     }
   }
 
@@ -102,7 +147,7 @@ function Dashboard() {
             </div>
             <div>
               <p className="text-sm text-gray-600">Total Reports</p>
-              <p className="text-2xl font-bold text-gray-900">{reports.length}</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total_reports}</p>
             </div>
           </div>
         </Card>
@@ -115,7 +160,7 @@ function Dashboard() {
             <div>
               <p className="text-sm text-gray-600">Completed</p>
               <p className="text-2xl font-bold text-gray-900">
-                {reports.filter(r => r.status === 'completed').length}
+                {stats.completed_reports}
               </p>
             </div>
           </div>
@@ -129,7 +174,7 @@ function Dashboard() {
             <div>
               <p className="text-sm text-gray-600">Total Rows</p>
               <p className="text-2xl font-bold text-gray-900">
-                {reports.reduce((sum, r) => sum + (r.row_count || 0), 0).toLocaleString()}
+                {(stats.total_rows || 0).toLocaleString()}
               </p>
             </div>
           </div>
@@ -158,10 +203,18 @@ function Dashboard() {
                         {report.row_count?.toLocaleString()} rows • {report.chart_type} chart
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => openReport(report.id)}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      Open
+                    </button>
                   </div>
                 </div>
                 {report.embed_url ? (
                   <iframe
+                    key={`${report.id}-${report.embed_url}`}
                     src={report.embed_url}
                     width="100%"
                     height="300"
@@ -171,7 +224,14 @@ function Dashboard() {
                   />
                 ) : (
                   <div className="h-[300px] flex items-center justify-center bg-gray-50">
-                    <p className="text-gray-500">Visualization not available</p>
+                    {isReportProcessing(report.status) || isReportCompleted(report.status) ? (
+                      <div className="flex flex-col items-center gap-2 text-gray-500">
+                        <Loader className="w-5 h-5 animate-spin" />
+                        <p>Visualization is loading...</p>
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">Open this report to view visualization</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -250,7 +310,7 @@ function Dashboard() {
             </div>
             <div>
               <p className="text-sm text-gray-600">Total Reports</p>
-              <p className="text-2xl font-bold text-gray-900">{reports.length}</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total_reports}</p>
             </div>
           </div>
         </Card>
@@ -279,7 +339,7 @@ function Dashboard() {
             <div>
               <p className="text-sm text-gray-600">Total Rows</p>
               <p className="text-2xl font-bold text-gray-900">
-                {reports.reduce((sum, r) => sum + (r.row_count || 0), 0).toLocaleString()}
+                {(stats.total_rows || 0).toLocaleString()}
               </p>
             </div>
           </div>
@@ -298,12 +358,16 @@ function Dashboard() {
           
           <div className="space-y-4">
             {reports.slice(0, 5).map((report) => (
-              <div key={report.id} className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+              <div
+                key={report.id}
+                className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                onClick={() => openReport(report.id)}
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <span className="font-semibold text-gray-900">Report #{report.id}</span>
-                    <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
-                      {report.status}
+                    <span className={`px-2 py-1 text-xs rounded-full ${getReportStatusBadgeClass(report.status)}`}>
+                      {formatReportStatus(report.status)}
                     </span>
                   </div>
                   <div className="text-sm text-gray-500">
@@ -368,7 +432,7 @@ function Dashboard() {
             </div>
             <div>
               <p className="text-sm text-gray-600">Total Reports</p>
-              <p className="text-2xl font-bold text-gray-900">{reports.length}</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total_reports}</p>
             </div>
           </div>
         </Card>
@@ -381,7 +445,7 @@ function Dashboard() {
             <div>
               <p className="text-sm text-gray-600">Completed</p>
               <p className="text-2xl font-bold text-gray-900">
-                {reports.filter(r => r.status === 'completed').length}
+                {stats.completed_reports}
               </p>
             </div>
           </div>
@@ -395,7 +459,7 @@ function Dashboard() {
             <div>
               <p className="text-sm text-gray-600">Total Rows</p>
               <p className="text-2xl font-bold text-gray-900">
-                {reports.reduce((sum, r) => sum + (r.row_count || 0), 0).toLocaleString()}
+                {(stats.total_rows || 0).toLocaleString()}
               </p>
             </div>
           </div>
@@ -418,6 +482,7 @@ function Dashboard() {
           </div>
           <div className="border-2 border-gray-200 rounded-lg overflow-hidden">
             <iframe
+              key={dashboardUrl}
               src={dashboardUrl}
               width="100%"
               height="800"

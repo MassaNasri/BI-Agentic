@@ -11,7 +11,7 @@ import sys
 import time
 
 sys.path.insert(0, '/app/detector-service/detector')
-sys.path.insert(0, '/app/shared')
+sys.path.insert(0, '/app')
 
 max_retries = 15
 retry_count = 0

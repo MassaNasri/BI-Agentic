@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.http import HttpResponse
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -10,6 +11,7 @@ from .db_detector import detect_db_type
 from .schema_extractor import SchemaExtractor
 from shared.utils.surreal_client import SurrealClient
 from shared.utils.response import make_response
+from shared.utils.metrics import render_metrics
 
 
 class RunDetectorView(APIView):
@@ -40,3 +42,14 @@ class RunDetectorView(APIView):
 
             except Exception as e:
                 return Response(make_response(False, str(e)), status=400)
+
+
+class HealthView(APIView):
+    def get(self, request):
+        return Response(make_response(True, "ok", {"status": "ok"}))
+
+
+class MetricsView(APIView):
+    def get(self, request):
+        data, content_type = render_metrics()
+        return HttpResponse(data, content_type=content_type)

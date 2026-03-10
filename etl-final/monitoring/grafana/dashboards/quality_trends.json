@@ -1,0 +1,58 @@
+{
+  "title": "Quality Trends",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Quality Score (Daily Avg)",
+      "datasource": {
+        "type": "clickhouse",
+        "uid": "clickhouse-ds"
+      },
+      "targets": [
+        {
+          "query": "SELECT toDate(_calculated_at) AS time, avg(_quality_score) AS value FROM quality_metrics GROUP BY time ORDER BY time",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Completeness / Validity / Consistency",
+      "datasource": {
+        "type": "clickhouse",
+        "uid": "clickhouse-ds"
+      },
+      "targets": [
+        {
+          "query": "SELECT toDate(_calculated_at) AS time, avg(_completeness_score) AS completeness, avg(_validity_score) AS validity, avg(_consistency_score) AS consistency FROM quality_metrics GROUP BY time ORDER BY time",
+          "format": "time_series"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      }
+    }
+  ],
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  }
+}

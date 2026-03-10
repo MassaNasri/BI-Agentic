@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: transformer-service
+  namespace: etl
+spec:
+  selector:
+    app: transformer-service
+  ports:
+    - name: http
+      port: 8004
+      targetPort: 8004
+    - name: health
+      port: 8084
+      targetPort: 8084

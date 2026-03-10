@@ -1,2 +1,9 @@
 kafka-python
 requests
+cryptography
+clickhouse-driver
+pytest
+prometheus_client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp

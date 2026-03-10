@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { toast } from 'react-hot-toast'
-import { 
-  BarChart3, 
+import { useSearchParams } from 'react-router-dom'
+import {
+  BarChart3,
   TrendingUp,
   AlertCircle,
   Loader,
@@ -14,17 +14,42 @@ import AnimatedPage from '../../components/AnimatedPage'
 import Card from '../../components/Card'
 import Button from '../../components/Button'
 import { fadeIn, slideInBottom } from '../../animations/variants'
+import {
+  isReportCompleted,
+  isReportProcessing,
+  getReportStatusBadgeClass,
+  formatReportStatus,
+} from '../../utils/reportStatus'
 
 function DashboardViewer() {
+  const [searchParams] = useSearchParams()
+  const selectedReportIdParam = searchParams.get('reportId')
   const [dashboardUrl, setDashboardUrl] = useState(null)
   const [reports, setReports] = useState([])
+  const [stats, setStats] = useState({
+    total_reports: 0,
+    completed_reports: 0,
+    total_rows: 0,
+  })
+  const [selectedReport, setSelectedReport] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isReportLoading, setIsReportLoading] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    loadDashboard()
-    loadReports()
+    handleRefresh()
   }, [])
+
+  useEffect(() => {
+    if (!selectedReportIdParam) {
+      return
+    }
+    const parsedReportId = Number(selectedReportIdParam)
+    if (Number.isNaN(parsedReportId)) {
+      return
+    }
+    handleLoadReport(parsedReportId)
+  }, [selectedReportIdParam])
 
   const loadDashboard = async () => {
     setIsLoading(true)
@@ -32,19 +57,19 @@ function DashboardViewer() {
 
     try {
       const response = await voiceReportsAPI.getWorkspaceDashboard()
-      
+
       if (response.data.success) {
         setDashboardUrl(response.data.dashboard_url)
       } else {
         setError(response.data.error || 'Failed to load dashboard')
       }
-    } catch (error) {
-      console.error('Failed to load dashboard:', error)
-      
-      if (error.response?.status === 404) {
+    } catch (loadError) {
+      console.error('Failed to load dashboard:', loadError)
+
+      if (loadError.response?.status === 404) {
         setError('No dashboard available yet. Ask your manager to create some reports first.')
       } else {
-        setError(error.response?.data?.error || 'Failed to load dashboard')
+        setError(loadError.response?.data?.error || 'Failed to load dashboard')
       }
     } finally {
       setIsLoading(false)
@@ -54,30 +79,70 @@ function DashboardViewer() {
   const loadReports = async () => {
     try {
       const response = await voiceReportsAPI.listReports()
-      
+
       if (response.data.success) {
-        const completedReports = (response.data.reports || []).filter(r => r.status === 'completed')
-        setReports(completedReports)
+        const nextReports = response.data.reports || []
+        setReports(nextReports)
+        return nextReports
       }
-    } catch (error) {
-      console.error('Failed to load reports:', error)
+    } catch (loadError) {
+      console.error('Failed to load reports:', loadError)
+    }
+    return []
+  }
+
+  const loadStats = async (fallbackReports = reports) => {
+    try {
+      const response = await voiceReportsAPI.getDashboardStats()
+      if (response.data.success) {
+        setStats({
+          total_reports: response.data.total_reports || 0,
+          completed_reports: response.data.completed_reports || 0,
+          total_rows: response.data.total_rows || 0,
+        })
+      }
+    } catch (loadError) {
+      console.error('Failed to load dashboard stats:', loadError)
+      // Fallback if stats endpoint is unavailable.
+      setStats({
+        total_reports: fallbackReports.length,
+        completed_reports: fallbackReports.filter((report) => isReportCompleted(report.status)).length,
+        total_rows: fallbackReports.reduce((sum, report) => sum + (report.row_count || 0), 0),
+      })
     }
   }
 
-  const handleRefresh = () => {
-    loadDashboard()
-    loadReports()
+  const handleLoadReport = async (reportId) => {
+    setIsReportLoading(true)
+    try {
+      const response = await voiceReportsAPI.getReport(reportId)
+      if (response.data.success) {
+        setSelectedReport(response.data.report)
+      }
+    } catch (loadError) {
+      console.error('Failed to load report:', loadError)
+    } finally {
+      setIsReportLoading(false)
+    }
+  }
+
+  const handleRefresh = async () => {
+    const nextReports = await loadReports()
+    await loadStats(nextReports)
+    await loadDashboard()
+    if (selectedReport?.id) {
+      await handleLoadReport(selectedReport.id)
+    }
   }
 
   return (
     <AnimatedPage>
       <div className="space-y-6">
-        {/* Header */}
         <motion.div variants={fadeIn}>
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                📊 Analytics Dashboard
+                Analytics Dashboard
               </h1>
               <p className="mt-2 text-gray-600 dark:text-gray-400">
                 View workspace analytics and voice-generated reports
@@ -101,7 +166,6 @@ function DashboardViewer() {
           </div>
         </motion.div>
 
-        {/* Stats */}
         <motion.div variants={slideInBottom} className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card>
             <div className="flex items-center gap-4">
@@ -111,7 +175,7 @@ function DashboardViewer() {
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Total Reports</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {reports.length}
+                  {stats.total_reports}
                 </p>
               </div>
             </div>
@@ -125,7 +189,7 @@ function DashboardViewer() {
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Completed</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {reports.filter(r => r.status === 'completed').length}
+                  {stats.completed_reports}
                 </p>
               </div>
             </div>
@@ -139,14 +203,13 @@ function DashboardViewer() {
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Total Rows</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                  {reports.reduce((sum, r) => sum + (r.row_count || 0), 0).toLocaleString()}
+                  {(stats.total_rows || 0).toLocaleString()}
                 </p>
               </div>
             </div>
           </Card>
         </motion.div>
 
-        {/* Dashboard */}
         <motion.div variants={slideInBottom}>
           <Card>
             {isLoading ? (
@@ -180,9 +243,10 @@ function DashboardViewer() {
                     Read-only view
                   </span>
                 </div>
-                
+
                 <div className="border-2 border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                   <iframe
+                    key={dashboardUrl}
                     src={dashboardUrl}
                     width="100%"
                     height="800"
@@ -206,7 +270,48 @@ function DashboardViewer() {
           </Card>
         </motion.div>
 
-        {/* Recent Reports */}
+        {selectedReport && (
+          <motion.div variants={slideInBottom}>
+            <Card>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  Report #{selectedReport.id}
+                </h2>
+                <span className={`px-2 py-1 text-xs rounded-full font-medium ${getReportStatusBadgeClass(selectedReport.status)}`}>
+                  {formatReportStatus(selectedReport.status)}
+                </span>
+              </div>
+
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                {selectedReport.transcription}
+              </p>
+
+              {selectedReport.embed_url ? (
+                <div className="border-2 border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                  <iframe
+                    key={`${selectedReport.id}-${selectedReport.embed_url}`}
+                    src={selectedReport.embed_url}
+                    width="100%"
+                    height="520"
+                    frameBorder="0"
+                    className="bg-white"
+                    title={`Report ${selectedReport.id}`}
+                  />
+                </div>
+              ) : isReportProcessing(selectedReport.status) || isReportCompleted(selectedReport.status) ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Visualization is loading...
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Open a report with completed execution to view its visualization.
+                </p>
+              )}
+            </Card>
+          </motion.div>
+        )}
+
         {reports.length > 0 && (
           <motion.div variants={slideInBottom}>
             <Card>
@@ -216,17 +321,19 @@ function DashboardViewer() {
 
               <div className="space-y-3">
                 {reports.slice(0, 5).map((report) => (
-                  <div
+                  <button
                     key={report.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                    type="button"
+                    onClick={() => handleLoadReport(report.id)}
+                    className="w-full text-left flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-1">
                         <h3 className="font-medium text-gray-900 dark:text-white">
                           Report #{report.id}
                         </h3>
-                        <span className="px-2 py-1 text-xs rounded-full font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                          {report.status}
+                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${getReportStatusBadgeClass(report.status)}`}>
+                          {formatReportStatus(report.status)}
                         </span>
                       </div>
                       <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-1">
@@ -234,13 +341,20 @@ function DashboardViewer() {
                       </p>
                       {report.row_count && (
                         <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                          {report.row_count.toLocaleString()} rows • {report.chart_type} chart
+                          {report.row_count.toLocaleString()} rows - {report.chart_type} chart
                         </p>
                       )}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
+
+              {isReportLoading && (
+                <div className="mt-4 text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Loading report details...
+                </div>
+              )}
             </Card>
           </motion.div>
         )}
@@ -250,4 +364,3 @@ function DashboardViewer() {
 }
 
 export default DashboardViewer
-

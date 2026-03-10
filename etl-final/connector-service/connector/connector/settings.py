@@ -11,6 +11,11 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from shared.utils.logging_utils import configure_logging
+from shared.utils.tracing import configure_tracing
+
+configure_logging()
+configure_tracing("connector-service")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -44,6 +49,26 @@ MEDIA_URL = '/uploads/'
 MEDIA_ROOT = BASE_DIR / '../uploaded_files'
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800
+
+# File validation settings
+import os
+MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 1073741824))  # Default: 1GB (1024*1024*1024)
+
+# Virus scanning settings
+VIRUS_SCAN_ENABLED = os.environ.get('VIRUS_SCAN_ENABLED', 'True').lower() in ('true', '1', 'yes')
+VIRUS_SCAN_BACKEND = os.environ.get('VIRUS_SCAN_BACKEND', 'clamav')  # 'clamav' or 'mock'
+CLAMAV_HOST = os.environ.get('CLAMAV_HOST', 'clamav')
+CLAMAV_PORT = int(os.environ.get('CLAMAV_PORT', 3310))
+CLAMAV_TIMEOUT = int(os.environ.get('CLAMAV_TIMEOUT', 30))
+
+# Input validation settings
+MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', 10485760))  # Default: 10MB
+
+# Rate limiting settings
+RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'True').lower() in ('true', '1', 'yes')
+RATE_LIMIT_REQUESTS = int(os.environ.get('RATE_LIMIT_REQUESTS', 100))  # requests per window (per IP)
+RATE_LIMIT_WINDOW = int(os.environ.get('RATE_LIMIT_WINDOW', 60))  # seconds
+RATE_LIMIT_PER_USER_REQUESTS = int(os.environ.get('RATE_LIMIT_PER_USER_REQUESTS', 200))  # requests per window (per authenticated user)
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -52,6 +77,12 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'shared.utils.django_middleware.CorrelationIdMiddleware',
+    'shared.utils.django_middleware.MetricsMiddleware',
+    # Custom middleware for input validation and security
+    'etl_engine.middleware.RequestValidationMiddleware',
+    'etl_engine.middleware.RateLimitMiddleware',
+    'etl_engine.middleware.SecurityHeadersMiddleware',
 ]
 
 ROOT_URLCONF = 'connector.urls'

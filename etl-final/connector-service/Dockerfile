@@ -12,8 +12,11 @@ COPY connector-service /app/connector-service
 # Copy shared utils/models
 COPY shared /app/shared
 
-ENV PYTHONPATH="/app/shared:/app"
+ENV PYTHONPATH="/app"
 
 EXPOSE 8000
 
-CMD ["python", "connector-service/connector/manage.py", "runserver", "0.0.0.0:8000"]
+COPY connector-service/start.sh /app/start.sh
+RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]

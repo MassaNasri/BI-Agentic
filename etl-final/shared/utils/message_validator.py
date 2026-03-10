@@ -4,6 +4,8 @@ Ensures message structure consistency across the ETL pipeline
 """
 from typing import Dict, Any, Optional, List, Tuple
 
+from .db_type_utils import normalize_db_type
+
 
 class MessageValidator:
     """
@@ -47,6 +49,8 @@ class MessageValidator:
             for field in required:
                 if field not in message:
                     return False, f"Missing required field for database type: {field}"
+            if normalize_db_type(message.get("db_type")) is None:
+                return False, "Unsupported db_type"
         
         return True, None
     

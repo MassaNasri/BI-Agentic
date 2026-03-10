@@ -141,6 +141,9 @@ export const voiceReportsAPI = {
   
   // Get workspace dashboard (Executive)
   getWorkspaceDashboard: () => apiClient.get('/voice-reports/dashboard/'),
+
+  // Dashboard aggregate counters
+  getDashboardStats: () => apiClient.get('/voice-reports/dashboard/stats/'),
 }
 
 export default {

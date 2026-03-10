@@ -6,3 +6,9 @@ pymysql
 psycopg2-binary
 pandas
 openpyxl
+clickhouse-driver
+cryptography
+prometheus_client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp

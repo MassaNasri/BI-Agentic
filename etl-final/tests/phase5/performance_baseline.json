@@ -1,0 +1,4 @@
+{
+  "min_rows_per_sec": 50000,
+  "max_duration_seconds": 30
+}

@@ -5,3 +5,9 @@ requests
 python-dotenv
 psycopg2-binary
 pymysql
+prometheus_client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
+cryptography
+clickhouse-driver

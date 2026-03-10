@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'react-hot-toast'
+import { useSearchParams } from 'react-router-dom'
 import { 
   Mic, 
   Upload, 
-  Play, 
   Trash2, 
   Database,
   Clock,
@@ -20,8 +20,16 @@ import AnimatedPage from '../../components/AnimatedPage'
 import Card from '../../components/Card'
 import Button from '../../components/Button'
 import { fadeIn, slideInBottom } from '../../animations/variants'
+import {
+  isReportCompleted,
+  isReportFailed,
+  getReportStatusBadgeClass,
+  formatReportStatus,
+} from '../../utils/reportStatus'
 
 function VoiceReportManager() {
+  const [searchParams] = useSearchParams()
+  const selectedReportIdParam = searchParams.get('reportId')
   const [currentReport, setCurrentReport] = useState(null)
   const [reports, setReports] = useState([])
   const [isUploading, setIsUploading] = useState(false)
@@ -141,7 +149,7 @@ function VoiceReportManager() {
           transcription: response.data.transcription,
           sql: response.data.sql, // Store but don't show to manager
           intent: response.data.intent,
-          status: 'completed',
+          status: executeResponse.data.status || 'visualization_created',
           embedUrl: executeResponse.data.embed_url,
           rowCount: executeResponse.data.row_count,
           executionTime: executeResponse.data.execution_time_ms,
@@ -218,6 +226,17 @@ function VoiceReportManager() {
       toast.error('Failed to load report')
     }
   }
+
+  useEffect(() => {
+    if (!selectedReportIdParam) {
+      return
+    }
+    const parsedReportId = Number(selectedReportIdParam)
+    if (Number.isNaN(parsedReportId)) {
+      return
+    }
+    handleLoadReport(parsedReportId)
+  }, [selectedReportIdParam])
 
   return (
     <AnimatedPage>
@@ -378,7 +397,7 @@ function VoiceReportManager() {
               </h2>
 
               {/* Results */}
-              {currentReport.status === 'completed' && (
+              {isReportCompleted(currentReport.status) && (
                 <>
                   {/* Metrics */}
                   <div className="grid grid-cols-3 gap-4 mb-6">
@@ -445,7 +464,7 @@ function VoiceReportManager() {
               )}
 
               {/* Failed State */}
-              {currentReport.status === 'failed' && (
+              {isReportFailed(currentReport.status) && (
                 <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
                   <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
                   <div>
@@ -491,13 +510,11 @@ function VoiceReportManager() {
                         </h3>
                         <span className={`
                           px-2 py-1 text-xs rounded-full font-medium
-                          ${report.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : ''}
-                          ${report.status === 'pending_execution' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' : ''}
-                          ${report.status === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' : ''}
+                          ${getReportStatusBadgeClass(report.status)}
                         `}>
-                          {report.status === 'completed' && <CheckCircle className="w-3 h-3 inline mr-1" />}
-                          {report.status === 'failed' && <XCircle className="w-3 h-3 inline mr-1" />}
-                          {report.status.replace('_', ' ')}
+                          {isReportCompleted(report.status) && <CheckCircle className="w-3 h-3 inline mr-1" />}
+                          {isReportFailed(report.status) && <XCircle className="w-3 h-3 inline mr-1" />}
+                          {formatReportStatus(report.status)}
                         </span>
                       </div>
                       {report.row_count && (

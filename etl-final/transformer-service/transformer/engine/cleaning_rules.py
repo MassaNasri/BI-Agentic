@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class CleaningRules:
     """
-    Comprehensive data cleaning rules with validation and error handling.
+    Stateless data cleaning rules with validation and error handling.
     
     Features:
     - Null/empty value handling
@@ -20,12 +20,13 @@ class CleaningRules:
     - Invalid data detection
     - Edge case handling
     - Validation metadata
+    
+    Thread-safe: All methods are pure functions with no instance state.
     """
     
     def __init__(self):
-        """Initialize cleaning rules with default configurations."""
-        self.warnings: List[str] = []
-        self.errors: List[str] = []
+        """Initialize cleaning rules (stateless - no instance variables)."""
+        pass
     
     def remove_null_fields(self, row: Dict[str, Any], keep_empty_strings: bool = False) -> Dict[str, Any]:
         """
@@ -142,8 +143,8 @@ class CleaningRules:
         
         return cleaned
     
-    def _coerce_boolean(self, value: Any) -> bool:
-        """Coerce value to boolean."""
+    def _coerce_boolean(self, value: Any) -> Any:
+        """Coerce value to boolean using strict mappings; leave unknown values unchanged."""
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
@@ -154,7 +155,7 @@ class CleaningRules:
                 return True
             if normalized in ['false', 'no', '0', 'n', 'off', '']:
                 return False
-        return bool(value)
+        return value
     
     def _infer_type(self, value: Any) -> Any:
         """Infer and convert type for a value."""
@@ -166,6 +167,11 @@ class CleaningRules:
         
         value_str = value.strip()
         
+        # Preserve leading-zero numeric-like strings (e.g. IDs/codes like "007")
+        unsigned = value_str[1:] if value_str.startswith("-") else value_str
+        if len(unsigned) > 1 and unsigned.startswith("0") and unsigned.isdigit():
+            return value_str
+
         # Try integer
         if value_str.isdigit() or (value_str.startswith('-') and value_str[1:].isdigit()):
             try:
@@ -225,14 +231,13 @@ class CleaningRules:
             required_fields: Optional list of required fields
             
         Returns:
-            Tuple of (cleaned_row, list_of_warnings)
+            Tuple of (cleaned_row, list_of_warnings_and_errors)
         """
-        self.warnings = []
-        self.errors = []
+        warnings_and_errors = []
         
         if not row:
-            self.errors.append("Empty row received")
-            return {}, self.errors
+            warnings_and_errors.append("Empty row received")
+            return {}, warnings_and_errors
         
         try:
             # Step 1: Handle nulls and empty strings
@@ -252,15 +257,15 @@ class CleaningRules:
             
             # Step 6: Validate
             is_valid, validation_warnings = self.validate_row(cleaned, required_fields)
-            self.warnings.extend(validation_warnings)
+            warnings_and_errors.extend(validation_warnings)
             
             if not is_valid:
-                self.warnings.append("Row validation failed")
+                warnings_and_errors.append("Row validation failed")
             
-            return cleaned, self.warnings
+            return cleaned, warnings_and_errors
             
         except Exception as e:
             error_msg = f"Cleaning error: {str(e)}"
             logger.error(error_msg)
-            self.errors.append(error_msg)
-            return row, self.errors  # Return original row on error
+            warnings_and_errors.append(error_msg)
+            return row, warnings_and_errors  # Return original row on error

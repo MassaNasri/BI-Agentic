@@ -11,6 +11,8 @@ import logging
 import math
 from typing import Dict, List, Optional, Any
 
+from voice_reports.utils import normalize_sql_table_references
+
 logger = logging.getLogger(__name__)
 
 
@@ -201,29 +203,74 @@ class ClickHouseExecutor:
     
     def __init__(self):
         """Initialize ClickHouse executor with environment configuration."""
-        self.host = os.getenv('CLICKHOUSE_HOST', 'localhost')
-        self.port = int(os.getenv('CLICKHOUSE_PORT', '8123'))
-        self.user = os.getenv('CLICKHOUSE_USER', 'etl_user')
-        self.password = os.getenv('CLICKHOUSE_PASSWORD', 'etl_pass123')
-        self.database = os.getenv('CLICKHOUSE_DATABASE', 'etl')
-        
+        host = os.getenv('CLICKHOUSE_HOST', 'localhost')
+        port_raw = os.getenv('CLICKHOUSE_PORT', '8123')
+        username = os.getenv('CLICKHOUSE_USER', 'user_etl')
+        password = os.getenv('CLICKHOUSE_PASSWORD', 'etl_pass123')
+        database = os.getenv('CLICKHOUSE_DATABASE', 'default')
+
+        try:
+            port = int(port_raw)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Invalid CLICKHOUSE_PORT value: {port_raw!r}. Expected an integer (8123)."
+            ) from exc
+
         # Validate port for HTTP protocol
-        if self.port == 9000:
+        if port == 9000:
             logger.warning(
-                "⚠️  CLICKHOUSE_PORT is set to 9000 (native protocol). "
+                "CLICKHOUSE_PORT is set to 9000 (native protocol). "
                 "HTTP interface requires port 8123. "
                 "Update your .env file: CLICKHOUSE_PORT=8123"
             )
-        
-        # Create clickhouse-connect client
-        self.client = clickhouse_connect.get_client(
-            host=self.host,
-            port=self.port,
-            username=self.user,
-            password=self.password,
-            database=self.database
-        )
-    
+
+        logger.info("Connecting to ClickHouse: %s:%s user=%s", host, port, username)
+
+        try:
+            client = clickhouse_connect.get_client(
+                host=host,
+                port=port,
+                username=username,
+                password=password,
+                database=database
+            )
+            version_result = client.query("SELECT version()")
+            version = (
+                version_result.result_rows[0][0]
+                if version_result.result_rows and version_result.result_rows[0]
+                else "unknown"
+            )
+            logger.info("ClickHouse connection verified. version=%s database=%s", version, database)
+        except Exception as exc:
+            error_msg = str(exc)
+            logger.error(
+                "ClickHouse initialization failed for %s:%s user=%s database=%s: %s",
+                host,
+                port,
+                username,
+                database,
+                error_msg
+            )
+            if 'AUTHENTICATION_FAILED' in error_msg or 'Authentication failed' in error_msg:
+                raise RuntimeError(
+                    "ClickHouse authentication failed. Verify CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, "
+                    "and CLICKHOUSE_DATABASE values. "
+                    f"Loaded config host={host}, port={port}, user={username}, database={database}. "
+                    f"Original error: {error_msg}"
+                ) from exc
+            raise RuntimeError(
+                "ClickHouse connection initialization failed. "
+                f"Loaded config host={host}, port={port}, user={username}, database={database}. "
+                f"Original error: {error_msg}"
+            ) from exc
+
+        self.host = host
+        self.port = port
+        self.user = username
+        self.password = password
+        self.database = database
+        self.client = client
+
     def execute_query(self, sql: str) -> Dict:
         """
         Execute SQL query on ClickHouse.
@@ -244,9 +291,19 @@ class ClickHouseExecutor:
         try:
             import time
             start_time = time.time()
+
+            logger.error("RAW SQL BEFORE NORMALIZATION:")
+            logger.error("=" * 80)
+            logger.error(sql)
+            logger.error("=" * 80)
+
+            normalized_sql = sql
+            # Only normalize SELECT queries; keep admin statements unchanged.
+            if sql and sql.strip().upper().startswith("SELECT"):
+                normalized_sql = normalize_sql_table_references(sql, self.database)
             
             # Sanitize SQL for HTTP execution (removes FORMAT Native, semicolons)
-            clean_sql = sanitize_sql_for_http(sql)
+            clean_sql = sanitize_sql_for_http(normalized_sql)
             
             # 🔍 FINAL SQL BOUNDARY LOGGING (MANDATORY)
             # This logs the EXACT query sent to ClickHouse

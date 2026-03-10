@@ -5,3 +5,7 @@ requests
 pymysql
 psycopg2-binary
 python-dotenv
+prometheus_client
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
