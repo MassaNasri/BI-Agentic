@@ -1,0 +1,391 @@
+services:
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env.microservices
+    environment:
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8001}
+      WORKSPACE_SERVICE_URL: ${WORKSPACE_SERVICE_URL:-http://workspace-service:8002}
+      REPORT_SERVICE_URL: ${REPORT_SERVICE_URL:-http://report-service:8003}
+      VOICE_SERVICE_URL: ${VOICE_SERVICE_URL:-http://voice-service:8004}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8005}
+      QUERY_SERVICE_URL: ${QUERY_SERVICE_URL:-http://query-service:8006}
+      VISUALIZATION_SERVICE_URL: ${VISUALIZATION_SERVICE_URL:-http://visualization-service:8007}
+      GATEWAY_RATE_LIMIT_REQUESTS: ${GATEWAY_RATE_LIMIT_REQUESTS:-120}
+      GATEWAY_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_RATE_LIMIT_WINDOW_SECONDS:-6}
+      GATEWAY_UPSTREAM_TIMEOUT_SECONDS: ${GATEWAY_UPSTREAM_TIMEOUT_SECONDS:-360}
+    depends_on:
+      - auth-service
+      - workspace-service
+      - report-service
+      - voice-service
+      - ai-service
+      - query-service
+      - visualization-service
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+    container_name: auth-service
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./.env.microservices
+
+  workspace-service:
+    build:
+      context: ./services/workspace-service
+    container_name: workspace-service
+    ports:
+      - "8002:8002"
+    env_file:
+      - ./.env.microservices
+
+  report-service:
+    build:
+      context: ./services/report-service
+    container_name: report-service
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./.env.microservices
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
+    depends_on:
+      - clickhouse
+      - etl-metadata
+
+  voice-service:
+    build:
+      context: ./services/voice-service
+    container_name: voice-service
+    ports:
+      - "8004:8004"
+    env_file:
+      - ./.env.microservices
+    environment:
+      SMALL_WHISPER_URL: http://ai-service:8005
+      SMALL_WHISPER_HEALTH_TIMEOUT_SECONDS: ${SMALL_WHISPER_HEALTH_TIMEOUT_SECONDS:-5}
+      SMALL_WHISPER_CONNECT_TIMEOUT_SECONDS: ${SMALL_WHISPER_CONNECT_TIMEOUT_SECONDS:-10}
+      SMALL_WHISPER_TIMEOUT_SECONDS: ${SMALL_WHISPER_TIMEOUT_SECONDS:-300}
+      SMALL_WHISPER_MAX_RETRIES: ${SMALL_WHISPER_MAX_RETRIES:-1}
+      QUERY_SERVICE_URL: ${QUERY_SERVICE_URL:-http://query-service:8006}
+      VISUALIZATION_SERVICE_URL: ${VISUALIZATION_SERVICE_URL:-http://visualization-service:8007}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      - ai-service
+      - query-service
+      - visualization-service
+      - clickhouse
+      - kafka
+
+  ai-service:
+    build:
+      context: ./services/ai-service
+    container_name: ai-service
+    ports:
+      - "8005:8005"
+    volumes:
+      - whisper_cache:/root/.cache/whisper
+    env_file:
+      - ./.env.microservices
+    environment:
+      DJANGO_SETTINGS_MODULE: backend.settings
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      WHISPER_MODEL_NAME: ${WHISPER_MODEL_NAME:-tiny}
+      WHISPER_CACHE_DIR: ${WHISPER_CACHE_DIR:-/root/.cache/whisper}
+      WHISPER_TASK: ${WHISPER_TASK:-translate}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-3n-e4b-it:free}
+    depends_on:
+      - clickhouse
+
+  query-service:
+    build:
+      context: ./services/query-service
+    container_name: query-service
+    ports:
+      - "8006:8006"
+    env_file:
+      - ./.env.microservices
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ETL_SERVICE_URL: ${ETL_SERVICE_URL:-http://etl-connector:8000}
+      METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
+    depends_on:
+      - clickhouse
+      - kafka
+      - etl-connector
+      - etl-metadata
+
+  visualization-service:
+    build:
+      context: ./services/visualization-service
+    container_name: visualization-service
+    ports:
+      - "8007:8007"
+    env_file:
+      - ./.env.microservices
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8081:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    container_name: surrealdb
+    command: start --user root --pass root --log debug memory
+    ports:
+      - "8008:8000"
+    volumes:
+      - surreal_data:/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    environment:
+      CLICKHOUSE_DB: etl
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: etl_pass123
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+
+  clamav:
+    image: clamav/clamav:latest
+    container_name: clamav
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    environment:
+      CLAMAV_NO_FRESHCLAM: "false"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+  etl-connector:
+    build:
+      context: ./etl-final
+      dockerfile: connector-service/Dockerfile
+    container_name: etl-connector
+    ports:
+      - "8101:8000"
+    volumes:
+      - uploaded-files:/app/uploaded_files
+    environment:
+      PYTHONPATH: /app
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: etl_pass123
+      CLICKHOUSE_DATABASE: etl
+      SURREAL_URL: http://surrealdb:8000/sql
+      SURREAL_USER: root
+      SURREAL_PASS: root
+      SURREAL_NS: bi_etl
+      SURREAL_DB: etl_logs
+      VIRUS_SCAN_ENABLED: "true"
+      VIRUS_SCAN_BACKEND: clamav
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+      CLAMAV_TIMEOUT: "30"
+    depends_on:
+      - kafka
+      - surrealdb
+      - clickhouse
+      - clamav
+
+  etl-detector:
+    build:
+      context: ./etl-final
+      dockerfile: detector-service/Dockerfile
+    container_name: etl-detector
+    ports:
+      - "8102:8000"
+    environment:
+      PYTHONPATH: /app
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: etl_pass123
+      CLICKHOUSE_DATABASE: etl
+      SURREAL_URL: http://surrealdb:8000/sql
+      SURREAL_USER: root
+      SURREAL_PASS: root
+      SURREAL_NS: bi_etl
+      SURREAL_DB: etl_logs
+    depends_on:
+      - kafka
+      - surrealdb
+      - clickhouse
+
+  etl-extractor:
+    build:
+      context: ./etl-final
+      dockerfile: extractor-service/Dockerfile
+    container_name: etl-extractor
+    ports:
+      - "8103:8000"
+    volumes:
+      - uploaded-files:/app/uploaded_files
+    environment:
+      PYTHONPATH: /app
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
+      EXTRACTOR_DLQ_TOPIC: errors
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: etl_pass123
+      CLICKHOUSE_DATABASE: etl
+      SURREAL_URL: http://surrealdb:8000/sql
+      SURREAL_USER: root
+      SURREAL_PASS: root
+      SURREAL_NS: bi_etl
+      SURREAL_DB: etl_logs
+    depends_on:
+      - kafka
+      - surrealdb
+      - clickhouse
+
+  etl-transformer:
+    build:
+      context: ./etl-final
+      dockerfile: transformer-service/Dockerfile
+    container_name: etl-transformer
+    ports:
+      - "8104:8000"
+    environment:
+      PYTHONPATH: /app
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
+      TRANSFORMER_DLQ_TOPIC: errors
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: etl_pass123
+      CLICKHOUSE_DATABASE: etl
+      SURREAL_URL: http://surrealdb:8000/sql
+      SURREAL_USER: root
+      SURREAL_PASS: root
+      SURREAL_NS: bi_etl
+      SURREAL_DB: etl_logs
+    depends_on:
+      - kafka
+      - surrealdb
+      - clickhouse
+
+  etl-loader:
+    build:
+      context: ./etl-final
+      dockerfile: loader-service/Dockerfile
+    container_name: etl-loader
+    ports:
+      - "8105:8000"
+    environment:
+      PYTHONPATH: /app
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
+      LOADER_DLQ_TOPIC: errors
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_USER: etl_user
+      CLICKHOUSE_PASSWORD: etl_pass123
+      CLICKHOUSE_DATABASE: etl
+      SURREAL_URL: http://surrealdb:8000/sql
+      SURREAL_USER: root
+      SURREAL_PASS: root
+      SURREAL_NS: bi_etl
+      SURREAL_DB: etl_logs
+    depends_on:
+      - kafka
+      - clickhouse
+      - surrealdb
+
+  etl-metadata:
+    build:
+      context: ./etl-final
+      dockerfile: metadata-service/Dockerfile
+    container_name: etl-metadata
+    ports:
+      - "8106:8000"
+    environment:
+      PYTHONPATH: /app
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLE_TOPIC_ALIASING: "true"
+      KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
+      SURREAL_URL: http://surrealdb:8000/sql
+      SURREAL_USER: root
+      SURREAL_PASS: root
+      SURREAL_NS: bi_etl
+      SURREAL_DB: etl_logs
+    depends_on:
+      - kafka
+      - surrealdb
+
+volumes:
+  uploaded-files:
+  surreal_data:
+  clickhouse_data:
+  clickhouse_logs:
+  clamav_data:
+  whisper_cache:
