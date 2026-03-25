@@ -8,6 +8,8 @@ class Workspace(models.Model):
     
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
+    company_number = models.CharField(max_length=100, blank=True, default='')
+    company_address = models.TextField(blank=True, default='')
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

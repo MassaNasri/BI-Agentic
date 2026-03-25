@@ -17,16 +17,22 @@ VOICE_SERVICE_URL = os.getenv('VOICE_SERVICE_URL', 'http://voice-service:8004').
 AI_SERVICE_URL = os.getenv('AI_SERVICE_URL', 'http://ai-service:8005').rstrip('/')
 QUERY_SERVICE_URL = os.getenv('QUERY_SERVICE_URL', 'http://query-service:8006').rstrip('/')
 VISUALIZATION_SERVICE_URL = os.getenv('VISUALIZATION_SERVICE_URL', 'http://visualization-service:8007').rstrip('/')
+SUBSCRIPTION_SERVICE_URL = os.getenv('SUBSCRIPTION_SERVICE_URL', 'http://subscription-service:8008').rstrip('/')
+NOTIFICATION_SERVICE_URL = os.getenv('NOTIFICATION_SERVICE_URL', 'http://notification-service:8010').rstrip('/')
 
 VOICE_EXECUTE_PATTERN = re.compile(r'^/voice-reports/\d+/execute/$')
 VOICE_SQL_PATTERN = re.compile(r'^/voice-reports/\d+/sql/$')
 VOICE_DETAIL_PATTERN = re.compile(r'^/voice-reports/\d+/$')
+VOICE_TEXT_QUERY_PATH = '/voice-reports/text-query/'
 
 
 PUBLIC_PATH_PREFIXES = (
     '/auth/signup/',
     '/auth/login/',
     '/auth/verify-email/',
+    '/auth/forgot-password/request/',
+    '/auth/forgot-password/verify/',
+    '/auth/forgot-password/reset/',
     '/auth/token/refresh/',
     '/workspace/accept-invite/',
 )
@@ -37,6 +43,15 @@ def is_public_path(path: str) -> bool:
 
 
 def resolve_target(path: str) -> Optional[RouteTarget]:
+    if path.startswith('/admin/users'):
+        return RouteTarget(service='auth-service', base_url=AUTH_SERVICE_URL)
+
+    if path.startswith('/admin/workspaces'):
+        return RouteTarget(service='workspace-service', base_url=WORKSPACE_SERVICE_URL)
+
+    if path.startswith('/admin/plans') or path.startswith('/admin/stats'):
+        return RouteTarget(service='subscription-service', base_url=SUBSCRIPTION_SERVICE_URL)
+
     if path.startswith('/auth/') or path.startswith('/user/'):
         return RouteTarget(service='auth-service', base_url=AUTH_SERVICE_URL)
 
@@ -46,7 +61,12 @@ def resolve_target(path: str) -> Optional[RouteTarget]:
     if path.startswith('/database/') or path.startswith('/query/'):
         return RouteTarget(service='query-service', base_url=QUERY_SERVICE_URL)
 
-    if path == '/voice-reports/upload/' or path == '/voice-reports/health/' or VOICE_EXECUTE_PATTERN.match(path):
+    if (
+        path == '/voice-reports/upload/'
+        or path == '/voice-reports/health/'
+        or path == VOICE_TEXT_QUERY_PATH
+        or VOICE_EXECUTE_PATTERN.match(path)
+    ):
         return RouteTarget(service='voice-service', base_url=VOICE_SERVICE_URL)
 
     if (
@@ -60,6 +80,12 @@ def resolve_target(path: str) -> Optional[RouteTarget]:
 
     if path.startswith('/visualization/'):
         return RouteTarget(service='visualization-service', base_url=VISUALIZATION_SERVICE_URL)
+
+    if path.startswith('/subscription/'):
+        return RouteTarget(service='subscription-service', base_url=SUBSCRIPTION_SERVICE_URL)
+
+    if path.startswith('/notification/'):
+        return RouteTarget(service='notification-service', base_url=NOTIFICATION_SERVICE_URL)
 
     if path.startswith('/ai/'):
         return RouteTarget(service='ai-service', base_url=AI_SERVICE_URL)

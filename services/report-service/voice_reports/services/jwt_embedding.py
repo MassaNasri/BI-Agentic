@@ -28,7 +28,12 @@ class JWTEmbeddingService:
         self.embed_exp_seconds = int(
             os.getenv("METABASE_EMBED_EXP_SECONDS", str(60 * 60 * 24))
         )
-        self.metabase_url = (os.getenv("METABASE_URL") or "http://localhost:3000").rstrip("/")
+        self.metabase_url = (
+            os.getenv("METABASE_EMBED_URL")
+            or os.getenv("METABASE_PUBLIC_URL")
+            or os.getenv("METABASE_URL")
+            or "http://localhost:3000"
+        ).rstrip("/")
 
         if not self.secret_key:
             logger.error("METABASE_SECRET_KEY is missing; secure embedding is disabled")

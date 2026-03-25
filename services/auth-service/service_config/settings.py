@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 load_dotenv(BASE_DIR.parent.parent / '.env')
+load_dotenv(BASE_DIR.parent.parent / '.env.microservices')
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'auth-service-secret-key')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
@@ -94,7 +95,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'users.authentication.ServiceJWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
@@ -115,7 +116,7 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
 }
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
@@ -125,6 +126,15 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'BI Voice Agent <no-reply@b
 SERVER_EMAIL = EMAIL_HOST_USER
 EMAIL_TIMEOUT = 10
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+NOTIFICATION_SERVICE_URL = os.getenv('NOTIFICATION_SERVICE_URL', 'http://notification-service:8010')
+NOTIFICATION_SERVICE_API_KEY = os.getenv('NOTIFICATION_SERVICE_API_KEY', '').strip()
+PASSWORD_RESET_CODE_EXPIRY_MINUTES = int(os.getenv('PASSWORD_RESET_CODE_EXPIRY_MINUTES', '15'))
+PASSWORD_RESET_MAX_ATTEMPTS = int(os.getenv('PASSWORD_RESET_MAX_ATTEMPTS', '5'))
+
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', '').strip().lower()
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
+ADMIN_NAME = os.getenv('ADMIN_NAME', 'System Admin')
+SYSTEM_ADMIN_USER_ID = int(os.getenv('SYSTEM_ADMIN_USER_ID', '0'))
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True

@@ -31,6 +31,15 @@ def _metabase_base_url() -> str:
     return (os.getenv("METABASE_URL") or "http://localhost:3000").rstrip("/")
 
 
+def _metabase_embed_base_url() -> str:
+    return (
+        os.getenv("METABASE_EMBED_URL")
+        or os.getenv("METABASE_PUBLIC_URL")
+        or os.getenv("METABASE_URL")
+        or "http://localhost:3000"
+    ).rstrip("/")
+
+
 def _credentials() -> tuple[Optional[str], Optional[str]]:
     return os.getenv("METABASE_USERNAME"), os.getenv("METABASE_PASSWORD")
 
@@ -122,6 +131,7 @@ def get_metabase_headers() -> Dict[str, str]:
 class MetabaseService:
     def __init__(self) -> None:
         self.base_url = _metabase_base_url()
+        self.embed_base_url = _metabase_embed_base_url()
         self.database_id = int(os.getenv("METABASE_DATABASE_ID", "1"))
         self.last_error: Optional[str] = None
 
@@ -394,7 +404,7 @@ class MetabaseService:
 
             jwt_service = get_jwt_service()
             token = jwt_service.generate_question_token(question_id, params=params or {})
-            return f"{self.base_url}/embed/question/{token}#bordered=true&titled=true"
+            return f"{self.embed_base_url}/embed/question/{token}#bordered=true&titled=true"
         except Exception as exc:
             self._set_last_error(f"question_embed_url_failed: {exc}")
             logger.error("Failed to generate question embed URL for %s: %s", question_id, exc)
@@ -407,7 +417,7 @@ class MetabaseService:
 
             jwt_service = get_jwt_service()
             token = jwt_service.generate_dashboard_token(dashboard_id, params=params or {})
-            return f"{self.base_url}/embed/dashboard/{token}#bordered=true&titled=true"
+            return f"{self.embed_base_url}/embed/dashboard/{token}#bordered=true&titled=true"
         except Exception as exc:
             self._set_last_error(f"dashboard_embed_url_failed: {exc}")
             logger.error("Failed to generate dashboard embed URL for %s: %s", dashboard_id, exc)

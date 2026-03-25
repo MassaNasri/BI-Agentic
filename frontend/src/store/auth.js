@@ -103,7 +103,7 @@ export const useAuthStore = create(
           
           set({
             user,
-            workspace: workspace || null,
+            workspace: workspace || user?.workspace || null,
             isAuthenticated: true,
           })
           

@@ -1,0 +1,14 @@
+# Django Framework
+Django==4.2.7
+
+# PostgreSQL Database Adapter
+psycopg2-binary==2.9.9
+
+# Django REST Framework
+djangorestframework==3.14.0
+
+# CORS Headers for Frontend Integration
+django-cors-headers==4.3.1
+
+# Python dotenv for environment variables
+python-dotenv==1.0.0

@@ -16,6 +16,16 @@ export const authAPI = {
   
   // R4: Logout
   logout: (refreshToken) => apiClient.post('/auth/logout/', { refresh: refreshToken }),
+
+  // Forgot password flow
+  requestPasswordResetCode: (email) => apiClient.post('/auth/forgot-password/request/', { email }),
+  verifyPasswordResetCode: (email, code) => apiClient.post('/auth/forgot-password/verify/', { email, code }),
+  resetPassword: (resetToken, newPassword, confirmNewPassword) =>
+    apiClient.post('/auth/forgot-password/reset/', {
+      reset_token: resetToken,
+      new_password: newPassword,
+      confirm_new_password: confirmNewPassword,
+    }),
   
   // Token refresh
   refreshToken: (refresh) => apiClient.post('/auth/token/refresh/', { refresh }),
@@ -31,6 +41,9 @@ export const userAPI = {
   
   // R6: Update Profile
   updateProfile: (data) => apiClient.put('/user/profile/', data),
+
+  // Change password
+  changePassword: (data) => apiClient.post('/user/change-password/', data),
   
   // R6: Deactivate Account
   deactivateAccount: (refreshToken) => apiClient.delete('/user/deactivate/', { data: { refresh: refreshToken } }),
@@ -41,6 +54,9 @@ export const userAPI = {
 // ============================================================================
 
 export const workspaceAPI = {
+  // Get workspace info
+  getWorkspace: () => apiClient.get('/workspace/'),
+
   // R7: Update Workspace Info
   updateWorkspace: (data) => apiClient.put('/workspace/', data),
   
@@ -123,6 +139,13 @@ export const voiceReportsAPI = {
       onUploadProgress,
     })
   },
+
+  // Submit text query directly to AI pipeline (skip Whisper)
+  submitTextQuery: (text, workspaceId) =>
+    apiClient.post('/voice-reports/text-query/', {
+      text,
+      workspace_id: workspaceId,
+    }),
   
   // Execute SQL query (Manager/Analyst)
   executeQuery: (reportId) => apiClient.post(`/voice-reports/${reportId}/execute/`),
@@ -146,11 +169,42 @@ export const voiceReportsAPI = {
   getDashboardStats: () => apiClient.get('/voice-reports/dashboard/stats/'),
 }
 
+// ============================================================================
+// Subscription Endpoints
+// ============================================================================
+
+export const subscriptionAPI = {
+  listPlans: () => apiClient.get('/subscription/plans/'),
+  getCurrentSubscription: (workspaceId) =>
+    apiClient.get('/subscription/current/', { params: { workspace_id: workspaceId } }),
+  checkAccess: (workspaceId, consume = false) =>
+    apiClient.get('/subscription/check-access/', {
+      params: { workspace_id: workspaceId, consume },
+    }),
+  subscribe: (data) => apiClient.post('/subscription/subscribe/', data),
+}
+
+// ============================================================================
+// Admin Endpoints
+// ============================================================================
+
+export const adminAPI = {
+  listPlans: () => apiClient.get('/admin/plans/'),
+  createPlan: (data) => apiClient.post('/admin/plans/', data),
+  updatePlan: (planId, data) => apiClient.patch(`/admin/plans/${planId}/`, data),
+  deletePlan: (planId) => apiClient.delete(`/admin/plans/${planId}/`),
+  listUsers: () => apiClient.get('/admin/users/'),
+  listWorkspaces: () => apiClient.get('/admin/workspaces/'),
+  getStats: () => apiClient.get('/admin/stats/'),
+}
+
 export default {
   auth: authAPI,
   user: userAPI,
   workspace: workspaceAPI,
   database: databaseAPI,
   voiceReports: voiceReportsAPI,
+  subscription: subscriptionAPI,
+  admin: adminAPI,
 }
 

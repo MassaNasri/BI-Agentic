@@ -23,6 +23,8 @@ class SmallWhisperClient:
     def __init__(self):
         self.base_url = getattr(settings, "SMALL_WHISPER_URL", "http://127.0.0.1:8001")
         self.transcribe_endpoint = f"{self.base_url}/api/transcribe/"
+        self.reasoning_endpoint = f"{self.base_url}/api/reasoning/test/"
+        self.intent_endpoint = f"{self.base_url}/api/llm/intent/"
         self.health_endpoint = f"{self.base_url}/admin/"
 
         self.health_timeout_seconds = int(
@@ -205,6 +207,181 @@ class SmallWhisperClient:
         )
         logger.error(timeout_error)
         return {"success": False, "error": timeout_error}
+
+    def process_text(self, text: str) -> Dict:
+        """
+        Process text directly through the post-transcription AI stages.
+
+        Flow: reasoning/classification -> intent+SQL generation.
+        """
+        question = (text or "").strip()
+        if not question:
+            return {"success": False, "error": "Text is required"}
+
+        logger.info("Starting text pipeline endpoint=%s", self.reasoning_endpoint)
+
+        if not self.check_health():
+            error_msg = (
+                f"Small Whisper service is not reachable at {self.base_url}. "
+                "Please ensure the ai-service container is healthy."
+            )
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
+
+        try:
+            reasoning_response = requests.post(
+                self.reasoning_endpoint,
+                json={"text": question},
+                timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
+            )
+            if reasoning_response.status_code != 200:
+                error_detail = reasoning_response.text[:500]
+                logger.error(
+                    "Reasoning endpoint returned non-200 status=%s body=%s",
+                    reasoning_response.status_code,
+                    error_detail,
+                )
+                return {
+                    "success": False,
+                    "error": f"Reasoning endpoint returned {reasoning_response.status_code}: {error_detail}",
+                }
+
+            try:
+                reasoning_payload = reasoning_response.json()
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": "Reasoning endpoint returned invalid JSON response",
+                }
+
+            if not isinstance(reasoning_payload, dict):
+                return {
+                    "success": False,
+                    "error": "Reasoning endpoint returned invalid response payload",
+                }
+
+            question_type = reasoning_payload.get("question_type", "unknown")
+            needs_sql = bool(reasoning_payload.get("needs_sql", False))
+            reasoning = {
+                "question_type": question_type,
+                "needs_sql": needs_sql,
+                "needs_chart": bool(reasoning_payload.get("needs_chart", False)),
+            }
+
+            if not needs_sql or question_type != "analytical":
+                return {
+                    "success": True,
+                    "text": question,
+                    "reasoning": reasoning,
+                    "question_type": question_type,
+                    "intent": None,
+                    "sql": None,
+                    "chart": None,
+                    "message": "Question does not require data analysis",
+                    "raw_response": {"reasoning": reasoning_payload},
+                }
+
+            llm_response = requests.post(
+                self.intent_endpoint,
+                json={"question": question},
+                timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
+            )
+
+            if llm_response.status_code != 200:
+                error_detail = llm_response.text[:500]
+                logger.error(
+                    "Intent endpoint returned non-200 status=%s body=%s",
+                    llm_response.status_code,
+                    error_detail,
+                )
+                return {
+                    "success": True,
+                    "text": question,
+                    "reasoning": reasoning,
+                    "question_type": question_type,
+                    "intent": None,
+                    "sql": None,
+                    "chart": None,
+                    "message": "Analytical stage failed",
+                    "analytical_error": {"status": llm_response.status_code, "details": error_detail},
+                    "raw_response": {"reasoning": reasoning_payload},
+                }
+
+            try:
+                llm_payload = llm_response.json()
+            except ValueError:
+                return {
+                    "success": True,
+                    "text": question,
+                    "reasoning": reasoning,
+                    "question_type": question_type,
+                    "intent": None,
+                    "sql": None,
+                    "chart": None,
+                    "message": "Analytical stage failed",
+                    "analytical_error": {"details": "Invalid JSON from intent endpoint"},
+                    "raw_response": {"reasoning": reasoning_payload},
+                }
+
+            if not isinstance(llm_payload, dict):
+                return {
+                    "success": True,
+                    "text": question,
+                    "reasoning": reasoning,
+                    "question_type": question_type,
+                    "intent": None,
+                    "sql": None,
+                    "chart": None,
+                    "message": "Analytical stage failed",
+                    "analytical_error": {"details": "Invalid payload from intent endpoint"},
+                    "raw_response": {"reasoning": reasoning_payload},
+                }
+
+            if llm_payload.get("error"):
+                return {
+                    "success": True,
+                    "text": question,
+                    "reasoning": reasoning,
+                    "question_type": question_type,
+                    "intent": None,
+                    "sql": None,
+                    "chart": None,
+                    "message": llm_payload.get("message", "Analytical stage failed"),
+                    "analytical_error": llm_payload,
+                    "raw_response": {"reasoning": reasoning_payload, "llm": llm_payload},
+                }
+
+            return {
+                "success": True,
+                "text": question,
+                "reasoning": reasoning,
+                "question_type": question_type,
+                "intent": llm_payload.get("intent"),
+                "sql": llm_payload.get("sql"),
+                "chart": llm_payload.get("chart"),
+                "confidence": llm_payload.get("confidence", 0.5),
+                "raw_response": {"reasoning": reasoning_payload, "llm": llm_payload},
+            }
+
+        except requests.exceptions.Timeout as exc:
+            error_msg = (
+                f"Text processing timed out after {self.read_timeout_seconds} seconds. "
+                "Please try again."
+            )
+            logger.error("%s Error=%s", error_msg, exc)
+            return {"success": False, "error": error_msg}
+        except requests.exceptions.ConnectionError as exc:
+            logger.error("Cannot connect to text pipeline endpoints error=%s", exc)
+            return {
+                "success": False,
+                "error": (
+                    f"Small Whisper service is not reachable at {self.base_url}. "
+                    "Verify the ai-service container and DNS connectivity."
+                ),
+            }
+        except Exception as exc:
+            logger.exception("Unexpected error while processing text")
+            return {"success": False, "error": f"Unexpected error: {exc}"}
 
 
 _small_whisper_client = None

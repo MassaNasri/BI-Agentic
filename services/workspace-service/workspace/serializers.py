@@ -9,6 +9,8 @@ class WorkspaceUpdateSerializer(serializers.Serializer):
     
     name = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
+    company_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    company_address = serializers.CharField(required=False, allow_blank=True)
     
     def validate(self, attrs):
         """Validate that user is the workspace owner."""
@@ -24,12 +26,18 @@ class WorkspaceUpdateSerializer(serializers.Serializer):
         return attrs
     
     def update(self, instance, validated_data):
-        """Update workspace name and/or description."""
+        """Update workspace name and descriptive fields."""
         if 'name' in validated_data:
             instance.name = validated_data['name']
         
         if 'description' in validated_data:
             instance.description = validated_data['description']
+
+        if 'company_number' in validated_data:
+            instance.company_number = validated_data['company_number']
+
+        if 'company_address' in validated_data:
+            instance.company_address = validated_data['company_address']
         
         instance.save()
         return instance
@@ -68,7 +76,7 @@ class WorkspaceSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Workspace
-        fields = ['id', 'name', 'description', 'created_at']
+        fields = ['id', 'name', 'description', 'company_number', 'company_address', 'created_at']
         read_only_fields = ['id', 'created_at']
 
 

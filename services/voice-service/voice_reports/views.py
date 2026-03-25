@@ -14,8 +14,10 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
+from django.core.files.base import ContentFile
 import logging
 import os
+import uuid
 import requests
 
 from .models import VoiceReport, SQLEditHistory
@@ -26,6 +28,8 @@ from .services import (
     SQLGuard,
     get_metabase_service,
     get_event_publisher,
+    get_subscription_client,
+    get_notification_client,
 )
 from .services.clickhouse_executor import sanitize_query_results
 from users.permissions import IsManager, IsAnalyst, IsExecutive
@@ -135,13 +139,47 @@ class VoiceUploadView(APIView):
                     {'success': False, 'error': 'User must belong to a workspace'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            # Enforce subscription/free-tier limits before processing any voice request.
+            subscription_client = get_subscription_client()
+            access_result = subscription_client.check_access(
+                workspace_id=workspace.id,
+                authorization_header=request.META.get('HTTP_AUTHORIZATION'),
+                consume=True,
+            )
+
+            if not access_result.get('success'):
+                logger.error(
+                    "Subscription access check failed workspace=%s user=%s error=%s",
+                    workspace.id,
+                    request.user.id,
+                    access_result.get('error'),
+                )
+                return Response(
+                    {
+                        'success': False,
+                        'error': 'Subscription service unavailable. Please try again.',
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            if not access_result.get('allowed'):
+                limit_message = 'You have reached your limit. Please subscribe.'
+                return Response(
+                    {
+                        'success': False,
+                        'error': limit_message,
+                        'message': limit_message,
+                        'remaining_requests': access_result.get('remaining_requests', 0),
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             
             # Save audio file
             audio_dir = f'media/workspaces/{workspace.id}/audio'
             os.makedirs(audio_dir, exist_ok=True)
             
             # Generate unique filename
-            import uuid
             filename = f"{uuid.uuid4()}_{audio_file.name}"
             audio_path = os.path.join(audio_dir, filename)
             
@@ -294,6 +332,210 @@ class VoiceUploadView(APIView):
         
         except Exception as e:
             logger.error(f"Error in VoiceUploadView: {e}", exc_info=True)
+            return Response(
+                {'success': False, 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class TextQueryView(APIView):
+    """
+    Accept pre-transcribed text and continue directly from intent detection stage.
+
+    Manager only. This skips audio upload/transcription and reuses the same
+    downstream SQL/visualization execution flow.
+    """
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def post(self, request):
+        try:
+            text = (request.data.get('text') or '').strip()
+            if not text:
+                return Response(
+                    {'success': False, 'error': 'Text is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            workspace = get_user_workspace(request.user)
+            if not workspace:
+                return Response(
+                    {'success': False, 'error': 'User must belong to a workspace'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            requested_workspace_id = request.data.get('workspace_id')
+            if (
+                requested_workspace_id is not None
+                and str(requested_workspace_id).strip()
+                and str(requested_workspace_id) != str(workspace.id)
+            ):
+                return Response(
+                    {'success': False, 'error': 'workspace_id does not match current user workspace'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # Keep subscription consumption behavior aligned with voice uploads.
+            subscription_client = get_subscription_client()
+            access_result = subscription_client.check_access(
+                workspace_id=workspace.id,
+                authorization_header=request.META.get('HTTP_AUTHORIZATION'),
+                consume=True,
+            )
+
+            if not access_result.get('success'):
+                logger.error(
+                    "Subscription access check failed workspace=%s user=%s error=%s",
+                    workspace.id,
+                    request.user.id,
+                    access_result.get('error'),
+                )
+                return Response(
+                    {
+                        'success': False,
+                        'error': 'Subscription service unavailable. Please try again.',
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            if not access_result.get('allowed'):
+                limit_message = 'You have reached your limit. Please subscribe.'
+                return Response(
+                    {
+                        'success': False,
+                        'error': limit_message,
+                        'message': limit_message,
+                        'remaining_requests': access_result.get('remaining_requests', 0),
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            whisper_client = get_small_whisper_client()
+            text_result = whisper_client.process_text(text=text)
+
+            if not text_result.get('success'):
+                return Response(
+                    {
+                        'success': False,
+                        'error': f"AI pipeline error: {text_result.get('error')}"
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+
+            transcription_text = text_result.get('text') or text
+            question_type = text_result.get('question_type', 'unknown')
+            sql = text_result.get('sql')
+
+            report = VoiceReport(
+                workspace=workspace,
+                created_by=request.user,
+                transcription=transcription_text,
+                intent_json=text_result.get('intent'),
+                generated_sql=sql or '',
+                final_sql=sql or '',
+                status=(
+                    VoiceReport.STATUS_PENDING
+                    if (question_type == 'analytical' and sql)
+                    else VoiceReport.STATUS_UPLOADED
+                ),
+            )
+            report.audio_file.save(
+                f"text-input/{uuid.uuid4()}.txt",
+                ContentFile(transcription_text.encode('utf-8')),
+                save=False
+            )
+            report.save()
+
+            event_base = {
+                'report_id': report.id,
+                'workspace_id': workspace.id,
+                'user_id': request.user.id,
+                'question_type': question_type,
+            }
+            publish_kafka_event(
+                'report.text.received',
+                {
+                    **event_base,
+                    'transcription': transcription_text,
+                },
+                key=str(report.id),
+            )
+            if text_result.get('intent') is not None:
+                publish_kafka_event(
+                    'report.intent.generated',
+                    {
+                        **event_base,
+                        'intent': text_result.get('intent'),
+                    },
+                    key=str(report.id),
+                )
+            if sql:
+                publish_kafka_event(
+                    'report.sql.generated',
+                    {
+                        **event_base,
+                        'sql': sql,
+                    },
+                    key=str(report.id),
+                )
+
+            if question_type == 'analytical' and not sql:
+                analytical_error_message = text_result.get(
+                    'message',
+                    'Analytical question detected but SQL generation failed.'
+                )
+                report.status = VoiceReport.STATUS_FAILED
+                report.error_message = analytical_error_message
+                report.save(update_fields=['status', 'error_message'])
+                logger.error(
+                    "Analytical SQL generation failed for text report=%s workspace=%s message=%s",
+                    report.id,
+                    workspace.id,
+                    analytical_error_message,
+                )
+                return Response(
+                    {
+                        'success': False,
+                        'id': report.id,
+                        'report_id': report.id,
+                        'question_type': question_type,
+                        'requires_sql': True,
+                        'error': 'SQL generation failed for analytical question',
+                        'details': analytical_error_message,
+                        'status': VoiceReport.STATUS_FAILED,
+                    },
+                    status=status.HTTP_502_BAD_GATEWAY
+                )
+
+            if question_type != 'analytical' or not sql:
+                return Response({
+                    'success': True,
+                    'id': report.id,
+                    'report_id': report.id,
+                    'transcription': transcription_text,
+                    'question_type': question_type,
+                    'message': text_result.get('message', 'Question does not require data analysis'),
+                    'intent': text_result.get('intent'),
+                    'requires_sql': False,
+                    'status': VoiceReport.STATUS_UPLOADED
+                })
+
+            normalized_chart = normalize_chart_payload(text_result.get('chart'))
+
+            return Response({
+                'success': True,
+                'id': report.id,
+                'report_id': report.id,
+                'transcription': transcription_text,
+                'question_type': question_type,
+                'intent': text_result.get('intent'),
+                'sql': sql,
+                'chart': normalized_chart,
+                'confidence': text_result.get('confidence'),
+                'message': 'Text processed successfully. Ready to execute.',
+                'status': VoiceReport.STATUS_PENDING
+            })
+        except Exception as e:
+            logger.error(f"Error in TextQueryView: {e}", exc_info=True)
             return Response(
                 {'success': False, 'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -518,6 +760,32 @@ class QueryExecuteView(APIView):
                 },
                 key=str(report.id),
             )
+
+            notification_client = get_notification_client()
+            workspace_owner = report.workspace.owner if report.workspace else None
+            owner_email = workspace_owner.email if workspace_owner else None
+            owner_name = workspace_owner.name if workspace_owner else None
+            notification_result = notification_client.send_event(
+                event_type='workspace_report_created',
+                event_key=f"report-created:{report.id}",
+                payload={
+                    'workspace_id': report.workspace_id,
+                    'workspace_name': report.workspace.name if report.workspace else None,
+                    'owner_email': owner_email,
+                    'owner_name': owner_name,
+                    'recipient_emails': [owner_email] if owner_email else [],
+                    'report_id': report.id,
+                    'created_by_user_id': request.user.id,
+                    'created_by_name': request.user.name,
+                },
+            )
+            if not notification_result.get('success'):
+                logger.warning(
+                    "workspace_report_created notification dispatch failed report=%s workspace=%s error=%s",
+                    report.id,
+                    report.workspace_id,
+                    notification_result.get('error'),
+                )
             
             # TODO: Create history entry when ReportHistory model is added
             # ReportHistory.objects.create(

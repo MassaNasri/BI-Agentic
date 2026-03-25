@@ -14,6 +14,8 @@ from .metabase_service import (
 )
 from .jwt_embedding import JWTEmbeddingService, get_jwt_service
 from .event_bus import KafkaEventPublisher, get_event_publisher
+from .subscription_client import SubscriptionClient, get_subscription_client
+from .notification_client import NotificationClient, get_notification_client
 
 __all__ = [
     'SmallWhisperClient',
@@ -31,5 +33,9 @@ __all__ = [
     'get_jwt_service',
     'KafkaEventPublisher',
     'get_event_publisher',
+    'SubscriptionClient',
+    'get_subscription_client',
+    'NotificationClient',
+    'get_notification_client',
 ]
 

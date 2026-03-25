@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 load_dotenv(BASE_DIR.parent.parent / '.env')
+load_dotenv(BASE_DIR.parent.parent / '.env.microservices')
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'voice-service-secret-key')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
@@ -116,6 +117,7 @@ SMALL_WHISPER_MAX_RETRIES = int(os.getenv('SMALL_WHISPER_MAX_RETRIES', '1'))
 QUERY_SERVICE_URL = os.getenv('QUERY_SERVICE_URL', 'http://query-service:8006')
 VISUALIZATION_SERVICE_URL = os.getenv('VISUALIZATION_SERVICE_URL', 'http://visualization-service:8007')
 REPORT_SERVICE_URL = os.getenv('REPORT_SERVICE_URL', 'http://report-service:8003')
+SUBSCRIPTION_SERVICE_URL = os.getenv('SUBSCRIPTION_SERVICE_URL', 'http://subscription-service:8008')
 
 CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', 'clickhouse')
 CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '8123'))

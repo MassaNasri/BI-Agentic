@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 load_dotenv(BASE_DIR.parent.parent / '.env')
+load_dotenv(BASE_DIR.parent.parent / '.env.microservices')
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'workspace-service-secret-key')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
@@ -86,7 +87,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'users.authentication.ServiceJWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
@@ -117,6 +118,10 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'BI Voice Agent <no-reply@b
 SERVER_EMAIL = EMAIL_HOST_USER
 EMAIL_TIMEOUT = 10
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', '').strip().lower()
+ADMIN_NAME = os.getenv('ADMIN_NAME', 'System Admin')
+SYSTEM_ADMIN_USER_ID = int(os.getenv('SYSTEM_ADMIN_USER_ID', '0'))
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True

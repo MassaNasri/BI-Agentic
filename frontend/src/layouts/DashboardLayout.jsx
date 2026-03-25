@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/auth'
 import { 
   Home, Users, Settings, User, LogOut, 
   UserPlus, LayoutDashboard, Menu, X, Database,
-  Mic, Code, BarChart3
+  Mic, Code, BarChart3, CreditCard
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { slideInLeft, sidebarItemVariants } from '../animations/variants'
@@ -74,6 +74,13 @@ function DashboardLayout() {
       icon: Database, 
       roles: ['manager'],
       description: 'Manage Data'
+    },
+    {
+      name: 'Subscription',
+      path: '/dashboard/subscription',
+      icon: CreditCard,
+      roles: ['manager'],
+      description: 'Billing Plans',
     },
     { 
       name: 'Members', 

@@ -31,6 +31,9 @@ const PUBLIC_ENDPOINTS = [
   '/auth/signup/',
   '/auth/login/',
   '/auth/verify-email/',
+  '/auth/forgot-password/request/',
+  '/auth/forgot-password/verify/',
+  '/auth/forgot-password/reset/',
   '/workspace/accept-invite/',
 ]
 

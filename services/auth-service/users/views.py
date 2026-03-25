@@ -4,13 +4,36 @@ from rest_framework import status, serializers
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from .serializers import (
     SignUpSerializer, LoginSerializer, LogoutSerializer,
-    ProfileSerializer, UpdateProfileSerializer, DeactivateAccountSerializer
+    ProfileSerializer, UpdateProfileSerializer, DeactivateAccountSerializer,
+    AdminUserSerializer, AdminUserUpdateSerializer,
+    ChangePasswordSerializer, ForgotPasswordRequestSerializer,
+    ForgotPasswordVerifySerializer, ForgotPasswordResetSerializer,
 )
 from .utils import generate_verification_token, send_verification_email, verify_email_token
 from .models import User
+from .notification_client import get_notification_client
+from .permissions import IsAdmin
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _system_admin_profile_payload(user):
+    return {
+        'id': getattr(user, 'id', 0),
+        'name': getattr(user, 'name', 'System Admin'),
+        'first_name': 'System',
+        'last_name': 'Admin',
+        'email': getattr(user, 'email', ''),
+        'role': 'admin',
+        'is_verified': True,
+        'is_active': True,
+        'date_of_birth': None,
+        'home_address': '',
+        'created_at': getattr(user, 'created_at', None),
+        'workspace': None,
+        'is_system_admin': True,
+    }
 
 
 class SignUpView(APIView):
@@ -66,13 +89,28 @@ class SignUpView(APIView):
             # Send verification email for ALL signups (both normal and invited users)
             # Generate verification token
             token = generate_verification_token(user.id)
-            
-            # Send verification email
-            email_sent = send_verification_email(
-                user_email=user.email,
-                user_name=user.name,
-                token=token
+
+            # Send activation email through notification-service.
+            notification_client = get_notification_client()
+            notification_result = notification_client.send_event(
+                event_type='account_activation',
+                event_key=f"account-activation:{user.id}:{token}",
+                payload={
+                    'email': user.email,
+                    'user_name': user.name,
+                    'token': token,
+                },
             )
+            email_sent = notification_result.get('success', False)
+
+            # Transitional fallback to keep signup activation behavior stable
+            # during notification-service rollout.
+            if not email_sent:
+                email_sent = send_verification_email(
+                    user_email=user.email,
+                    user_name=user.name,
+                    token=token
+                )
             
             if not email_sent:
                 logger.warning(
@@ -225,7 +263,9 @@ class EmailVerificationView(APIView):
             workspace_members = WorkspaceMember.objects.filter(
                 user=user,
                 status='pending_acceptance'
-            )
+            ).select_related('workspace__owner')
+
+            notification_client = get_notification_client()
             
             for member in workspace_members:
                 member.status = 'active'
@@ -233,6 +273,35 @@ class EmailVerificationView(APIView):
                     member.joined_at = timezone.now()
                 member.save()
                 logger.info(f"WorkspaceMember {member.id} activated for verified user {user.email}")
+
+                owner_email = None
+                owner_name = None
+                if member.workspace and member.workspace.owner:
+                    owner_email = member.workspace.owner.email
+                    owner_name = member.workspace.owner.name
+
+                notification_result = notification_client.send_event(
+                    event_type='workspace_member_joined',
+                    event_key=f"workspace-join:{member.workspace_id}:{user.id}",
+                    payload={
+                        'workspace_id': member.workspace_id,
+                        'workspace_name': member.workspace.name if member.workspace else None,
+                        'owner_email': owner_email,
+                        'owner_name': owner_name,
+                        'recipient_emails': [owner_email] if owner_email else [],
+                        'joined_user_id': user.id,
+                        'joined_user_name': user.name,
+                        'joined_user_email': user.email,
+                        'joined_role': member.role,
+                    },
+                )
+                if not notification_result.get('success'):
+                    logger.warning(
+                        "workspace_member_joined notification dispatch failed workspace=%s user=%s error=%s",
+                        member.workspace_id,
+                        user.id,
+                        notification_result.get('error'),
+                    )
             
             logger.info(f"User {user.email} (ID: {user.id}) successfully verified")
             
@@ -433,6 +502,15 @@ class ProfileView(APIView):
             - id, name, email, role, is_verified, is_suspended, created_at
         """
         user = request.user
+        if getattr(user, 'is_system_admin', False):
+            return Response(
+                {
+                    'success': True,
+                    'user': _system_admin_profile_payload(user),
+                },
+                status=status.HTTP_200_OK,
+            )
+
         serializer = ProfileSerializer(user)
         
         return Response(
@@ -463,6 +541,14 @@ class ProfileView(APIView):
             - user: Updated user profile
         """
         user = request.user
+        if getattr(user, 'is_system_admin', False):
+            return Response(
+                {
+                    'success': False,
+                    'message': 'System admin profile is managed through environment configuration.',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = UpdateProfileSerializer(
             data=request.data,
             context={'request': request}
@@ -474,24 +560,11 @@ class ProfileView(APIView):
             # Update the user
             result = serializer.update(user, serializer.validated_data)
             updated_user = result['user']
-            email_changed = result['email_changed']
-            
-            # Send verification email if email changed
-            if email_changed:
-                token = generate_verification_token(updated_user.id)
-                send_verification_email(
-                    user_email=updated_user.email,
-                    user_name=updated_user.name,
-                    token=token
-                )
-                logger.info(f"User {updated_user.id} changed email, verification email sent")
             
             # Return updated profile
             profile_serializer = ProfileSerializer(updated_user)
             
             message = 'Profile updated successfully.'
-            if email_changed:
-                message += ' Please verify your new email address.'
             
             logger.info(f"User {updated_user.email} updated profile")
             
@@ -525,6 +598,173 @@ class ProfileView(APIView):
             )
 
 
+class ChangePasswordView(APIView):
+    """
+    API endpoint for changing password while authenticated.
+
+    POST /user/change-password/
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if getattr(request.user, 'is_system_admin', False):
+            return Response(
+                {
+                    'success': False,
+                    'message': 'System admin password is managed through environment configuration.',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+
+        try:
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            logger.info("Password changed successfully for user=%s", request.user.email)
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Password updated successfully.',
+                },
+                status=status.HTTP_200_OK,
+            )
+        except serializers.ValidationError as e:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Validation failed',
+                    'errors': e.detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            logger.error("Error changing password for user %s: %s", request.user.email, e)
+            return Response(
+                {
+                    'success': False,
+                    'message': 'An error occurred while changing password.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class ForgotPasswordRequestView(APIView):
+    """
+    Request a password reset code.
+
+    POST /auth/forgot-password/request/
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ForgotPasswordRequestSerializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+            result = serializer.save()
+            expires_minutes = 15
+            if isinstance(result, dict):
+                expires_minutes = result.get('expires_minutes', 15)
+
+            # Intentionally generic response to avoid leaking whether email exists.
+            return Response(
+                {
+                    'success': True,
+                    'message': 'If the account exists, a verification code was sent to the email address.',
+                    'expires_in_minutes': expires_minutes,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except serializers.ValidationError as e:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Validation failed.',
+                    'errors': e.detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            logger.error("Forgot password request failed: %s", e, exc_info=True)
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Unable to process forgot password request right now. Please try again shortly.',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class ForgotPasswordVerifyView(APIView):
+    """
+    Verify password reset code.
+
+    POST /auth/forgot-password/verify/
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ForgotPasswordVerifySerializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+            reset_code = serializer.save()
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Code verified successfully.',
+                    'reset_token': str(reset_code.verification_token),
+                },
+                status=status.HTTP_200_OK,
+            )
+        except serializers.ValidationError as e:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Verification failed.',
+                    'errors': e.detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class ForgotPasswordResetView(APIView):
+    """
+    Reset password after successful code verification.
+
+    POST /auth/forgot-password/reset/
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ForgotPasswordResetSerializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Password reset successfully. Please log in with your new password.',
+                },
+                status=status.HTTP_200_OK,
+            )
+        except serializers.ValidationError as e:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Password reset failed.',
+                    'errors': e.detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
 class DeactivateAccountView(APIView):
     """
     API endpoint for deactivating user account.
@@ -549,6 +789,15 @@ class DeactivateAccountView(APIView):
             - success: Boolean
             - message: "Your account has been deactivated."
         """
+        if getattr(request.user, 'is_system_admin', False):
+            return Response(
+                {
+                    'success': False,
+                    'message': 'System admin account cannot be deactivated.',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = DeactivateAccountSerializer(
             data=request.data,
             context={'request': request}
@@ -589,4 +838,60 @@ class DeactivateAccountView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class AdminUsersView(APIView):
+    """
+    Admin API for global user management.
+
+    GET /admin/users/
+    """
+
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request):
+        users = User.objects.all().order_by('-created_at')
+        serializer = AdminUserSerializer(users, many=True)
+        return Response(
+            {
+                'success': True,
+                'count': len(serializer.data),
+                'users': serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdminUserDetailView(APIView):
+    """
+    Admin API for updating users globally.
+
+    PATCH /admin/users/<user_id>/
+    """
+
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def patch(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'User not found.',
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = AdminUserUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated_user = serializer.update(user, serializer.validated_data)
+        payload = AdminUserSerializer(updated_user).data
+        return Response(
+            {
+                'success': True,
+                'user': payload,
+            },
+            status=status.HTTP_200_OK,
+        )
 

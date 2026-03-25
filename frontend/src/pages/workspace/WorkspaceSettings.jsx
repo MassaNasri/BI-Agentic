@@ -13,10 +13,18 @@ function WorkspaceSettings() {
   const [workspace, setWorkspace] = useState({
     name: '',
     description: '',
+    company_number: '',
+    company_address: '',
   })
   
   const [isLoading, setIsLoading] = useState(false)
   const [errors, setErrors] = useState({})
+
+  useEffect(() => {
+    if (hasRole('manager')) {
+      loadWorkspace()
+    }
+  }, [user?.role])
 
   // Only managers can access this page
   if (!hasRole('manager')) {
@@ -46,6 +54,23 @@ function WorkspaceSettings() {
     
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
+  }
+
+  const loadWorkspace = async () => {
+    try {
+      const response = await workspaceAPI.getWorkspace()
+      if (response.data?.workspace) {
+        setWorkspace({
+          name: response.data.workspace.name || '',
+          description: response.data.workspace.description || '',
+          company_number: response.data.workspace.company_number || '',
+          company_address: response.data.workspace.company_address || '',
+        })
+      }
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Failed to load workspace'
+      toast.error(errorMsg)
+    }
   }
 
   const handleChange = (e) => {
@@ -79,6 +104,8 @@ function WorkspaceSettings() {
         setWorkspace({
           name: response.data.workspace.name,
           description: response.data.workspace.description || '',
+          company_number: response.data.workspace.company_number || '',
+          company_address: response.data.workspace.company_address || '',
         })
       }
     } catch (error) {
@@ -138,6 +165,32 @@ function WorkspaceSettings() {
               onChange={handleChange}
               className="input resize-none"
               placeholder="Describe your workspace and its purpose..."
+            />
+          </div>
+
+          <Input
+            label="Company Number"
+            icon={Building}
+            name="company_number"
+            type="text"
+            value={workspace.company_number}
+            onChange={handleChange}
+            error={errors.company_number}
+            placeholder="Enter company registration number"
+          />
+
+          <div>
+            <label htmlFor="company_address" className="block text-sm font-medium text-gray-700 mb-2">
+              Company Address
+            </label>
+            <textarea
+              id="company_address"
+              name="company_address"
+              rows={3}
+              value={workspace.company_address}
+              onChange={handleChange}
+              className="input resize-none"
+              placeholder="Enter company address..."
             />
           </div>
 

@@ -61,8 +61,11 @@ function Login() {
     const result = await login(formData.email, formData.password)
     
     if (result.success) {
-      // Always redirect to dashboard - users can navigate from there
-      navigate('/dashboard')
+      if (result.user?.role === 'admin') {
+        navigate('/admin-dashboard')
+      } else {
+        navigate('/dashboard')
+      }
     } else {
       setApiError(result.error || 'Login failed. Please try again.')
       setShowError(true)
@@ -203,6 +206,15 @@ function Login() {
         </form>
 
         {/* Links */}
+        <motion.div variants={linksVariants} className="mt-2 text-center">
+          <Link
+            to="/forgot-password"
+            className="text-sm text-primary-600 hover:text-primary-700 font-semibold transition-colors"
+          >
+            Forgot Password?
+          </Link>
+        </motion.div>
+
         <motion.div variants={linksVariants} className="mt-6 text-center">
           <p className="text-sm text-gray-600">
             Don't have an account?{' '}

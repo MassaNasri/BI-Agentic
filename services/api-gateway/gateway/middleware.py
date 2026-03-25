@@ -62,9 +62,6 @@ class GatewayAuthenticationMiddleware:
         if is_public_path(request.path):
             return self.get_response(request)
 
-        if request.path.startswith('/admin/'):
-            return self.get_response(request)
-
         if request.path.startswith('/health/'):
             return self.get_response(request)
 

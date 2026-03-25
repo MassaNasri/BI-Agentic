@@ -15,6 +15,8 @@ services:
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8005}
       QUERY_SERVICE_URL: ${QUERY_SERVICE_URL:-http://query-service:8006}
       VISUALIZATION_SERVICE_URL: ${VISUALIZATION_SERVICE_URL:-http://visualization-service:8007}
+      SUBSCRIPTION_SERVICE_URL: ${SUBSCRIPTION_SERVICE_URL:-http://subscription-service:8008}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL:-http://notification-service:8010}
       GATEWAY_RATE_LIMIT_REQUESTS: ${GATEWAY_RATE_LIMIT_REQUESTS:-120}
       GATEWAY_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_RATE_LIMIT_WINDOW_SECONDS:-6}
       GATEWAY_UPSTREAM_TIMEOUT_SECONDS: ${GATEWAY_UPSTREAM_TIMEOUT_SECONDS:-360}
@@ -26,6 +28,8 @@ services:
       - ai-service
       - query-service
       - visualization-service
+      - subscription-service
+      - notification-service
 
   auth-service:
     build:
@@ -77,6 +81,7 @@ services:
       SMALL_WHISPER_MAX_RETRIES: ${SMALL_WHISPER_MAX_RETRIES:-1}
       QUERY_SERVICE_URL: ${QUERY_SERVICE_URL:-http://query-service:8006}
       VISUALIZATION_SERVICE_URL: ${VISUALIZATION_SERVICE_URL:-http://visualization-service:8007}
+      SUBSCRIPTION_SERVICE_URL: ${SUBSCRIPTION_SERVICE_URL:-http://subscription-service:8008}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -84,6 +89,7 @@ services:
       - ai-service
       - query-service
       - visualization-service
+      - subscription-service
       - clickhouse
       - kafka
 
@@ -137,6 +143,42 @@ services:
       - "8007:8007"
     env_file:
       - ./.env.microservices
+
+  subscription-service:
+    build:
+      context: ./services/subscription-service
+    container_name: subscription-service
+    ports:
+      - "8009:8008"
+    env_file:
+      - ./.env.microservices
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+    container_name: notification-service
+    ports:
+      - "8010:8010"
+    env_file:
+      - ./.env.microservices
+
+  notification-expiry-worker:
+    build:
+      context: ./services/notification-service
+    container_name: notification-expiry-worker
+    env_file:
+      - ./.env.microservices
+    command:
+      - sh
+      - -c
+      - >
+        python manage.py migrate &&
+        while true; do
+          python manage.py send_expiry_warnings;
+          sleep ${NOTIFICATION_EXPIRY_CHECK_INTERVAL_SECONDS:-21600};
+        done
+    depends_on:
+      - notification-service
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0

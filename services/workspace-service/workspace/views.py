@@ -13,7 +13,9 @@ from .serializers import (
     RoleAssignmentSerializer
 )
 from users.utils import generate_invitation_token, send_invitation_email
+from .notification_client import get_notification_client
 from users.models import User
+from users.permissions import IsAdmin
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,41 @@ class WorkspaceUpdateView(APIView):
     Only the workspace owner (Manager) can update workspace info.
     """
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Return current workspace details for the authenticated manager.
+        """
+        user = request.user
+
+        if not user.is_verified:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Please verify your email before accessing workspace features.'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            workspace = Workspace.objects.get(owner=user)
+        except Workspace.DoesNotExist:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Workspace not found. Only managers can access workspace information.'
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        workspace_serializer = WorkspaceSerializer(workspace)
+        return Response(
+            {
+                'success': True,
+                'workspace': workspace_serializer.data,
+            },
+            status=status.HTTP_200_OK
+        )
     
     def put(self, request):
         """
@@ -434,13 +471,30 @@ class InvitationView(APIView):
                 f"by {request.user.email} (user_exists: {user_exists})"
             )
             
-            email_sent = send_invitation_email(
-                invited_email=invited_email,
-                inviter_name=request.user.name,
-                workspace_name=workspace.name,
-                token=token,
-                role=role
+            notification_client = get_notification_client()
+            notification_result = notification_client.send_event(
+                event_type='workspace_invitation',
+                event_key=f"workspace-invitation:{workspace.id}:{token}",
+                payload={
+                    'invited_email': invited_email,
+                    'inviter_name': request.user.name,
+                    'workspace_name': workspace.name,
+                    'token': token,
+                    'role': role,
+                },
             )
+            email_sent = notification_result.get('success', False)
+
+            # Transitional fallback to preserve invitation delivery if
+            # notification-service is temporarily unavailable.
+            if not email_sent:
+                email_sent = send_invitation_email(
+                    invited_email=invited_email,
+                    inviter_name=request.user.name,
+                    workspace_name=workspace.name,
+                    token=token,
+                    role=role
+                )
             
             if not email_sent:
                 logger.error(
@@ -1279,6 +1333,32 @@ class AcceptInvitationView(APIView):
                 # Mark invitation as accepted
                 invitation.status = 'accepted'
                 invitation.save()
+
+                notification_client = get_notification_client()
+                owner_email = workspace.owner.email if workspace and workspace.owner else None
+                owner_name = workspace.owner.name if workspace and workspace.owner else None
+                notification_result = notification_client.send_event(
+                    event_type='workspace_member_joined',
+                    event_key=f"workspace-join:{workspace.id}:{user.id}",
+                    payload={
+                        'workspace_id': workspace.id,
+                        'workspace_name': workspace.name,
+                        'owner_email': owner_email,
+                        'owner_name': owner_name,
+                        'recipient_emails': [owner_email] if owner_email else [],
+                        'joined_user_id': user.id,
+                        'joined_user_name': user.name,
+                        'joined_user_email': user.email,
+                        'joined_role': role,
+                    },
+                )
+                if not notification_result.get('success'):
+                    logger.warning(
+                        "workspace_member_joined notification dispatch failed workspace=%s user=%s error=%s",
+                        workspace.id,
+                        user.id,
+                        notification_result.get('error'),
+                    )
                 
                 logger.info(f"User {user.email} accepted invitation to workspace {workspace.id}")
                 
@@ -1342,4 +1422,123 @@ class AcceptInvitationView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class AdminWorkspaceListView(APIView):
+    """
+    Admin API for global workspace management.
+
+    GET /admin/workspaces/
+    """
+
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request):
+        workspaces = Workspace.objects.select_related('owner').all().order_by('-created_at')
+        payload = []
+        for workspace in workspaces:
+            payload.append(
+                {
+                    'id': workspace.id,
+                    'name': workspace.name,
+                    'description': workspace.description,
+                    'company_number': workspace.company_number,
+                    'company_address': workspace.company_address,
+                    'created_at': workspace.created_at,
+                    'owner': {
+                        'id': workspace.owner.id,
+                        'name': workspace.owner.name,
+                        'email': workspace.owner.email,
+                    },
+                    'active_members_count': WorkspaceMember.objects.filter(
+                        workspace=workspace,
+                        status='active',
+                    ).count(),
+                    'pending_members_count': WorkspaceMember.objects.filter(
+                        workspace=workspace,
+                        status__in=['pending_registration', 'pending_acceptance'],
+                    ).count(),
+                }
+            )
+
+        return Response(
+            {
+                'success': True,
+                'count': len(payload),
+                'workspaces': payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdminWorkspaceDetailView(APIView):
+    """
+    Admin API for workspace details and deletion.
+
+    GET /admin/workspaces/<workspace_id>/
+    DELETE /admin/workspaces/<workspace_id>/
+    """
+
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request, workspace_id):
+        try:
+            workspace = Workspace.objects.select_related('owner').get(id=workspace_id)
+        except Workspace.DoesNotExist:
+            return Response(
+                {'success': False, 'message': 'Workspace not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        members = WorkspaceMember.objects.filter(workspace=workspace).select_related('user')
+        member_payload = []
+        for member in members:
+            member_payload.append(
+                {
+                    'id': member.user.id if member.user else None,
+                    'email': member.invited_email,
+                    'name': member.user.name if member.user else None,
+                    'role': member.role,
+                    'status': member.status,
+                }
+            )
+
+        return Response(
+            {
+                'success': True,
+                'workspace': {
+                    'id': workspace.id,
+                    'name': workspace.name,
+                    'description': workspace.description,
+                    'company_number': workspace.company_number,
+                    'company_address': workspace.company_address,
+                    'created_at': workspace.created_at,
+                    'owner': {
+                        'id': workspace.owner.id,
+                        'name': workspace.owner.name,
+                        'email': workspace.owner.email,
+                    },
+                    'members': member_payload,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, workspace_id):
+        try:
+            workspace = Workspace.objects.get(id=workspace_id)
+        except Workspace.DoesNotExist:
+            return Response(
+                {'success': False, 'message': 'Workspace not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        workspace.delete()
+        return Response(
+            {
+                'success': True,
+                'message': 'Workspace deleted successfully.',
+            },
+            status=status.HTTP_200_OK,
+        )
 

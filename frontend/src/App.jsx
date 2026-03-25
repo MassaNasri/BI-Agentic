@@ -11,6 +11,7 @@ import Home from './pages/Home'
 import Login from './pages/auth/Login'
 import Signup from './pages/auth/Signup'
 import VerifyEmail from './pages/auth/VerifyEmail'
+import ForgotPassword from './pages/auth/ForgotPassword'
 import Profile from './pages/profile/Profile'
 import WorkspaceSettings from './pages/workspace/WorkspaceSettings'
 import MembersList from './pages/workspace/MembersList'
@@ -22,6 +23,14 @@ import DatabaseManagement from './pages/database/DatabaseManagement'
 import VoiceReportManager from './pages/voice-reports/VoiceReportManager'
 import SQLEditor from './pages/voice-reports/SQLEditor'
 import DashboardViewer from './pages/voice-reports/DashboardViewer'
+import AdminDashboard from './pages/admin/AdminDashboard'
+import SubscriptionPlansPage from './pages/subscription/SubscriptionPlansPage'
+
+const getDefaultRoute = (user) => {
+  if (!user) return '/login'
+  if (user.role === 'admin') return '/admin-dashboard'
+  return '/dashboard'
+}
 
 // Protected Route Component
 function PrivateRoute({ children, roles }) {
@@ -32,7 +41,7 @@ function PrivateRoute({ children, roles }) {
   }
   
   if (roles && !roles.includes(user?.role)) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to={getDefaultRoute(user)} replace />
   }
   
   return children
@@ -50,6 +59,7 @@ function App() {
         {/* Auth Routes */}
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/accept-invite" element={<AcceptInvite />} />
@@ -59,7 +69,7 @@ function App() {
         <Route
           path="/dashboard"
           element={
-            <PrivateRoute>
+            <PrivateRoute roles={['manager', 'analyst', 'executive']}>
               <DashboardLayout />
             </PrivateRoute>
           }
@@ -74,6 +84,14 @@ function App() {
             element={
               <PrivateRoute roles={['manager']}>
                 <DatabaseManagement />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="subscription"
+            element={
+              <PrivateRoute roles={['manager']}>
+                <SubscriptionPlansPage />
               </PrivateRoute>
             }
           />
@@ -116,6 +134,15 @@ function App() {
             }
           />
         </Route>
+
+        <Route
+          path="/admin-dashboard"
+          element={
+            <PrivateRoute roles={['admin']}>
+              <AdminDashboard />
+            </PrivateRoute>
+          }
+        />
         
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -46,3 +46,12 @@ class IsManagerOrAnalyst(BasePermission):
             request.user.role in ['manager', 'analyst']
         )
 
+
+class IsAdmin(BasePermission):
+    """
+    Permission class to allow only system admins.
+    """
+
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and request.user.role == 'admin'
+
