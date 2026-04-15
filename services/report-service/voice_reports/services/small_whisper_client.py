@@ -171,6 +171,14 @@ class SmallWhisperClient:
             text = result.get('text', '')
             reasoning = result.get('reasoning', {})
             llm_data = result.get('llm')  # Can be null for conversational questions
+            preprocessing_low = result.get('preprocessing_low')
+            preprocessing_high = result.get('preprocessing_high')
+            pipeline_trace = result.get('pipeline_trace')
+            overall_status = result.get('overall_status')
+            root_cause = result.get('root_cause')
+            dagster_runtime = result.get('dagster_runtime')
+            final_route = result.get('final_route')
+            final_user_message = result.get('final_user_message')
             
             # Extract question type from reasoning
             question_type = reasoning.get('question_type', 'unknown')
@@ -192,6 +200,14 @@ class SmallWhisperClient:
                     'sql': None,
                     'chart': None,
                     'message': reasoning.get('message', 'Question does not require data analysis'),
+                    'preprocessing_low': preprocessing_low,
+                    'preprocessing_high': preprocessing_high,
+                    'pipeline_trace': pipeline_trace,
+                    'overall_status': overall_status,
+                    'root_cause': root_cause,
+                    'dagster_runtime': dagster_runtime,
+                    'final_route': final_route,
+                    'final_user_message': final_user_message,
                     'raw_response': result
                 }
             
@@ -210,6 +226,14 @@ class SmallWhisperClient:
                     'chart': None,
                     'message': error_msg,
                     'analytical_error': reasoning.get('analytical_error'),
+                    'preprocessing_low': preprocessing_low,
+                    'preprocessing_high': preprocessing_high,
+                    'pipeline_trace': pipeline_trace,
+                    'overall_status': overall_status,
+                    'root_cause': root_cause,
+                    'dagster_runtime': dagster_runtime,
+                    'final_route': final_route,
+                    'final_user_message': final_user_message,
                     'raw_response': result
                 }
             
@@ -233,6 +257,14 @@ class SmallWhisperClient:
                 'sql': sql,
                 'chart': chart,
                 'confidence': confidence,
+                'preprocessing_low': preprocessing_low,
+                'preprocessing_high': preprocessing_high,
+                'pipeline_trace': pipeline_trace,
+                'overall_status': overall_status,
+                'root_cause': root_cause,
+                'dagster_runtime': dagster_runtime,
+                'final_route': final_route,
+                'final_user_message': final_user_message,
                 'raw_response': result
             }
         

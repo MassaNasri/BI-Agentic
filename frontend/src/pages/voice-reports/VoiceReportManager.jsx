@@ -113,7 +113,21 @@ function VoiceReportManager() {
       return
     }
 
-    if (response.data.requires_sql === false || !response.data.sql) {
+    const questionType = String(response.data.question_type || '').trim().toLowerCase()
+    const nonAnalyticalTypes = new Set([
+      'conversational',
+      'informational',
+      'invalid_input',
+      'numeric_only_input',
+      'noise_input',
+      'empty_input',
+      'transcription_failure',
+      'no_speech_detected'
+    ])
+    const isExplicitNonAnalytical = nonAnalyticalTypes.has(questionType)
+    const hasSql = Boolean(response.data.sql && String(response.data.sql).trim())
+
+    if (isExplicitNonAnalytical) {
       toast.success(
         sourceMode === 'voice'
           ? 'Audio transcribed! This appears to be a conversational question and does not require data analysis.'
@@ -126,6 +140,26 @@ function VoiceReportManager() {
         intent: response.data.intent,
         status: 'uploaded',
         message: response.data.message
+      })
+      setSelectedFile(null)
+      setTextInput('')
+      await loadReports()
+      return
+    }
+
+    if (!hasSql) {
+      const fallbackMessage =
+        response.data.message ||
+        response.data.error ||
+        'The request could not be processed into SQL. Please try rephrasing the question.'
+      toast.error(fallbackMessage)
+      setCurrentReport({
+        id: reportId,
+        transcription: response.data.transcription,
+        sql: null,
+        intent: response.data.intent,
+        status: response.data.status || 'failed',
+        message: fallbackMessage
       })
       setSelectedFile(null)
       setTextInput('')

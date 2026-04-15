@@ -1,0 +1,46 @@
+import time
+from typing import Any
+
+from dagster import AssetExecutionContext, asset
+
+from dagster_pipeline import ASSET_RETRY_POLICY, pipeline_failure_hook
+from reasoning_app.intent_classification_task import run_intent_classification
+from shared.pipeline_trace import utc_now_iso
+
+
+@asset(
+    group_name="ai_pipeline",
+    retry_policy=ASSET_RETRY_POLICY,
+    hooks={pipeline_failure_hook},
+)
+def intent_classification_asset(
+    context: AssetExecutionContext,
+    pipeline_request_asset: dict[str, Any],
+    transcription_asset: dict[str, Any],
+    preprocessing_low_asset: dict[str, Any],
+) -> dict[str, Any]:
+    stage_started_at = utc_now_iso()
+    stage_started_perf = time.perf_counter()
+    result = run_intent_classification(
+        cleaned_text=str(preprocessing_low_asset.get("cleaned_text", "")),
+        raw_text=str(transcription_asset.get("text", pipeline_request_asset.get("text", "")) or ""),
+        source="audio" if bool(pipeline_request_asset.get("audio_path")) else "text",
+        transcription_status=str(transcription_asset.get("status", "") or ""),
+    )
+    result.setdefault("started_at", stage_started_at)
+    result.setdefault("finished_at", utc_now_iso())
+    if not result.get("duration_ms"):
+        result["duration_ms"] = int((time.perf_counter() - stage_started_perf) * 1000)
+    result.setdefault("attempts", [])
+    result["attempts_count"] = len(result.get("attempts", []))
+    result.setdefault("warnings", [])
+    result.setdefault("errors", [])
+    result.setdefault("debug_metadata", {})
+    result["debug_metadata"]["cleaned_text_chars"] = len(str(preprocessing_low_asset.get("cleaned_text", "")))
+    context.log.info(
+        "Intent classification completed | status=%s is_analytical=%s classification=%s",
+        result.get("status"),
+        result.get("is_analytical"),
+        result.get("classification"),
+    )
+    return result

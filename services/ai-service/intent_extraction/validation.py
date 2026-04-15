@@ -1,0 +1,349 @@
+from __future__ import annotations
+
+from typing import Any
+
+from intent_extraction.error_handler import IntentExtractionSchemaMismatchError
+from intent_extraction.schemas import StructuredIntent
+from shared.schema_utils import is_numeric_type, unqualify_table_name
+
+
+_VALID_AGGREGATIONS = {"SUM", "AVG", "COUNT", "MIN", "MAX"}
+_VALID_FILTER_OPERATORS = {"=", "!=", ">", "<", ">=", "<=", "IN", "LIKE", "BETWEEN"}
+
+
+def _resolve_table_name(
+    *,
+    requested_table: str,
+    schema: dict[str, list[dict[str, Any]]],
+    referenced_columns: set[str],
+) -> str:
+    if requested_table and requested_table in schema:
+        return requested_table
+
+    if requested_table:
+        requested_unqualified = unqualify_table_name(requested_table).lower()
+        matches = [
+            table_name
+            for table_name in schema.keys()
+            if unqualify_table_name(table_name).lower() == requested_unqualified
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise IntentExtractionSchemaMismatchError(
+                f"Ambiguous table '{requested_table}'. Matches: {', '.join(matches)}"
+            )
+
+    if not schema:
+        raise IntentExtractionSchemaMismatchError("Schema is empty.")
+
+    if referenced_columns:
+        best_table = ""
+        best_score = -1
+        for table_name, columns in schema.items():
+            column_names = {str(col.get("name", "")).strip() for col in columns}
+            score = len(referenced_columns & column_names)
+            if score > best_score:
+                best_score = score
+                best_table = table_name
+        if best_table:
+            return best_table
+
+    # Deterministic fallback so routing can continue when table is omitted by model.
+    return sorted(schema.keys())[0]
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _pick_default_metric(table_columns: list[dict[str, Any]]) -> str:
+    for column in table_columns:
+        col_name = str(column.get("name", "")).strip()
+        if not col_name:
+            continue
+        if is_numeric_type(str(column.get("type", ""))):
+            return col_name
+    return "*"
+
+
+def _normalize_limit_value(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            parsed = int(raw)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _derive_operations(
+    *,
+    metric_specs: list[dict[str, Any]],
+    dimensions: list[str],
+    filters: list[dict[str, Any]],
+    order_by: list[dict[str, str]],
+    limit: int | None,
+) -> list[str]:
+    operations: list[str] = ["projection"]
+    if any(spec.get("aggregation") for spec in metric_specs):
+        operations.append("aggregation")
+    if dimensions:
+        operations.append("grouping")
+    if filters:
+        operations.append("filtering")
+    if order_by:
+        operations.append("ranking")
+    if limit:
+        operations.append("limiting")
+    if dimensions and len(metric_specs) > 1:
+        operations.append("comparison")
+    return operations
+
+
+def _derive_primary_intent(operations: list[str]) -> str:
+    if "ranking" in operations:
+        return "ranking"
+    if "aggregation" in operations and "grouping" in operations:
+        return "aggregation"
+    if "filtering" in operations:
+        return "filtering"
+    return "projection"
+
+
+def validate_structured_intent(
+    *,
+    intent: StructuredIntent,
+    schema: dict[str, list[dict[str, Any]]],
+) -> StructuredIntent:
+    metrics = [str(item).strip() for item in intent.get("metrics", []) if str(item).strip()]
+    dimensions = [str(item).strip() for item in intent.get("dimensions", []) if str(item).strip()]
+    filters = intent.get("filters", []) or []
+    metric_specs = intent.get("metric_specs", []) or []
+    order_by = intent.get("order_by", []) or []
+    limit = _normalize_limit_value(intent.get("limit"))
+    target_column = str(intent.get("target_column", "")).strip()
+    requested_table = str(intent.get("table", "")).strip()
+
+    referenced_columns = set(metrics + dimensions)
+    if target_column:
+        referenced_columns.add(target_column)
+    for flt in filters:
+        if isinstance(flt, dict):
+            column = str(flt.get("column", "")).strip()
+            if column:
+                referenced_columns.add(column)
+    for metric in metric_specs:
+        if isinstance(metric, dict):
+            column = str(metric.get("column", "")).strip()
+            if column:
+                referenced_columns.add(column)
+    for order_item in order_by:
+        if isinstance(order_item, dict):
+            column = str(order_item.get("column", "")).strip()
+            if column:
+                referenced_columns.add(column)
+
+    resolved_table = _resolve_table_name(
+        requested_table=requested_table,
+        schema=schema,
+        referenced_columns=referenced_columns,
+    )
+    table_columns = schema.get(resolved_table, [])
+    if not table_columns:
+        raise IntentExtractionSchemaMismatchError(
+            f"Table '{resolved_table}' not found in schema."
+        )
+
+    column_map = {str(col.get("name", "")).strip(): col for col in table_columns}
+    available_columns = set(column_map.keys())
+
+    unknown_metrics = [metric for metric in metrics if metric != "*" and metric not in available_columns]
+    unknown_dimensions = [dim for dim in dimensions if dim not in available_columns]
+    unknown_filters = [
+        str(flt.get("column", "")).strip()
+        for flt in filters
+        if isinstance(flt, dict)
+        and str(flt.get("column", "")).strip()
+        and str(flt.get("column", "")).strip() not in available_columns
+    ]
+    unknown_metric_specs = [
+        str(metric.get("column", "")).strip()
+        for metric in metric_specs
+        if isinstance(metric, dict)
+        and str(metric.get("column", "")).strip()
+        and str(metric.get("column", "")).strip() != "*"
+        and str(metric.get("column", "")).strip() not in available_columns
+    ]
+
+    if unknown_metrics or unknown_dimensions or unknown_filters or unknown_metric_specs:
+        unknown_chunks: list[str] = []
+        if unknown_metrics:
+            unknown_chunks.append(f"metrics={unknown_metrics}")
+        if unknown_dimensions:
+            unknown_chunks.append(f"dimensions={unknown_dimensions}")
+        if unknown_filters:
+            unknown_chunks.append(f"filters={unknown_filters}")
+        if unknown_metric_specs:
+            unknown_chunks.append(f"metric_specs={unknown_metric_specs}")
+        raise IntentExtractionSchemaMismatchError(
+            "Schema mismatch for extracted intent columns: " + ", ".join(unknown_chunks)
+        )
+
+    if target_column and target_column != "*" and target_column not in available_columns:
+        raise IntentExtractionSchemaMismatchError(
+            f"Target column '{target_column}' does not exist in table '{resolved_table}'."
+        )
+
+    if not metrics and target_column:
+        metrics = [target_column]
+    if not metrics:
+        metrics = [_pick_default_metric(table_columns)]
+
+    metrics = _dedupe_preserve_order(metrics)
+    dimensions = _dedupe_preserve_order(dimensions)
+
+    aggregation = str(intent.get("aggregation", "")).strip().upper()
+    if aggregation not in _VALID_AGGREGATIONS:
+        aggregation = ""
+
+    primary_metric = metrics[0] if metrics else ""
+
+    normalized_filters: list[dict[str, Any]] = []
+    for flt in filters:
+        if not isinstance(flt, dict):
+            continue
+        column = str(flt.get("column", "")).strip()
+        if not column:
+            continue
+        operator = str(flt.get("operator", "=")).strip().upper() or "="
+        if operator not in _VALID_FILTER_OPERATORS:
+            operator = "="
+        normalized_filters.append(
+            {
+                "column": column,
+                "operator": operator,
+                "value": flt.get("value"),
+            }
+        )
+
+    normalized_metric_specs: list[dict[str, Any]] = []
+    for metric in metric_specs:
+        if not isinstance(metric, dict):
+            continue
+        column = str(metric.get("column", "")).strip()
+        if not column:
+            continue
+        aggregation_hint = str(metric.get("aggregation", "")).strip().upper() or None
+        if aggregation_hint and aggregation_hint not in _VALID_AGGREGATIONS:
+            aggregation_hint = None
+        alias = metric.get("alias")
+        alias_str = str(alias).strip() if isinstance(alias, str) and alias.strip() else None
+        normalized_metric_specs.append(
+            {
+                "column": column,
+                "aggregation": aggregation_hint,
+                "alias": alias_str,
+            }
+        )
+
+    if not aggregation and normalized_metric_specs:
+        inferred_aggregations = [
+            str(spec.get("aggregation", "")).strip().upper()
+            for spec in normalized_metric_specs
+            if str(spec.get("aggregation", "")).strip().upper() in _VALID_AGGREGATIONS
+        ]
+        if len(set(inferred_aggregations)) == 1 and inferred_aggregations:
+            aggregation = inferred_aggregations[0]
+    if not aggregation:
+        aggregation = "SUM"
+    if primary_metric == "*":
+        aggregation = "COUNT"
+    elif primary_metric:
+        metric_type = str(column_map[primary_metric].get("type", ""))
+        if aggregation in {"SUM", "AVG", "MIN", "MAX"} and not is_numeric_type(metric_type):
+            aggregation = "COUNT"
+
+    normalized_order_by: list[dict[str, str]] = []
+    for order_item in order_by:
+        if not isinstance(order_item, dict):
+            continue
+        column = str(order_item.get("column", "")).strip()
+        if not column:
+            continue
+        direction = str(order_item.get("direction", "ASC")).strip().upper() or "ASC"
+        if direction not in {"ASC", "DESC"}:
+            direction = "ASC"
+        normalized_order_by.append({"column": column, "direction": direction})
+
+    normalized_limit = limit
+
+    normalized_target = target_column or primary_metric
+
+    ranking_payload = intent.get("ranking") if isinstance(intent.get("ranking"), dict) else {}
+    ranking_direction = str(ranking_payload.get("direction", "")).strip().upper()
+    if ranking_direction not in {"ASC", "DESC"}:
+        ranking_direction = ""
+
+    if ranking_direction and not normalized_order_by:
+        first_order_column = (
+            (normalized_metric_specs[0].get("alias") if normalized_metric_specs else None)
+            or (normalized_metric_specs[0].get("column") if normalized_metric_specs else None)
+            or (metrics[0] if metrics else "")
+        )
+        if isinstance(first_order_column, str) and first_order_column.strip():
+            normalized_order_by = [{"column": first_order_column.strip(), "direction": ranking_direction}]
+    if ranking_direction and normalized_limit is None:
+        normalized_limit = 1
+    if normalized_limit is not None and not normalized_order_by and metrics:
+        normalized_order_by = [{"column": metrics[0], "direction": "DESC"}]
+
+    operations = intent.get("operations") if isinstance(intent.get("operations"), list) else []
+    if not operations:
+        operations = _derive_operations(
+            metric_specs=normalized_metric_specs,
+            dimensions=dimensions,
+            filters=normalized_filters,
+            order_by=normalized_order_by,
+            limit=normalized_limit,
+        )
+    normalized_intent_name = str(intent.get("intent", "")).strip()
+    if not normalized_intent_name:
+        normalized_intent_name = _derive_primary_intent(operations)
+    normalized_ranking = {
+        "direction": ranking_direction or (normalized_order_by[0]["direction"] if normalized_order_by else None),
+        "requested": bool(ranking_direction or normalized_order_by),
+        "source": ranking_payload.get("source", "validation"),
+    }
+
+    return {
+        "intent_type": intent["intent_type"],
+        "intent": normalized_intent_name,
+        "metrics": metrics,
+        "metric_specs": normalized_metric_specs,
+        "dimensions": dimensions,
+        "filters": normalized_filters,
+        "time_range": str(intent.get("time_range", "all_time")).strip() or "all_time",
+        "aggregation": aggregation,
+        "target_column": normalized_target,
+        "table": resolved_table,
+        "order_by": normalized_order_by,
+        "limit": normalized_limit,
+        "ranking": normalized_ranking,
+        "operations": operations,
+        "ambiguities": intent.get("ambiguities") if isinstance(intent.get("ambiguities"), list) else [],
+    }

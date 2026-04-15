@@ -6,12 +6,119 @@ Calls the AI transcription service as a black box.
 
 import logging
 import os
+import re
 from typing import Dict
 
 import requests
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+_EXPLICIT_NON_ANALYTICAL_TYPES = {
+    "conversational",
+    "informational",
+    "invalid_input",
+    "numeric_only_input",
+    "noise_input",
+    "empty_input",
+    "transcription_failure",
+    "no_speech_detected",
+}
+_ANALYTICAL_TYPES = {"analytical", "forecast"}
+_ANALYTICAL_FALLBACK_PATTERNS = (
+    r"\b(show|list|give|display)\b.*\b(total|sum|average|avg|count|max|min|distribution|breakdown|population|revenue|profit|margin)\b",
+    r"\b(total|sum|average|avg|count|max|min|distribution|breakdown)\b.*\b(by|per|across|for each|in each)\b",
+    r"\b(top|bottom)\s+\d+\b.*\bby\b",
+    r"\bhow many\b.*\b(by|per|across|for each|in each)\b",
+)
+_CONVERSATIONAL_PATTERNS = (
+    r"\bhello\b",
+    r"\bhi\b",
+    r"\bhey\b",
+    r"\bhow are you\b",
+    r"\bthank(s| you)\b",
+)
+
+
+def _normalize_question_type(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"information", "informational", "info", "non_analytical", "non-analytical"}:
+        return "conversational"
+    return normalized or "unknown"
+
+
+def _looks_analytical_question(question: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(question or "").lower()).strip()
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in _ANALYTICAL_FALLBACK_PATTERNS)
+
+
+def _looks_conversational_question(question: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(question or "").lower()).strip()
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in _CONVERSATIONAL_PATTERNS)
+
+
+def _extract_failed_text_classification(llm_payload: dict, question: str) -> tuple[str, str, bool]:
+    details = llm_payload.get("details", {}) if isinstance(llm_payload.get("details"), dict) else {}
+    trace = llm_payload.get("pipeline_trace", {}) if isinstance(llm_payload.get("pipeline_trace"), dict) else {}
+    trace_input = trace.get("input_validation", {}) if isinstance(trace.get("input_validation"), dict) else {}
+    trace_final = trace_input.get("final_output", {}) if isinstance(trace_input.get("final_output"), dict) else {}
+    details_intent = details.get("intent", {}) if isinstance(details.get("intent"), dict) else {}
+    details_trace = details.get("pipeline_trace", {}) if isinstance(details.get("pipeline_trace"), dict) else {}
+    details_trace_input = (
+        details_trace.get("input_validation", {})
+        if isinstance(details_trace.get("input_validation"), dict)
+        else {}
+    )
+    details_trace_final = (
+        details_trace_input.get("final_output", {})
+        if isinstance(details_trace_input.get("final_output"), dict)
+        else {}
+    )
+    overall_status = llm_payload.get("overall_status", {}) if isinstance(llm_payload.get("overall_status"), dict) else {}
+    details_overall_status = details.get("overall_status", {}) if isinstance(details.get("overall_status"), dict) else {}
+
+    classification_candidates = [
+        llm_payload.get("question_type"),
+        details_intent.get("classification"),
+        details_intent.get("question_type"),
+        trace_final.get("classification"),
+        trace_final.get("question_type"),
+        details_trace_final.get("classification"),
+        details_trace_final.get("question_type"),
+        llm_payload.get("final_route"),
+        overall_status.get("final_route"),
+        details.get("final_route"),
+        details_overall_status.get("final_route"),
+    ]
+
+    classification = "unknown"
+    for candidate in classification_candidates:
+        normalized = _normalize_question_type(candidate)
+        if normalized in _ANALYTICAL_TYPES or normalized in _EXPLICIT_NON_ANALYTICAL_TYPES:
+            classification = normalized
+            break
+
+    if classification == "unknown":
+        if _looks_analytical_question(question):
+            classification = "analytical"
+        elif _looks_conversational_question(question):
+            classification = "conversational"
+
+    classification_reason = (
+        details_intent.get("classification_reason")
+        or trace_final.get("reason")
+        or details_trace_final.get("reason")
+        or llm_payload.get("message")
+        or details.get("message")
+        or "Pipeline returned a non-success response."
+    )
+    needs_sql = classification in _ANALYTICAL_TYPES
+    return classification, str(classification_reason), bool(needs_sql)
 
 
 class SmallWhisperClient:
@@ -70,7 +177,7 @@ class SmallWhisperClient:
         filename = os.path.basename(audio_file)
         return {"audio": (filename, file_handle, "audio/wav")}, file_handle
 
-    def process_audio(self, audio_file) -> Dict:
+    def process_audio(self, audio_file, user_id: str | None = None) -> Dict:
         logger.info("Starting Small Whisper request endpoint=%s", self.transcribe_endpoint)
 
         if not self.check_health():
@@ -86,9 +193,14 @@ class SmallWhisperClient:
             file_to_close = None
             try:
                 files, file_to_close = self._prepare_files(audio_file)
+                form_data = {}
+                if user_id is not None and str(user_id).strip():
+                    form_data["user_id"] = str(user_id).strip()
+
                 response = requests.post(
                     self.transcribe_endpoint,
                     files=files,
+                    data=form_data or None,
                     timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
                 )
 
@@ -129,11 +241,25 @@ class SmallWhisperClient:
                 text = result.get("text", "")
                 reasoning = result.get("reasoning", {})
                 llm_data = result.get("llm")
+                preprocessing_low = result.get("preprocessing_low")
+                preprocessing_high = result.get("preprocessing_high")
+                pipeline_trace = result.get("pipeline_trace")
+                overall_status = result.get("overall_status")
+                root_cause = result.get("root_cause")
+                dagster_runtime = result.get("dagster_runtime")
+                final_route = result.get("final_route")
+                final_user_message = result.get("final_user_message")
 
-                question_type = reasoning.get("question_type", "unknown")
-                needs_sql = reasoning.get("needs_sql", False)
+                question_type = _normalize_question_type(reasoning.get("question_type", "unknown"))
+                if question_type == "unknown":
+                    if _looks_analytical_question(text):
+                        question_type = "analytical"
+                    elif _looks_conversational_question(text):
+                        question_type = "conversational"
+                needs_sql = bool(reasoning.get("needs_sql", False) or question_type in _ANALYTICAL_TYPES)
+                is_explicit_non_analytical = question_type in _EXPLICIT_NON_ANALYTICAL_TYPES
 
-                if not needs_sql or question_type != "analytical":
+                if is_explicit_non_analytical:
                     return {
                         "success": True,
                         "text": text,
@@ -145,6 +271,39 @@ class SmallWhisperClient:
                         "message": reasoning.get(
                             "message", "Question does not require data analysis"
                         ),
+                        "preprocessing_low": preprocessing_low,
+                        "preprocessing_high": preprocessing_high,
+                        "pipeline_trace": pipeline_trace,
+                        "overall_status": overall_status,
+                        "root_cause": root_cause,
+                        "dagster_runtime": dagster_runtime,
+                        "final_route": final_route,
+                        "final_user_message": final_user_message,
+                        "raw_response": result,
+                    }
+
+                if question_type not in _ANALYTICAL_TYPES and not needs_sql:
+                    return {
+                        "success": True,
+                        "text": text,
+                        "reasoning": reasoning,
+                        "question_type": question_type,
+                        "intent": None,
+                        "sql": None,
+                        "chart": None,
+                        "message": (
+                            str(final_user_message or "").strip()
+                            or reasoning.get("message")
+                            or "Pipeline could not confidently classify the request."
+                        ),
+                        "preprocessing_low": preprocessing_low,
+                        "preprocessing_high": preprocessing_high,
+                        "pipeline_trace": pipeline_trace,
+                        "overall_status": overall_status,
+                        "root_cause": root_cause,
+                        "dagster_runtime": dagster_runtime,
+                        "final_route": final_route,
+                        "final_user_message": final_user_message,
                         "raw_response": result,
                     }
 
@@ -160,6 +319,14 @@ class SmallWhisperClient:
                         "chart": None,
                         "message": message,
                         "analytical_error": reasoning.get("analytical_error"),
+                        "preprocessing_low": preprocessing_low,
+                        "preprocessing_high": preprocessing_high,
+                        "pipeline_trace": pipeline_trace,
+                        "overall_status": overall_status,
+                        "root_cause": root_cause,
+                        "dagster_runtime": dagster_runtime,
+                        "final_route": final_route,
+                        "final_user_message": final_user_message,
                         "raw_response": result,
                     }
 
@@ -170,8 +337,19 @@ class SmallWhisperClient:
                     "question_type": question_type,
                     "intent": llm_data.get("intent"),
                     "sql": llm_data.get("sql"),
+                    "generated_sql": llm_data.get("generated_sql"),
+                    "reviewed_sql": llm_data.get("reviewed_sql"),
+                    "sql_review": llm_data.get("sql_review"),
                     "chart": llm_data.get("chart"),
                     "confidence": llm_data.get("confidence", 0.5),
+                    "preprocessing_low": preprocessing_low,
+                    "preprocessing_high": preprocessing_high,
+                    "pipeline_trace": pipeline_trace,
+                    "overall_status": overall_status,
+                    "root_cause": root_cause,
+                    "dagster_runtime": dagster_runtime,
+                    "final_route": final_route,
+                    "final_user_message": final_user_message,
                     "raw_response": result,
                 }
 
@@ -208,17 +386,17 @@ class SmallWhisperClient:
         logger.error(timeout_error)
         return {"success": False, "error": timeout_error}
 
-    def process_text(self, text: str) -> Dict:
+    def process_text(self, text: str, user_id: str | None = None) -> Dict:
         """
-        Process text directly through the post-transcription AI stages.
-
-        Flow: reasoning/classification -> intent+SQL generation.
+        Process text directly through the full AI pipeline endpoint.
+        This ensures analyst-visible traceability for all classes, including
+        invalid/conversational/non-analytical requests.
         """
         question = (text or "").strip()
         if not question:
             return {"success": False, "error": "Text is required"}
 
-        logger.info("Starting text pipeline endpoint=%s", self.reasoning_endpoint)
+        logger.info("Starting text pipeline endpoint=%s", self.intent_endpoint)
 
         if not self.check_health():
             error_msg = (
@@ -229,128 +407,73 @@ class SmallWhisperClient:
             return {"success": False, "error": error_msg}
 
         try:
-            reasoning_response = requests.post(
-                self.reasoning_endpoint,
-                json={"text": question},
-                timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
-            )
-            if reasoning_response.status_code != 200:
-                error_detail = reasoning_response.text[:500]
-                logger.error(
-                    "Reasoning endpoint returned non-200 status=%s body=%s",
-                    reasoning_response.status_code,
-                    error_detail,
-                )
-                return {
-                    "success": False,
-                    "error": f"Reasoning endpoint returned {reasoning_response.status_code}: {error_detail}",
-                }
-
-            try:
-                reasoning_payload = reasoning_response.json()
-            except ValueError:
-                return {
-                    "success": False,
-                    "error": "Reasoning endpoint returned invalid JSON response",
-                }
-
-            if not isinstance(reasoning_payload, dict):
-                return {
-                    "success": False,
-                    "error": "Reasoning endpoint returned invalid response payload",
-                }
-
-            question_type = reasoning_payload.get("question_type", "unknown")
-            needs_sql = bool(reasoning_payload.get("needs_sql", False))
-            reasoning = {
-                "question_type": question_type,
-                "needs_sql": needs_sql,
-                "needs_chart": bool(reasoning_payload.get("needs_chart", False)),
-            }
-
-            if not needs_sql or question_type != "analytical":
-                return {
-                    "success": True,
-                    "text": question,
-                    "reasoning": reasoning,
-                    "question_type": question_type,
-                    "intent": None,
-                    "sql": None,
-                    "chart": None,
-                    "message": "Question does not require data analysis",
-                    "raw_response": {"reasoning": reasoning_payload},
-                }
+            llm_payload = {"question": question}
+            if user_id is not None and str(user_id).strip():
+                llm_payload["user_id"] = str(user_id).strip()
 
             llm_response = requests.post(
                 self.intent_endpoint,
-                json={"question": question},
+                json=llm_payload,
                 timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
             )
-
-            if llm_response.status_code != 200:
-                error_detail = llm_response.text[:500]
-                logger.error(
-                    "Intent endpoint returned non-200 status=%s body=%s",
-                    llm_response.status_code,
-                    error_detail,
-                )
-                return {
-                    "success": True,
-                    "text": question,
-                    "reasoning": reasoning,
-                    "question_type": question_type,
-                    "intent": None,
-                    "sql": None,
-                    "chart": None,
-                    "message": "Analytical stage failed",
-                    "analytical_error": {"status": llm_response.status_code, "details": error_detail},
-                    "raw_response": {"reasoning": reasoning_payload},
-                }
 
             try:
                 llm_payload = llm_response.json()
             except ValueError:
                 return {
-                    "success": True,
-                    "text": question,
-                    "reasoning": reasoning,
-                    "question_type": question_type,
-                    "intent": None,
-                    "sql": None,
-                    "chart": None,
-                    "message": "Analytical stage failed",
-                    "analytical_error": {"details": "Invalid JSON from intent endpoint"},
-                    "raw_response": {"reasoning": reasoning_payload},
+                    "success": False,
+                    "error": "Intent endpoint returned invalid JSON response",
                 }
 
             if not isinstance(llm_payload, dict):
                 return {
-                    "success": True,
-                    "text": question,
-                    "reasoning": reasoning,
-                    "question_type": question_type,
-                    "intent": None,
-                    "sql": None,
-                    "chart": None,
-                    "message": "Analytical stage failed",
-                    "analytical_error": {"details": "Invalid payload from intent endpoint"},
-                    "raw_response": {"reasoning": reasoning_payload},
+                    "success": False,
+                    "error": "Intent endpoint returned invalid response payload",
                 }
 
-            if llm_payload.get("error"):
+            if llm_response.status_code != 200 or llm_payload.get("error"):
+                classification, classification_reason, needs_sql = _extract_failed_text_classification(
+                    llm_payload=llm_payload,
+                    question=question,
+                )
+                reasoning = {
+                    "question_type": classification,
+                    "needs_sql": bool(needs_sql),
+                    "needs_chart": bool(needs_sql),
+                    "message": classification_reason or "Question does not require data analysis",
+                }
                 return {
                     "success": True,
                     "text": question,
                     "reasoning": reasoning,
-                    "question_type": question_type,
+                    "question_type": classification,
                     "intent": None,
                     "sql": None,
                     "chart": None,
-                    "message": llm_payload.get("message", "Analytical stage failed"),
+                    "message": reasoning["message"],
                     "analytical_error": llm_payload,
-                    "raw_response": {"reasoning": reasoning_payload, "llm": llm_payload},
+                    "preprocessing_low": llm_payload.get("preprocessing_low"),
+                    "preprocessing_high": llm_payload.get("preprocessing_high"),
+                    "pipeline_trace": llm_payload.get("pipeline_trace"),
+                    "overall_status": llm_payload.get("overall_status"),
+                    "root_cause": llm_payload.get("root_cause"),
+                    "dagster_runtime": llm_payload.get("dagster_runtime"),
+                    "final_route": llm_payload.get("final_route"),
+                    "final_user_message": llm_payload.get("final_user_message"),
+                    "raw_response": {"llm": llm_payload},
                 }
 
+            question_type = "analytical" if llm_payload.get("sql") else _normalize_question_type(
+                llm_payload.get("question_type")
+            )
+            if question_type == "unknown":
+                question_type = "analytical" if _looks_analytical_question(question) else "conversational"
+            reasoning = {
+                "question_type": question_type,
+                "needs_sql": bool(question_type in _ANALYTICAL_TYPES),
+                "needs_chart": bool(question_type in _ANALYTICAL_TYPES),
+                "message": llm_payload.get("final_user_message", "Analytical request processed."),
+            }
             return {
                 "success": True,
                 "text": question,
@@ -358,9 +481,20 @@ class SmallWhisperClient:
                 "question_type": question_type,
                 "intent": llm_payload.get("intent"),
                 "sql": llm_payload.get("sql"),
+                "generated_sql": llm_payload.get("generated_sql"),
+                "reviewed_sql": llm_payload.get("reviewed_sql"),
+                "sql_review": llm_payload.get("sql_review"),
                 "chart": llm_payload.get("chart"),
                 "confidence": llm_payload.get("confidence", 0.5),
-                "raw_response": {"reasoning": reasoning_payload, "llm": llm_payload},
+                "preprocessing_low": llm_payload.get("preprocessing_low"),
+                "preprocessing_high": llm_payload.get("preprocessing_high"),
+                "pipeline_trace": llm_payload.get("pipeline_trace"),
+                "overall_status": llm_payload.get("overall_status"),
+                "root_cause": llm_payload.get("root_cause"),
+                "dagster_runtime": llm_payload.get("dagster_runtime"),
+                "final_route": llm_payload.get("final_route"),
+                "final_user_message": llm_payload.get("final_user_message"),
+                "raw_response": {"llm": llm_payload},
             }
 
         except requests.exceptions.Timeout as exc:

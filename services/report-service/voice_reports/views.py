@@ -1,4 +1,4 @@
-"""
+﻿"""
 Voice Reports Views
 
 API endpoints for voice-driven BI system.
@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 import logging
@@ -30,6 +31,8 @@ from .services.clickhouse_executor import sanitize_query_results
 from users.permissions import IsManager, IsAnalyst, IsExecutive
 
 logger = logging.getLogger(__name__)
+LOW_CHANGE_TYPES = {"removed_noise", "normalized", "reduced_repetition", "removed_filler_words", "removed_noise_tags", "removed_noise_tokens", "normalized_repeated_characters", "normalized_punctuation", "normalized_whitespace", "removed_control_chars", "removed_malformed_symbols", "normalized_control_chars"}
+HIGH_ADJUSTMENT_TYPES = {"derived_field", "mapped_column"}
 
 
 def normalize_chart_payload(chart_payload):
@@ -89,6 +92,338 @@ def get_report_embed_url(report, metabase_service=None):
         metabase.last_error
     )
     return ""
+
+
+def build_default_preprocessing_low(original_text: str = "") -> dict:
+    normalized_text = str(original_text or "")
+    return {
+        "original_text": normalized_text,
+        "cleaned_text": normalized_text,
+        "changes": [],
+    }
+
+
+def build_default_preprocessing_high(corrected_query: str = "") -> dict:
+    return {
+        "corrected_query": str(corrected_query or ""),
+        "term_corrections": [],
+        "schema_used": {"tables": [], "columns": []},
+        "schema_adjustments": [],
+        "unresolved_terms": [],
+        "unsupported_terms": [],
+        "term_resolutions": [],
+        "schema_validation_status": "unknown",
+        "candidate_columns": {},
+        "candidate_tables": [],
+        "selected_table": "",
+        "selected_columns": [],
+    }
+
+
+def build_default_pipeline_trace() -> dict:
+    return {
+        "request_metadata": {},
+        "overall_status": {"status": "unknown"},
+        "root_cause": {
+            "root_cause_category": "unknown",
+            "root_cause_detail": "",
+            "analyst_recommended_fix": "",
+        },
+    }
+
+
+def normalize_pipeline_trace(payload) -> dict:
+    fallback = build_default_pipeline_trace()
+    if not isinstance(payload, dict):
+        return fallback
+    normalized = dict(payload)
+    normalized.setdefault("request_metadata", {})
+    normalized.setdefault("overall_status", {"status": "unknown"})
+    normalized.setdefault(
+        "root_cause",
+        {
+            "root_cause_category": "unknown",
+            "root_cause_detail": "",
+            "analyst_recommended_fix": "",
+        },
+    )
+    return normalized
+
+
+def _flatten_schema_columns(columns_payload) -> list[str]:
+    flattened: list[str] = []
+    if isinstance(columns_payload, dict):
+        for table_name, columns in columns_payload.items():
+            normalized_table = str(table_name or "").strip()
+            if not isinstance(columns, list):
+                continue
+            for column in columns:
+                if isinstance(column, dict):
+                    column_name = str(column.get("name", "")).strip()
+                else:
+                    column_name = str(column or "").strip()
+                if not column_name:
+                    continue
+                if normalized_table:
+                    flattened.append(f"{normalized_table}.{column_name}")
+                else:
+                    flattened.append(column_name)
+        return flattened
+    if isinstance(columns_payload, list):
+        return [str(column) for column in columns_payload if str(column or "").strip()]
+    return flattened
+
+
+def _dedupe_non_empty(values) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(values, list):
+        return deduped
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized:
+            continue
+        signature = normalized.lower()
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(normalized)
+    return deduped
+
+
+def _extract_term_corrections_from_mappings(mappings) -> list[dict]:
+    corrections: list[dict] = []
+    if not isinstance(mappings, list):
+        return corrections
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            continue
+        status = str(mapping.get("status", "")).strip().lower()
+        if status not in {"mapped", "derivable"}:
+            continue
+        requested = str(mapping.get("requested", "")).strip()
+        matched_column = str(mapping.get("matched_column", "")).strip()
+        matched_table = str(mapping.get("matched_table", "")).strip()
+        if not requested or not matched_column:
+            continue
+        corrections.append(
+            {
+                "original": requested,
+                "corrected": matched_column,
+                "matched_column": f"{matched_table}.{matched_column}" if matched_table else matched_column,
+            }
+        )
+    return corrections
+
+
+def _extract_schema_adjustments_from_mappings(mappings) -> list[dict]:
+    adjustments: list[dict] = []
+    if not isinstance(mappings, list):
+        return adjustments
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            continue
+        status = str(mapping.get("status", "")).strip().lower()
+        requested = str(mapping.get("requested", "")).strip()
+        matched_column = str(mapping.get("matched_column", "")).strip()
+        matched_table = str(mapping.get("matched_table", "")).strip()
+        if status == "mapped" and requested and matched_column:
+            fully_qualified = f"{matched_table}.{matched_column}" if matched_table else matched_column
+            adjustments.append(
+                {
+                    "type": "mapped_column",
+                    "description": f"Mapped '{requested}' to '{fully_qualified}'.",
+                }
+            )
+        elif status == "derivable" and requested and matched_column:
+            fully_qualified = f"{matched_table}.{matched_column}" if matched_table else matched_column
+            adjustments.append(
+                {
+                    "type": "derived_field",
+                    "description": f"Derived '{requested}' from '{fully_qualified}'.",
+                }
+            )
+    return adjustments
+
+
+def _extract_schema_usage_from_mappings(mappings) -> tuple[list[str], list[str]]:
+    tables: list[str] = []
+    columns: list[str] = []
+    if not isinstance(mappings, list):
+        return tables, columns
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            continue
+        status = str(mapping.get("status", "")).strip().lower()
+        if status not in {"exact", "mapped", "derivable"}:
+            continue
+        matched_table = str(mapping.get("matched_table", "")).strip()
+        matched_column = str(mapping.get("matched_column", "")).strip()
+        if matched_table:
+            tables.append(matched_table)
+        if matched_column:
+            columns.append(f"{matched_table}.{matched_column}" if matched_table else matched_column)
+    return _dedupe_non_empty(tables), _dedupe_non_empty(columns)
+
+
+def normalize_preprocessing_low(payload, fallback_text: str = "") -> dict:
+    fallback = build_default_preprocessing_low(fallback_text)
+    if not isinstance(payload, dict):
+        return fallback
+
+    original_text = str(payload.get("original_text") or fallback_text or "").strip()
+    cleaned_text = str(payload.get("cleaned_text") or original_text).strip()
+    raw_changes = payload.get("changes", [])
+    if not isinstance(raw_changes, list):
+        raw_changes = []
+    if not raw_changes:
+        raw_changes = payload.get("detected_changes", [])
+    normalized_changes = []
+    if isinstance(raw_changes, list):
+        for change in raw_changes:
+            if not isinstance(change, dict):
+                continue
+            change_type = str(change.get("type", "normalized")).strip().lower()
+            if change_type not in LOW_CHANGE_TYPES:
+                change_type = "normalized"
+            normalized_changes.append(
+                {
+                    "type": change_type,
+                    "before": str(change.get("before", "")).strip(),
+                    "after": str(change.get("after", "")).strip(),
+                }
+            )
+
+    return {
+        "original_text": original_text,
+        "cleaned_text": cleaned_text,
+        "changes": normalized_changes,
+    }
+
+
+def normalize_preprocessing_high(payload, fallback_query: str = "") -> dict:
+    fallback = build_default_preprocessing_high(fallback_query)
+    if not isinstance(payload, dict):
+        return fallback
+
+    corrected_query = str(
+        payload.get("corrected_query")
+        or payload.get("final_query")
+        or fallback_query
+        or ""
+    ).strip()
+    selected_table = str(payload.get("selected_table", "")).strip()
+    selected_columns = _dedupe_non_empty(
+        payload.get("selected_columns", []) if isinstance(payload.get("selected_columns"), list) else []
+    )
+    mappings = payload.get("mappings", []) if isinstance(payload.get("mappings"), list) else []
+
+    term_corrections = []
+    raw_corrections = payload.get("term_corrections", [])
+    if isinstance(raw_corrections, list):
+        for correction in raw_corrections:
+            if not isinstance(correction, dict):
+                continue
+            term_corrections.append(
+                {
+                    "original": str(correction.get("original", "")).strip(),
+                    "corrected": str(correction.get("corrected", "")).strip(),
+                    "matched_column": str(correction.get("matched_column", "")).strip(),
+                }
+            )
+    if not term_corrections and mappings:
+        term_corrections = _extract_term_corrections_from_mappings(mappings)
+
+    raw_schema_used = payload.get("schema_used", {})
+    tables = []
+    columns = []
+    if isinstance(raw_schema_used, dict):
+        raw_tables = raw_schema_used.get("tables", [])
+        if isinstance(raw_tables, list):
+            tables = _dedupe_non_empty(raw_tables)
+        columns = _flatten_schema_columns(raw_schema_used.get("columns", []))
+
+    schema_adjustments = []
+    raw_adjustments = payload.get("schema_adjustments", [])
+    if isinstance(raw_adjustments, list):
+        for adjustment in raw_adjustments:
+            if not isinstance(adjustment, dict):
+                continue
+            adjustment_type = str(adjustment.get("type", "mapped_column")).strip().lower()
+            if adjustment_type not in HIGH_ADJUSTMENT_TYPES:
+                adjustment_type = "mapped_column"
+            schema_adjustments.append(
+                {
+                    "type": adjustment_type,
+                    "description": str(adjustment.get("description", "")).strip(),
+                }
+            )
+    if not schema_adjustments and mappings:
+        schema_adjustments = _extract_schema_adjustments_from_mappings(mappings)
+
+    if not tables and selected_table:
+        tables = [selected_table]
+    if not columns and selected_columns:
+        columns = [
+            f"{selected_table}.{column}" if selected_table else column
+            for column in selected_columns
+        ]
+
+    if not tables or not columns:
+        mapping_tables, mapping_columns = _extract_schema_usage_from_mappings(mappings)
+        if not tables and mapping_tables:
+            tables = mapping_tables
+        if not columns and mapping_columns:
+            columns = mapping_columns
+
+    tables = _dedupe_non_empty(tables)
+    columns = _dedupe_non_empty(columns)
+    if not selected_table and len(tables) == 1:
+        selected_table = tables[0]
+    if not selected_columns and columns:
+        selected_columns = [
+            column.split(".", 1)[1]
+            if selected_table and column.lower().startswith(f"{selected_table.lower()}.")
+            else column.split(".")[-1]
+            for column in columns
+        ]
+        selected_columns = _dedupe_non_empty(selected_columns)
+
+    return {
+        "corrected_query": corrected_query,
+        "term_corrections": term_corrections,
+        "schema_used": {
+            "tables": tables,
+            "columns": columns,
+        },
+        "schema_adjustments": schema_adjustments,
+        "unresolved_terms": [
+            str(term).strip()
+            for term in payload.get("unresolved_terms", [])
+            if str(term).strip()
+        ]
+        if isinstance(payload.get("unresolved_terms"), list)
+        else [],
+        "unsupported_terms": [
+            str(term).strip()
+            for term in payload.get("unsupported_terms", [])
+            if str(term).strip()
+        ]
+        if isinstance(payload.get("unsupported_terms"), list)
+        else [],
+        "term_resolutions": payload.get("term_resolutions", [])
+        if isinstance(payload.get("term_resolutions"), list)
+        else [],
+        "schema_validation_status": str(payload.get("schema_validation_status", "unknown")),
+        "candidate_columns": payload.get("candidate_columns", {})
+        if isinstance(payload.get("candidate_columns"), dict)
+        else {},
+        "candidate_tables": payload.get("candidate_tables", [])
+        if isinstance(payload.get("candidate_tables"), list)
+        else [],
+        "selected_table": selected_table,
+        "selected_columns": selected_columns,
+    }
 
 
 class VoiceUploadView(APIView):
@@ -155,6 +490,17 @@ class VoiceUploadView(APIView):
             # Extract question type and SQL
             question_type = whisper_result.get('question_type', 'unknown')
             sql = whisper_result.get('sql')
+            generated_sql = whisper_result.get('generated_sql') or sql
+            reviewed_sql = whisper_result.get('reviewed_sql') or sql
+            preprocessing_low = normalize_preprocessing_low(
+                whisper_result.get("preprocessing_low"),
+                fallback_text=whisper_result.get("text", ""),
+            )
+            preprocessing_high = normalize_preprocessing_high(
+                whisper_result.get("preprocessing_high"),
+                fallback_query=preprocessing_low.get("cleaned_text", whisper_result.get("text", "")),
+            )
+            pipeline_trace = normalize_pipeline_trace(whisper_result.get("pipeline_trace"))
             
             # ALWAYS create a report record, even for conversational questions
             # This ensures we always return a valid report_id
@@ -164,8 +510,11 @@ class VoiceUploadView(APIView):
                 audio_file=audio_path,
                 transcription=whisper_result['text'],
                 intent_json=whisper_result.get('intent'),
-                generated_sql=sql or '',  # Empty string if no SQL
-                final_sql=sql or '',  # Initially same
+                generated_sql=generated_sql or '',  # Raw SQL from generation stage
+                final_sql=reviewed_sql or '',  # Reviewed/corrected SQL before execution
+                preprocessing_low=preprocessing_low,
+                preprocessing_high=preprocessing_high,
+                pipeline_trace=pipeline_trace,
                 status=(
                     VoiceReport.STATUS_PENDING
                     if (question_type == 'analytical' and sql)
@@ -185,6 +534,14 @@ class VoiceUploadView(APIView):
                     'message': whisper_result.get('message', 'Question does not require data analysis'),
                     'intent': whisper_result.get('intent'),
                     'requires_sql': False,
+                    'preprocessing_low': preprocessing_low,
+                    'preprocessing_high': preprocessing_high,
+                    'pipeline_trace': pipeline_trace,
+                    'overall_status': whisper_result.get('overall_status'),
+                    'root_cause': whisper_result.get('root_cause'),
+                    'dagster_runtime': whisper_result.get('dagster_runtime'),
+                    'final_route': whisper_result.get('final_route'),
+                    'final_user_message': whisper_result.get('final_user_message'),
                     'status': VoiceReport.STATUS_UPLOADED
                 })
             
@@ -214,6 +571,14 @@ class VoiceUploadView(APIView):
                 'chart': normalized_chart,
                 'confidence': whisper_result.get('confidence'),
                 'message': 'Audio processed successfully. Ready to execute.',
+                'preprocessing_low': preprocessing_low,
+                'preprocessing_high': preprocessing_high,
+                'pipeline_trace': pipeline_trace,
+                'overall_status': whisper_result.get('overall_status'),
+                'root_cause': whisper_result.get('root_cause'),
+                'dagster_runtime': whisper_result.get('dagster_runtime'),
+                'final_route': whisper_result.get('final_route'),
+                'final_user_message': whisper_result.get('final_user_message'),
                 'status': VoiceReport.STATUS_PENDING
             })
         
@@ -338,7 +703,7 @@ class QueryExecuteView(APIView):
                 )
             
             # Save query results
-            # 🔒 NaN-SAFE: Apply sanitization before saving to PostgreSQL JSONField
+            # ðŸ”’ NaN-SAFE: Apply sanitization before saving to PostgreSQL JSONField
             # This is defense-in-depth - results are already sanitized in executor,
             # but we sanitize again here to ensure PostgreSQL storage never fails
             sanitized_rows = sanitize_query_results(query_result['rows'])
@@ -356,7 +721,7 @@ class QueryExecuteView(APIView):
                 query_result['row_count']
             )
             
-            # 🔒 NaN-SAFE: Catch JSON serialization errors during save
+            # ðŸ”’ NaN-SAFE: Catch JSON serialization errors during save
             # This is a final safety net in case any NaN/Infinity values slip through
             try:
                 report.save()
@@ -802,6 +1167,15 @@ class ReportDetailView(APIView):
             # } for h in history]
             history_data = []  # Placeholder until ReportHistory is added
             embed_url = get_report_embed_url(report)
+            preprocessing_low = normalize_preprocessing_low(
+                report.preprocessing_low,
+                fallback_text=report.transcription,
+            )
+            preprocessing_high = normalize_preprocessing_high(
+                report.preprocessing_high,
+                fallback_query=preprocessing_low.get("cleaned_text", report.transcription),
+            )
+            pipeline_trace = normalize_pipeline_trace(report.pipeline_trace)
             
             return Response({
                 'success': True,
@@ -821,6 +1195,11 @@ class ReportDetailView(APIView):
                     'metabase_question_id': report.metabase_question_id,
                     'metabase_dashboard_id': report.metabase_dashboard_id,
                     'embed_url': embed_url,
+                    'preprocessing_low': preprocessing_low,
+                    'preprocessing_high': preprocessing_high,
+                    'pipeline_trace': pipeline_trace,
+                    'overall_status': pipeline_trace.get('overall_status'),
+                    'root_cause': pipeline_trace.get('root_cause'),
                     'error_message': report.error_message,
                     'created_at': report.created_at,
                     'created_by': report.created_by.email,
@@ -868,6 +1247,11 @@ class ReportDetailView(APIView):
                 'message': 'Report deleted successfully'
             })
         
+        except Http404:
+            return Response(
+                {'success': False, 'error': 'Report not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
         except Exception as e:
             logger.error(f"Error deleting report: {e}", exc_info=True)
             return Response(

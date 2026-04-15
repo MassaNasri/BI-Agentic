@@ -81,6 +81,21 @@ class VoiceReport(models.Model):
     
     # SQL Generation
     intent_json = models.JSONField(null=True, blank=True, help_text='Extracted intent from text')
+    preprocessing_low = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='Low-level text preprocessing metadata'
+    )
+    preprocessing_high = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='High-level schema-aware preprocessing metadata'
+    )
+    pipeline_trace = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='Full analyst-grade execution trace for the AI pipeline'
+    )
     generated_sql = models.TextField(blank=True, help_text='Generated SQL query')
     final_sql = models.TextField(blank=True, help_text='Final SQL after validation/edits')
     sql_validated = models.BooleanField(default=False)

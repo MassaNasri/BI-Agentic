@@ -7,6 +7,7 @@ from typing import Any
 import clickhouse_connect
 
 from shared.schema_utils import is_date_type, is_dimension_type, is_numeric_type, unqualify_table_name
+from shared.schema_filtering import filter_business_schema
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +81,8 @@ def _fetch_schema_from_clickhouse() -> dict[str, list[dict[str, Any]]]:
 
     if not schema:
         raise RuntimeError("No tables found in current ClickHouse database")
-
-    return schema
+    filtered_schema, _ = filter_business_schema(schema)
+    return filtered_schema or schema
 
 
 def get_schema(*, force_refresh: bool = False) -> dict[str, list[dict[str, Any]]]:

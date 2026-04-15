@@ -6,6 +6,8 @@ openai-whisper
 numpy
 scipy
 ffmpeg-python
+dagster
+redis
 
 requests
 python-dotenv

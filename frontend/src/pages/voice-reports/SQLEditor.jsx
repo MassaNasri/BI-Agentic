@@ -18,6 +18,7 @@ import { voiceReportsAPI } from '../../api/endpoints'
 import AnimatedPage from '../../components/AnimatedPage'
 import Card from '../../components/Card'
 import Button from '../../components/Button'
+import PreprocessingDetailsPanel from '../../components/preprocessing/PreprocessingDetailsPanel'
 import { fadeIn, slideInBottom } from '../../animations/variants'
 import {
   isReportCompleted,
@@ -312,6 +313,13 @@ function SQLEditor() {
                       </Button>
                     </div>
                   </div>
+                </Card>
+
+                <Card>
+                  <PreprocessingDetailsPanel
+                    preprocessingLow={selectedReport.preprocessing_low}
+                    preprocessingHigh={selectedReport.preprocessing_high}
+                  />
                 </Card>
 
                 {/* Execution Results */}

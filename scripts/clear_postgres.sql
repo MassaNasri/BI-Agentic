@@ -1,5 +1,6 @@
 -- Clear PostgreSQL data while preserving schema.
--- Excludes django_migrations to keep migration history.
+-- Preserve core Django metadata tables to avoid post_migrate race conditions
+-- when multiple services start and run migrations concurrently.
 
 DO $$
 DECLARE
@@ -12,7 +13,7 @@ BEGIN
     INTO truncate_list
     FROM pg_tables
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-      AND tablename <> 'django_migrations';
+      AND tablename NOT IN ('django_migrations', 'django_content_type', 'auth_permission');
 
     IF truncate_list IS NULL THEN
         RAISE NOTICE 'No PostgreSQL tables eligible for truncation.';

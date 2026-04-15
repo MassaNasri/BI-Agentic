@@ -21,15 +21,24 @@ services:
       GATEWAY_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_RATE_LIMIT_WINDOW_SECONDS:-6}
       GATEWAY_UPSTREAM_TIMEOUT_SECONDS: ${GATEWAY_UPSTREAM_TIMEOUT_SECONDS:-360}
     depends_on:
-      - auth-service
-      - workspace-service
-      - report-service
-      - voice-service
-      - ai-service
-      - query-service
-      - visualization-service
-      - subscription-service
-      - notification-service
+      auth-service:
+        condition: service_healthy
+      workspace-service:
+        condition: service_healthy
+      report-service:
+        condition: service_healthy
+      voice-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+      query-service:
+        condition: service_healthy
+      visualization-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
 
   auth-service:
     build:
@@ -39,6 +48,16 @@ services:
       - "8001:8001"
     env_file:
       - ./.env.microservices
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8001), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   workspace-service:
     build:
@@ -48,6 +67,19 @@ services:
       - "8002:8002"
     env_file:
       - ./.env.microservices
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8002), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   report-service:
     build:
@@ -62,8 +94,22 @@ services:
       CLICKHOUSE_PORT: "8123"
       METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
     depends_on:
-      - clickhouse
-      - etl-metadata
+      clickhouse:
+        condition: service_started
+      etl-metadata:
+        condition: service_started
+      query-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8003), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   voice-service:
     build:
@@ -86,12 +132,28 @@ services:
       CLICKHOUSE_PORT: "8123"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
-      - ai-service
-      - query-service
-      - visualization-service
-      - subscription-service
-      - clickhouse
-      - kafka
+      ai-service:
+        condition: service_healthy
+      query-service:
+        condition: service_healthy
+      visualization-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+      kafka:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8004), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   ai-service:
     build:
@@ -110,10 +172,37 @@ services:
       WHISPER_MODEL_NAME: ${WHISPER_MODEL_NAME:-tiny}
       WHISPER_CACHE_DIR: ${WHISPER_CACHE_DIR:-/root/.cache/whisper}
       WHISPER_TASK: ${WHISPER_TASK:-translate}
+      TRANSCRIPTION_REDIS_URL: ${TRANSCRIPTION_REDIS_URL:-redis://redis:6379/0}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-3n-e4b-it:free}
     depends_on:
       - clickhouse
+      - redis
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8005), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   query-service:
     build:
@@ -130,10 +219,26 @@ services:
       ETL_SERVICE_URL: ${ETL_SERVICE_URL:-http://etl-connector:8000}
       METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
     depends_on:
-      - clickhouse
-      - kafka
-      - etl-connector
-      - etl-metadata
+      clickhouse:
+        condition: service_started
+      kafka:
+        condition: service_started
+      etl-connector:
+        condition: service_started
+      etl-metadata:
+        condition: service_started
+      subscription-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8006), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   visualization-service:
     build:
@@ -143,6 +248,19 @@ services:
       - "8007:8007"
     env_file:
       - ./.env.microservices
+    depends_on:
+      report-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8007), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   subscription-service:
     build:
@@ -152,6 +270,19 @@ services:
       - "8009:8008"
     env_file:
       - ./.env.microservices
+    depends_on:
+      workspace-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8008), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   notification-service:
     build:
@@ -161,6 +292,19 @@ services:
       - "8010:8010"
     env_file:
       - ./.env.microservices
+    depends_on:
+      voice-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.create_connection(('127.0.0.1', 8010), 5); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   notification-expiry-worker:
     build:
@@ -178,7 +322,8 @@ services:
           sleep ${NOTIFICATION_EXPIRY_CHECK_INTERVAL_SECONDS:-21600};
         done
     depends_on:
-      - notification-service
+      notification-service:
+        condition: service_healthy
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -431,3 +576,4 @@ volumes:
   clickhouse_logs:
   clamav_data:
   whisper_cache:
+  redis_data:
