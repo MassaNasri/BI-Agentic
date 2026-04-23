@@ -440,6 +440,33 @@ class SemanticExtractionCompletenessTests(unittest.TestCase):
         )
         self.assertNotIn("SUM(", sql.upper())
 
+    def test_relationship_wording_with_over_time_keeps_time_series_shape(self):
+        intent = self._extract_with_mocked_llm(
+            query="Show relationship between revenue and order_date over time",
+            payload={
+                "intent_type": "analytical",
+                "table": "sales_fact",
+                "metrics": ["revenue", "profit"],
+                "metric_specs": [
+                    {"column": "revenue", "aggregation": "SUM"},
+                    {"column": "profit", "aggregation": "SUM"},
+                ],
+                "dimensions": [],
+                "filters": [],
+                "aggregation": "SUM",
+                "target_column": "revenue",
+            },
+        )
+        validated = validate_structured_intent(intent=intent, schema=TEST_SCHEMA)
+        _, sql = build_sql_from_intent(
+            query="Show relationship between revenue and order_date over time",
+            intent=validated,
+            schema=TEST_SCHEMA,
+        )
+        self.assertIn("AS period", sql)
+        self.assertIn("ORDER BY period ASC", sql)
+        self.assertIn("order_date", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

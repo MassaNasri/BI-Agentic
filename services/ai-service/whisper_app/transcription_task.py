@@ -1109,30 +1109,6 @@ def _run_legacy_whisper_transcription_preprocess_intent(
             "preprocess_high": preprocess_high_result,
         }
 
-    if (
-        str(routing_result.get("route", "")).strip().lower() != "forecasting"
-        and preprocess_high_result.get("schema_valid") is False
-    ):
-        return {
-            "status": "rejected",
-            "stage": "preprocessing_high",
-            "message": (
-                "SQL generation was blocked because schema validation did not prove "
-                "the query safe against the selected dataset."
-            ),
-            "transcription": transcription_result,
-            "preprocess": preprocess_result,
-            "intent": intent_result,
-            "routing": routing_result,
-            "preprocess_high": preprocess_high_result,
-            "intent_extraction": {
-                "status": "rejected",
-                "error_type": "schema_mismatch",
-                "action_taken": "stop",
-                "sql_query": "",
-            },
-        }
-
     try:
         schema_snapshot = get_schema()
     except Exception as exc:  # noqa: BLE001

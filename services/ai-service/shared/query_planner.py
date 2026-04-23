@@ -490,6 +490,10 @@ def normalize_analytical_intent(
             column_name=time_column,
             granularity=time_granularity,
         )
+        # Time-series intent takes precedence over generic "compare X and Y" phrasing.
+        # Without this, prompts like "compare sales and orders per week" can be
+        # misrouted into relationship/scatter semantics and lose the time axis.
+        relationship_requested = False
         if time_column not in dimensions:
             dimensions = [time_column, *dimensions]
             ambiguities.append(
@@ -674,6 +678,7 @@ def _infer_time_granularity(question_lower: str) -> str:
     soft_patterns = (
         (r"\bhourly\b|\bhour\b", "hour"),
         (r"\bdaily\b|\bday\b", "day"),
+        (r"\bdate\b|\btime\b", "day"),
         (r"\bweekly\b|\bweek\b", "week"),
         (r"\bmonthly\b|\bmonth\b", "month"),
         (r"\bquarterly\b|\bquarter\b", "quarter"),
@@ -1200,7 +1205,7 @@ def _extract_metric_hints_from_question(question: str) -> list[str]:
     hints: list[str] = []
 
     select_match = re.search(
-        r"\b(?:show|list|display|give|what is|what are|which)\s+(.+?)(?:\s+\bby\b|\s+\bwhere\b|\s+\bin\b|\s+\bwith\b|$)",
+        r"\b(?:show|list|display|give|compare|what is|what are|which)\s+(.+?)(?:\s+\bby\b|\s+\bwhere\b|\s+\bin\b|\s+\bwith\b|$)",
         question_lower,
     )
     if select_match:

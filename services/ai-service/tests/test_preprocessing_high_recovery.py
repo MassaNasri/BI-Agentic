@@ -109,6 +109,35 @@ class PreprocessHighRecoveryTests(unittest.TestCase):
         self.assertNotIn("highest", diagnostics.get("unresolved_terms", []))
         self.assertFalse(diagnostics.get("unresolved_terms"))
 
+    def test_evolution_language_is_not_flagged_as_schema_error(self):
+        query = "How does the relationship between customers and total sales change over time?"
+        diagnostics = build_schema_resolution_diagnostics(
+            original_query=query,
+            corrected_query=query,
+            loaded_schema=_loaded_schema_fixture(),
+            validation_result=build_deterministic_schema_validation_result(
+                corrected_query=query,
+                loaded_schema=_loaded_schema_fixture(),
+            ),
+        )
+        self.assertNotIn("does", diagnostics.get("unresolved_terms", []))
+        self.assertNotIn("change", diagnostics.get("unresolved_terms", []))
+        self.assertNotIn("it", diagnostics.get("unresolved_terms", []))
+
+    def test_relational_connector_language_is_not_flagged_as_schema_error(self):
+        query = "Show sales and customers trend together over time"
+        diagnostics = build_schema_resolution_diagnostics(
+            original_query=query,
+            corrected_query=query,
+            loaded_schema=_loaded_schema_fixture(),
+            validation_result=build_deterministic_schema_validation_result(
+                corrected_query=query,
+                loaded_schema=_loaded_schema_fixture(),
+            ),
+        )
+        self.assertNotIn("together", diagnostics.get("unresolved_terms", []))
+        self.assertFalse(diagnostics.get("unresolved_terms"))
+
     @patch("preprocessing_high.preprocess_high_task.load_user_schema")
     @patch("preprocessing_high.preprocess_high_task.correct_query_terms")
     @patch("preprocessing_high.preprocess_high_task.validate_query_schema_usage")

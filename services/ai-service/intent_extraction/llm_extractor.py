@@ -405,7 +405,30 @@ def _enrich_with_semantic_ir(
         target_column = enriched_metrics[0] if enriched_metrics else "*"
 
     relationship_query = _is_relationship_query(query)
-    if relationship_query:
+    normalized_operations = {
+        str(op).strip().lower()
+        for op in (normalized.get("operations", []) or [])
+        if str(op).strip()
+    }
+    normalized_dimensions = [
+        str(item).strip()
+        for item in (normalized.get("dimensions", []) or [])
+        if str(item).strip()
+    ]
+    has_time_like_dimension = any(
+        (
+            dim.lower() in {"ds", "date", "period", "timestamp", "datetime"}
+            or any(token in dim.lower() for token in ("date", "time", "day", "week", "month", "quarter", "year"))
+        )
+        for dim in normalized_dimensions
+    )
+    time_grouping_detected = bool(
+        normalized.get("time_grouping_detected")
+        or "time_grouping" in normalized_operations
+        or str(normalized.get("intent", "")).strip().lower() == "time_series"
+        or has_time_like_dimension
+    )
+    if relationship_query and not time_grouping_detected:
         candidate_metrics: list[str] = []
         candidate_metrics.extend([str(item).strip() for item in enriched_metrics if str(item).strip()])
         candidate_metrics.extend([str(item).strip() for item in (intent_payload.get("metrics", []) or []) if str(item).strip()])

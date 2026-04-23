@@ -79,6 +79,23 @@ class BIHardeningTests(unittest.TestCase):
         self.assertIn("GROUP BY period", sql)
         self.assertEqual(chart["type"], "line")
 
+    def test_compare_two_metrics_per_week_remains_time_series(self):
+        question = "Compare total sales and orders per week"
+        intent = normalize_analytical_intent(
+            question=question,
+            raw_intent={"table": "sales_fact"},
+            schema=TEST_SCHEMA,
+        )
+        sql = compile_sql(intent, schema=TEST_SCHEMA)
+        chart = recommend_chart(intent)
+
+        self.assertTrue(intent.get("time_grouping_detected"))
+        self.assertIn("time_grouping", intent.get("operations", []))
+        self.assertIn("GROUP BY period", sql)
+        self.assertIn("SUM(total_sales)", sql)
+        self.assertIn("SUM(orders)", sql)
+        self.assertEqual(chart["type"], "line")
+
     def test_average_per_day_on_daily_grain_uses_line_without_sum(self):
         question = "What is the average number of orders per day?"
         intent = normalize_analytical_intent(question=question, raw_intent={"table": "sales_fact"}, schema=TEST_SCHEMA)

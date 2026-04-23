@@ -52,6 +52,44 @@ class AITraceServiceTests(unittest.TestCase):
         self.assertIn("term_corrections", trace["preprocessing_high"])
         self.assertTrue(trace["preprocessing_high"]["term_corrections"])
 
+    def test_classification_error_is_cleared_when_preprocessing_high_is_degraded(self):
+        trace = build_ai_trace_payload(
+            report_id=11,
+            transcription="How does sales change over time?",
+            preprocessing_low={"cleaned_text": "How does sales change over time?"},
+            preprocessing_high={
+                "status": "degraded",
+                "final_query": "How does total_sales change over time?",
+                "term_corrections": [{"from": "sales", "to": "total_sales", "type": "mapped"}],
+            },
+            intent_json={"intent_type": "analytical"},
+            pipeline_trace={
+                "classification": {
+                    "status": "failed",
+                    "final_output": {"message": "temporary upstream issue"},
+                    "errors": [{"type": "system", "message": "temporary upstream issue"}],
+                },
+                "preprocessing_high": {
+                    "status": "degraded",
+                    "final_output": {"final_query": "How does total_sales change over time?"},
+                    "errors": [],
+                },
+            },
+            generated_sql="SELECT toDate(ds) AS period, SUM(total_sales) AS sum_total_sales FROM etl.sales GROUP BY period",
+            reviewed_sql="SELECT toDate(ds) AS period, SUM(total_sales) AS sum_total_sales FROM etl.sales GROUP BY period",
+            query_result={"columns": ["period", "sum_total_sales"], "rows": [{"period": "2023-01-01", "sum_total_sales": 100.0}]},
+            execution_time_ms=19,
+            row_count=1,
+            chart_type="line",
+            metabase_question_id=2,
+            metabase_dashboard_id=3,
+            embed_url="",
+            chart_config={},
+            error_message="",
+        )
+
+        self.assertFalse(bool(trace["classification"]["error"]))
+
 
 if __name__ == "__main__":
     unittest.main()

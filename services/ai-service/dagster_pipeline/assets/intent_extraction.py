@@ -160,62 +160,17 @@ def intent_extraction_asset(
             else {}
         ).get("route", preprocessing_high_asset.get("route", "analytical"))
     ).strip().lower() or "analytical"
-    if route != "forecasting" and preprocessing_high_asset.get("schema_valid") is False:
-        message = (
-            "SQL generation was blocked because schema validation did not prove the query "
-            "safe against the selected dataset."
+    schema_validation_deferred = bool(
+        route != "forecasting"
+        and preprocessing_high_asset.get("schema_valid") is False
+    )
+    if schema_validation_deferred:
+        context.log.warning(
+            "Proceeding with intent extraction after deferred schema validation | status=%s unresolved_terms=%s unsupported_terms=%s",
+            preprocessing_high_asset.get("schema_validation_status"),
+            preprocessing_high_asset.get("unresolved_terms", []),
+            preprocessing_high_asset.get("unsupported_terms", []),
         )
-        attempts = [
-            make_attempt(
-                attempt_number=1,
-                input_payload={
-                    "final_query": final_query,
-                    "schema_valid": preprocessing_high_asset.get("schema_valid"),
-                    "schema_validation_status": preprocessing_high_asset.get("schema_validation_status"),
-                },
-                output_payload={},
-                success=False,
-                retry_triggered=False,
-                model_or_method_used="schema_sql_safety_gate",
-                duration_ms=0,
-                validation_result={"is_valid": False, "sql_generation_allowed": False},
-                error_type="schema_mismatch",
-                error_message=message,
-            )
-        ]
-        result = {
-            "status": "rejected",
-            "intent_type": "analytical",
-            "next_step": "metabase",
-            "error_type": "schema_mismatch",
-            "action_taken": "stop",
-            "message": message,
-            "query": final_query,
-            "schema": {},
-            "extracted_intent": {},
-            "validated_intent": {},
-            "attempts": attempts,
-            "attempts_count": len(attempts),
-            "started_at": stage_started_at,
-            "finished_at": utc_now_iso(),
-            "duration_ms": int((time.perf_counter() - stage_started_perf) * 1000),
-            "warnings": [
-                {
-                    "type": "schema_sql_safety_gate",
-                    "message": message,
-                }
-            ],
-            "errors": [],
-            "debug_metadata": {
-                "schema_validation_status": preprocessing_high_asset.get("schema_validation_status"),
-                "unresolved_terms": preprocessing_high_asset.get("unresolved_terms", []),
-                "unsupported_terms": preprocessing_high_asset.get("unsupported_terms", []),
-                "sql_generation_allowed": False,
-                "reason_for_selection": "schema_sql_safety_gate",
-            },
-        }
-        result["confidence"] = stage_confidence(result, base_success=0.86, base_degraded=0.45)
-        return result
 
     dataset_scope = (
         preprocessing_high_asset.get("dataset_scope")
@@ -395,6 +350,20 @@ def intent_extraction_asset(
     result["debug_metadata"]["dataset_scope"] = dataset_context
     result["debug_metadata"]["dataset_scope_guard"] = scope_meta
     result["debug_metadata"]["reason_for_selection"] = scope_meta.get("reason_for_selection", "")
+    result["debug_metadata"]["schema_validation_status"] = preprocessing_high_asset.get("schema_validation_status")
+    result["debug_metadata"]["unresolved_terms"] = preprocessing_high_asset.get("unresolved_terms", [])
+    result["debug_metadata"]["unsupported_terms"] = preprocessing_high_asset.get("unsupported_terms", [])
+    result["debug_metadata"]["sql_generation_allowed"] = True
+    if schema_validation_deferred:
+        result["warnings"].append(
+            {
+                "type": "schema_validation_deferred",
+                "message": (
+                    "Preprocessing-high schema validation was deferred; "
+                    "intent-aware schema/table binding validation was applied."
+                ),
+            }
+        )
     if isinstance(result.get("validated_intent"), dict):
         result["validated_intent"]["table"] = bound_table
         result["validated_intent"]["dataset_context"] = dataset_context

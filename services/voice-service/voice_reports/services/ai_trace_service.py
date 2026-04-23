@@ -316,8 +316,9 @@ def build_ai_trace_payload(
     preprocessing_corrections = _extract_preprocessing_corrections(normalized_pre_high)
     classification_status = _normalize_status(classification_stage.get("status") or "unknown")
     classification_error = classification_status == "error"
-    # If high preprocessing succeeded (including typo recovery), do not mark classification as an error.
-    if preprocessing_high_status == "success":
+    # If high preprocessing completed (including deferred/degraded recovery), avoid surfacing
+    # stale classification errors as final failures.
+    if preprocessing_high_status in {"success", "degraded"}:
         classification_error = False
 
     trace = {

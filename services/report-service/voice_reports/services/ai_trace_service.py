@@ -347,7 +347,7 @@ def build_ai_trace_payload(
             "status": _normalize_status(classification_stage.get("status") or "unknown"),
             "is_analytical": bool(is_analytical),
             "is_predictive": bool(question_type == "predictive"),
-            "error": preprocessing_high_failed,
+            "error": preprocessing_high_status == "error",
             "error_reason": str(pre_high_stage.get("message") or pre_high_final.get("message") or ""),
             "question_type": question_type,
             "requires_forecast": requires_forecast,

@@ -110,6 +110,11 @@ _DETERMINISTIC_FALLBACK_STOP_TOKENS = {
     "trends",
     "values",
     "value",
+    "together",
+    "jointly",
+    "alongside",
+    "simultaneously",
+    "concurrently",
 }
 _SEMANTIC_MAPPING_MIN_SCORE = 2.0
 _SEMANTIC_MAPPING_MIN_MARGIN = 0.25

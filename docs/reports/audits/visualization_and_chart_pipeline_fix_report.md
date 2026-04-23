@@ -146,3 +146,72 @@ Results:
 - Metabase support for multi-series native SQL charts can vary by version; the service now preserves `series_type` and `graph.breakout`, but final visual styling depends on Metabase behavior.
 - Report-service has a legacy direct-Metabase path; it was improved for intent-aware line/scatter selection, but the voice-service plus visualization-service path remains the stronger canonical path.
 - Frontend currently renders Metabase embeds rather than local chart primitives, so actual/forecast visual distinction is primarily supplied through Metabase settings and persisted metadata.
+
+## Supplemental Re-Audit (Trace-Driven Fixes)
+
+Date: 2026-04-23
+
+Additional failures observed in AI Trace replay were reproduced and fixed.
+
+### New Problems Found
+
+1. Deferred schema validation was still blocked in downstream intent extraction.
+   - Symptom: `preprocessing_high`/`intent_extraction` failed for natural queries containing non-schema verbs (`does`, `change`, `evolve`).
+   - Root cause: hard `schema_valid == false` gate in both Dagster intent-extraction asset and legacy whisper flow rejected analytical execution instead of deferring to intent-aware validation.
+
+2. Natural analytical wording was over-penalized as unresolved schema terms.
+   - Symptom: queries like “How does ... change over time?” raised unresolved lexical/schema terms (`does`, `it`, `change`, `evolve`).
+   - Root cause: diagnostics stopword/analytical-language vocab was too narrow.
+
+3. Time-grouped comparison prompts were downgraded to single-metric or scatter-like semantics.
+   - Symptom: “Compare total sales and orders per week” produced non-time-grouped single-metric SQL.
+   - Root cause: query planner’s relationship detection from `compare ... and ...` overrode time-series intent; metric hint extraction for `compare` prompts under-detected multi-metric candidates.
+
+4. Trace classification error flag could remain noisy after degraded-but-valid preprocessing-high recovery.
+   - Symptom: classification `Error? YES` persisted even when pipeline had a usable degraded path.
+   - Root cause: trace builder only cleared classification error on `preprocessing_high == success`, not `degraded`.
+
+### Fixes Implemented
+
+- Removed hard schema safety rejection in:
+  - `services/ai-service/dagster_pipeline/assets/intent_extraction.py`
+  - `services/ai-service/whisper_app/transcription_task.py`
+- Added deferred-schema warning and debug metadata while continuing intent extraction with dataset binding guards.
+- Expanded preprocessing-high diagnostics vocabulary to treat common analytical phrasing as non-schema tokens:
+  - `services/ai-service/preprocessing_high/diagnostics.py`
+- Updated query planner to prioritize time grouping over relationship override and better parse compare-style metric hints:
+  - `services/ai-service/shared/query_planner.py`
+- Added defensive guard in semantic enrichment to skip relationship override when time-series intent is present:
+  - `services/ai-service/intent_extraction/llm_extractor.py`
+- Updated AI trace classification error normalization for degraded preprocessing-high recovery:
+  - `services/voice-service/voice_reports/services/ai_trace_service.py`
+  - `services/report-service/voice_reports/services/ai_trace_service.py`
+
+### Regression Coverage Added/Updated
+
+- `services/ai-service/tests/test_preprocessing_high_recovery.py`
+  - Evolution/change language is no longer treated as unresolved schema error.
+- `services/ai-service/tests/test_bi_hardening.py`
+  - Compare-two-metrics-per-week stays time-series with grouped SQL.
+- `services/ai-service/intent_extraction/tests.py`
+  - Relationship wording with over-time context preserves time-series shape.
+- `services/ai-service/tests/test_final_system_hardening.py`
+  - Deferred schema path no longer rejects at intent-extraction gate.
+- `services/voice-service/voice_reports/tests_ai_trace_service.py`
+  - Classification error is cleared for degraded preprocessing-high continuation.
+
+### Verification (Supplemental)
+
+Commands run:
+
+```powershell
+$env:PYTHONPATH='services/ai-service'; python -m pytest services/ai-service/tests/test_preprocessing_high_recovery.py services/ai-service/tests/test_bi_hardening.py services/ai-service/intent_extraction/tests.py services/ai-service/tests/test_final_system_hardening.py
+$env:PYTHONPATH='services/voice-service'; python -m pytest services/voice-service/voice_reports/tests_ai_trace_service.py
+python -m py_compile services/ai-service/preprocessing_high/diagnostics.py services/ai-service/shared/query_planner.py services/ai-service/dagster_pipeline/assets/intent_extraction.py services/ai-service/whisper_app/transcription_task.py services/ai-service/intent_extraction/llm_extractor.py services/voice-service/voice_reports/services/ai_trace_service.py services/report-service/voice_reports/services/ai_trace_service.py
+```
+
+Results:
+
+- AI-service targeted suite: 39 passed.
+- Voice-service AI-trace tests: 2 passed.
+- Python compile check on updated modules: passed.

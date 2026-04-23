@@ -85,7 +85,7 @@ class _FakeContext:
 
 
 class FinalSystemHardeningTests(unittest.TestCase):
-    def test_schema_invalid_analytical_query_blocks_sql_generation(self):
+    def test_schema_deferred_analytical_query_proceeds_to_intent_validation(self):
         result = intent_extraction_asset(
             context=_FakeContext(),
             preprocessing_high_asset={
@@ -95,6 +95,16 @@ class FinalSystemHardeningTests(unittest.TestCase):
                 "schema_validation_status": "invalid_unresolved_terms",
                 "final_query": "show revenue by nonexistent_region",
                 "unresolved_terms": ["nonexistent_region"],
+                "schema_used": {
+                    "tables": ["sales_fact"],
+                    "columns": {
+                        "sales_fact": [
+                            {"name": "order_date", "type": "Date"},
+                            {"name": "revenue", "type": "Float64"},
+                            {"name": "customers", "type": "UInt32"},
+                        ]
+                    },
+                },
                 "dataset_scope": {
                     "workspace_id": "w1",
                     "dataset_id": "d1",
@@ -105,11 +115,17 @@ class FinalSystemHardeningTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result.get("status"), "rejected")
-        self.assertEqual(result.get("error_type"), "schema_mismatch")
-        self.assertEqual(result.get("validated_intent"), {})
-        self.assertFalse(result.get("debug_metadata", {}).get("sql_generation_allowed"))
-        self.assertLess(result.get("confidence", 1.0), 0.5)
+        self.assertIn(result.get("status"), {"success", "degraded", "failed"})
+        self.assertNotEqual(result.get("status"), "rejected")
+        self.assertTrue(result.get("debug_metadata", {}).get("sql_generation_allowed"))
+        self.assertIn("schema_validation_status", result.get("debug_metadata", {}))
+        self.assertTrue(
+            any(
+                isinstance(warning, dict)
+                and warning.get("type") == "schema_validation_deferred"
+                for warning in result.get("warnings", [])
+            )
+        )
 
     def test_confidence_penalizes_schema_deferred_and_forecast_fallback(self):
         high = {
