@@ -37,10 +37,18 @@ def intent_classification_asset(
     result.setdefault("errors", [])
     result.setdefault("debug_metadata", {})
     result["debug_metadata"]["cleaned_text_chars"] = len(str(preprocessing_low_asset.get("cleaned_text", "")))
+    result["debug_metadata"]["dataset_context"] = {
+        "workspace_id": pipeline_request_asset.get("workspace_id"),
+        "dataset_id": pipeline_request_asset.get("dataset_id") or pipeline_request_asset.get("source_id"),
+        "manager_id": pipeline_request_asset.get("manager_id") or pipeline_request_asset.get("user_id"),
+        "table_name": pipeline_request_asset.get("table_name"),
+    }
     context.log.info(
-        "Intent classification completed | status=%s is_analytical=%s classification=%s",
+        "Intent classification completed | status=%s is_analytical=%s classification=%s route=%s requires_forecast=%s",
         result.get("status"),
         result.get("is_analytical"),
         result.get("classification"),
+        (result.get("debug_metadata", {}) if isinstance(result.get("debug_metadata"), dict) else {}).get("route"),
+        result.get("requires_forecast"),
     )
     return result

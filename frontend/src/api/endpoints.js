@@ -158,6 +158,9 @@ export const voiceReportsAPI = {
   
   // Get report details
   getReport: (reportId) => apiClient.get(`/voice-reports/${reportId}/`),
+
+  // Get normalized AI explainability trace
+  getAITrace: (reportId) => apiClient.get(`/voice-reports/${reportId}/ai-trace/`),
   
   // Delete report (Manager only)
   deleteReport: (reportId) => apiClient.delete(`/voice-reports/${reportId}/`),

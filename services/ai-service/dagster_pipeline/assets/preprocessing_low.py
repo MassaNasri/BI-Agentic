@@ -6,6 +6,7 @@ from dagster import AssetExecutionContext, asset
 from dagster_pipeline import ASSET_RETRY_POLICY, pipeline_failure_hook
 from preprocessing_low.preprocess_task import run_preprocess_text
 from shared.pipeline_trace import make_attempt, utc_now_iso
+from shared.stage_contract import stage_allows_progress
 
 
 @asset(
@@ -15,11 +16,12 @@ from shared.pipeline_trace import make_attempt, utc_now_iso
 )
 def preprocessing_low_asset(
     context: AssetExecutionContext,
+    pipeline_request_asset: dict[str, Any],
     transcription_asset: dict[str, Any],
 ) -> dict[str, Any]:
     stage_started_at = utc_now_iso()
     stage_started_perf = time.perf_counter()
-    if transcription_asset.get("status") != "success":
+    if not stage_allows_progress(transcription_asset.get("status"), degraded=bool(transcription_asset.get("degraded"))):
         context.log.warning(
             "Skipping low preprocessing because transcription failed | error_type=%s",
             transcription_asset.get("error_type"),
@@ -56,7 +58,14 @@ def preprocessing_low_asset(
                     "message": "Low preprocessing skipped because transcription failed.",
                 }
             ],
-            "debug_metadata": {},
+            "debug_metadata": {
+                "dataset_context": {
+                    "workspace_id": pipeline_request_asset.get("workspace_id"),
+                    "dataset_id": pipeline_request_asset.get("dataset_id") or pipeline_request_asset.get("source_id"),
+                    "manager_id": pipeline_request_asset.get("manager_id") or pipeline_request_asset.get("user_id"),
+                    "table_name": pipeline_request_asset.get("table_name"),
+                }
+            },
         }
 
     result = run_preprocess_text(text=str(transcription_asset.get("text", "")))
@@ -68,6 +77,12 @@ def preprocessing_low_asset(
         result["duration_ms"] = int((time.perf_counter() - stage_started_perf) * 1000)
     result.setdefault("debug_metadata", {})
     result["debug_metadata"]["input_chars"] = len(str(transcription_asset.get("text", "")))
+    result["debug_metadata"]["dataset_context"] = {
+        "workspace_id": pipeline_request_asset.get("workspace_id"),
+        "dataset_id": pipeline_request_asset.get("dataset_id") or pipeline_request_asset.get("source_id"),
+        "manager_id": pipeline_request_asset.get("manager_id") or pipeline_request_asset.get("user_id"),
+        "table_name": pipeline_request_asset.get("table_name"),
+    }
     context.log.info(
         "Low preprocessing completed | status=%s cleaned_chars=%s",
         result.get("status"),

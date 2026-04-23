@@ -224,7 +224,7 @@ class DeterministicPlannerTests(unittest.TestCase):
         self.assertIn("FROM etl.population_distribution_csv", sql)
         self.assertNotIn("etl.etl.population_distribution_csv", sql)
 
-    def test_table_resolution_avoids_technical_table_when_business_match_exists(self):
+    def test_table_resolution_selects_best_matching_table_in_multi_table_schema(self):
         schema = {
             "population_distribution_csv": [
                 {"name": "city", "type": "String", "is_numeric": False, "is_date": False, "is_dimension": True},

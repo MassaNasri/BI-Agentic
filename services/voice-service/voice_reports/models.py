@@ -14,10 +14,13 @@ class VoiceReport(models.Model):
     CHART_CHOICES = [
         (ChartType.LINE, 'Line Chart'),
         (ChartType.BAR, 'Bar Chart'),
-        (ChartType.PIE, 'Pie Chart'),
-        (ChartType.KPI, 'KPI'),
+        (ChartType.CARD, 'Card'),
         (ChartType.TABLE, 'Table'),
+        (ChartType.SCATTER, 'Scatter Plot'),
+        (ChartType.HISTOGRAM, 'Histogram'),
         # Legacy chart values kept for backward compatibility with old rows.
+        ('kpi', 'Legacy KPI'),
+        ('pie', 'Legacy Pie'),
         ('number', 'Legacy Number/KPI'),
         ('scalar', 'Legacy Scalar'),
         ('grouped_bar', 'Legacy Grouped Bar'),
@@ -95,6 +98,11 @@ class VoiceReport(models.Model):
         null=True,
         blank=True,
         help_text='Full analyst-grade execution trace for the AI pipeline'
+    )
+    ai_trace = models.JSONField(
+        null=True,
+        blank=True,
+        help_text='Normalized AI transparency trace for analyst explainability UI'
     )
     generated_sql = models.TextField(blank=True, help_text='Generated SQL query')
     final_sql = models.TextField(blank=True, help_text='Final SQL after validation/edits')

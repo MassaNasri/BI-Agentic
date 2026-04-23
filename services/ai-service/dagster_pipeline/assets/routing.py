@@ -5,9 +5,11 @@ from dagster import AssetExecutionContext, asset
 
 from dagster_pipeline import ASSET_RETRY_POLICY, pipeline_failure_hook
 from shared.pipeline_trace import make_attempt, utc_now_iso
+from shared.stage_contract import normalize_stage_status, stage_allows_progress
 
 
 _ALLOWED_STEPS = {"metabase", "forecasting"}
+_PREDICTIVE_LABELS = {"predictive", "forecast", "forecasting"}
 
 
 @asset(
@@ -21,7 +23,7 @@ def routing_asset(
 ) -> dict[str, Any]:
     stage_started_at = utc_now_iso()
     stage_started_perf = time.perf_counter()
-    if intent_extraction_asset.get("status") != "success":
+    if not stage_allows_progress(intent_extraction_asset.get("status"), degraded=bool(intent_extraction_asset.get("degraded"))):
         context.log.warning(
             "Skipping routing because intent extraction was not successful | status=%s",
             intent_extraction_asset.get("status"),
@@ -61,6 +63,30 @@ def routing_asset(
         }
 
     next_step = str(intent_extraction_asset.get("next_step", "metabase")).strip().lower()
+    intent_type = str(intent_extraction_asset.get("intent_type", "analytical")).strip().lower()
+    extracted_intent = (
+        intent_extraction_asset.get("extracted_intent", {})
+        if isinstance(intent_extraction_asset.get("extracted_intent"), dict)
+        else {}
+    )
+    validated_intent = (
+        intent_extraction_asset.get("validated_intent", {})
+        if isinstance(intent_extraction_asset.get("validated_intent"), dict)
+        else {}
+    )
+    predictive_signal = (
+        intent_type in _PREDICTIVE_LABELS
+        or str(validated_intent.get("intent_type", "")).strip().lower() in _PREDICTIVE_LABELS
+        or str(validated_intent.get("question_type", "")).strip().lower() in _PREDICTIVE_LABELS
+        or bool(validated_intent.get("requires_forecast"))
+        or str(extracted_intent.get("intent_type", "")).strip().lower() in _PREDICTIVE_LABELS
+    )
+    if predictive_signal:
+        next_step = "forecasting"
+        intent_type = "predictive"
+        validated_intent["intent_type"] = "predictive"
+        validated_intent["question_type"] = "predictive"
+        validated_intent["requires_forecast"] = True
     if next_step not in _ALLOWED_STEPS:
         context.log.error("Routing produced unsupported next_step=%s", next_step)
         attempts = [
@@ -94,13 +120,14 @@ def routing_asset(
         }
 
     routed_result = {
-        "status": "routed",
+        "status": normalize_stage_status("success"),
+        "legacy_status": "routed",
         "next_step": next_step,
-        "intent_type": intent_extraction_asset.get("intent_type", "analytical"),
+        "intent_type": intent_type or "analytical",
         "query": intent_extraction_asset.get("query", ""),
         "schema": intent_extraction_asset.get("schema", {}),
-        "extracted_intent": intent_extraction_asset.get("extracted_intent", {}),
-        "validated_intent": intent_extraction_asset.get("validated_intent", {}),
+        "extracted_intent": extracted_intent,
+        "validated_intent": validated_intent,
         "attempts": [
             make_attempt(
                 attempt_number=1,
@@ -124,6 +151,17 @@ def routing_asset(
         "errors": [],
         "debug_metadata": {
             "classification": intent_extraction_asset.get("debug_metadata", {}),
+            "predictive_signal": predictive_signal,
+            "dataset_scope": (
+                intent_extraction_asset.get("debug_metadata", {})
+                if isinstance(intent_extraction_asset.get("debug_metadata"), dict)
+                else {}
+            ).get("dataset_scope", {}),
+            "bound_table": (
+                intent_extraction_asset.get("debug_metadata", {})
+                if isinstance(intent_extraction_asset.get("debug_metadata"), dict)
+                else {}
+            ).get("selected_table", ""),
         },
     }
     context.log.info(

@@ -17,6 +17,7 @@ from preprocessing_low.schemas import (
     build_preprocess_failed_result,
     build_preprocess_success_result,
 )
+from shared.confidence import preprocessing_low_confidence
 from shared.pipeline_trace import make_attempt
 
 
@@ -85,6 +86,7 @@ def run_preprocess_text(text: str) -> dict:
         failure_payload["finished_at"] = finished_at
         failure_payload["duration_ms"] = int((time.perf_counter() - stage_started_perf) * 1000)
         failure_payload["debug_metadata"] = {"input_chars": len(str(text or ""))}
+        failure_payload["confidence"] = preprocessing_low_confidence(failure_payload)
         return failure_payload
 
     _log_event(
@@ -123,6 +125,7 @@ def run_preprocess_text(text: str) -> dict:
             "cleaned_chars": len(rule_cleaned_text),
             "input_flags": input_flags,
         }
+        success_payload["confidence"] = preprocessing_low_confidence(success_payload)
         return success_payload
 
     while True:
@@ -178,6 +181,7 @@ def run_preprocess_text(text: str) -> dict:
                 "input_flags": input_flags,
                 "llm_output_flags": llm_flags,
             }
+            success_payload["confidence"] = preprocessing_low_confidence(success_payload)
             return success_payload
         except Exception as exc:  # noqa: BLE001
             error_type = classify_preprocess_error(exc)
@@ -250,6 +254,10 @@ def run_preprocess_text(text: str) -> dict:
                     fallback_error=str(exc),
                     cleaned_chars=len(rule_cleaned_text),
                 )
+                fallback_payload["degraded"] = True
+                fallback_payload["degradation_reason"] = "llm_preprocessing_fallback"
+                fallback_payload["status"] = "degraded"
+                fallback_payload["confidence"] = preprocessing_low_confidence(fallback_payload)
                 return fallback_payload
 
             finished_at = _utc_now()
@@ -269,6 +277,7 @@ def run_preprocess_text(text: str) -> dict:
                 "rule_cleaned_chars": len(rule_cleaned_text),
                 "input_flags": input_flags,
             }
+            failed_payload["confidence"] = preprocessing_low_confidence(failed_payload)
             return failed_payload
 
 

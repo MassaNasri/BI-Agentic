@@ -12,6 +12,8 @@ from intent_extraction.error_handler import (
 )
 from intent_extraction.intent_extraction_task import intent_extraction_task, run_intent_extraction_stage
 from intent_extraction.llm_extractor import extract_structured_intent, infer_intent_type
+from intent_extraction.predictive_parser import parse_predictive_intent
+from intent_extraction.routing import build_sql_from_intent
 from intent_extraction.schemas import IntentExtractionConfig
 from intent_extraction.validation import validate_structured_intent
 
@@ -47,6 +49,58 @@ class IntentTypeDetectionTests(unittest.TestCase):
             "predictive",
         )
 
+    def test_next_keyword_forces_predictive_detection(self):
+        self.assertEqual(
+            infer_intent_type(query="What is revenue for next period?", hinted_intent_type=None),
+            "predictive",
+        )
+
+    def test_what_will_be_forces_predictive_detection(self):
+        self.assertEqual(
+            infer_intent_type(query="What will be the total sales for next month?", hinted_intent_type=None),
+            "predictive",
+        )
+
+
+class PredictiveParserTests(unittest.TestCase):
+    def test_parser_accepts_ds_string_column_as_time_dimension(self):
+        schema = {
+            "sales_3months_realistic_csv": [
+                {"name": "ds", "type": "String"},
+                {"name": "total_sales", "type": "Float64"},
+                {"name": "orders", "type": "Int64"},
+            ]
+        }
+
+        parsed = parse_predictive_intent(
+            query="Forecast total sales for the next 7 days",
+            schema=schema,
+        )
+
+        self.assertEqual(parsed["intent_type"], "predictive")
+        self.assertEqual(parsed["time_column"], "ds")
+        self.assertEqual(parsed["metric"], "total_sales")
+        self.assertEqual(parsed["horizon"], 7)
+
+    def test_predictive_sql_builder_casts_string_date_for_week_grouping(self):
+        schema = {
+            "sales_3months_realistic_csv": [
+                {"name": "ds", "type": "String"},
+                {"name": "customers", "type": "UInt64"},
+            ]
+        }
+        intent = parse_predictive_intent(
+            query="Predict the number of customers for the next 2 weeks",
+            schema=schema,
+        )
+        intent["granularity"] = "week"
+        _, sql = build_sql_from_intent(
+            query="Predict the number of customers for the next 2 weeks",
+            intent=intent,
+            schema=schema,
+        )
+        self.assertIn("toStartOfWeek(toDate(ds))", sql)
+
 
 class IntentExtractionTaskTests(unittest.TestCase):
     def test_validate_structured_intent_allows_count_star_metric(self):
@@ -79,7 +133,9 @@ class IntentExtractionTaskTests(unittest.TestCase):
 
         result = run_intent_extraction_stage(query="Show total revenue by region", schema=TEST_SCHEMA)
 
-        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status"], "degraded")
+        self.assertTrue(result.get("degraded"))
+        self.assertEqual(result.get("degradation_reason"), "intent_extraction_llm_fallback")
         self.assertEqual(result["intent_type"], "analytical")
         self.assertTrue(result.get("debug_metadata", {}).get("llm_fallback_used"))
         self.assertTrue(result.get("warnings"))
@@ -332,6 +388,57 @@ class SemanticExtractionCompletenessTests(unittest.TestCase):
         self.assertTrue(any(f["column"] == "revenue" and f["operator"] == ">" for f in validated["filters"]))
         self.assertTrue(validated["operations"])
         self.assertTrue(validated["intent"])
+
+    def test_relationship_query_uses_non_aggregated_metric_pairs(self):
+        intent = self._extract_with_mocked_llm(
+            query="What is the relationship between revenue and profit?",
+            payload={
+                "intent_type": "analytical",
+                "table": "sales_fact",
+                "metrics": ["revenue", "profit"],
+                "metric_specs": [
+                    {"column": "revenue", "aggregation": "SUM"},
+                    {"column": "profit", "aggregation": "SUM"},
+                ],
+                "dimensions": [],
+                "filters": [],
+                "aggregation": "SUM",
+                "target_column": "revenue",
+            },
+        )
+        validated = validate_structured_intent(intent=intent, schema=TEST_SCHEMA)
+        self.assertEqual(validated["intent"], "comparison")
+        self.assertEqual(validated["aggregation"], "")
+        self.assertIn("comparison", validated["operations"])
+        self.assertNotIn("aggregation", validated["operations"])
+        self.assertEqual(validated["metrics"], ["revenue", "profit"])
+        for spec in validated["metric_specs"]:
+            self.assertIsNone(spec["aggregation"])
+
+    def test_relationship_query_sql_does_not_force_sum(self):
+        intent = self._extract_with_mocked_llm(
+            query="What is the relationship between revenue and profit?",
+            payload={
+                "intent_type": "analytical",
+                "table": "sales_fact",
+                "metrics": ["revenue", "profit"],
+                "metric_specs": [
+                    {"column": "revenue", "aggregation": "SUM"},
+                    {"column": "profit", "aggregation": "SUM"},
+                ],
+                "dimensions": [],
+                "filters": [],
+                "aggregation": "SUM",
+                "target_column": "revenue",
+            },
+        )
+        validated = validate_structured_intent(intent=intent, schema=TEST_SCHEMA)
+        _, sql = build_sql_from_intent(
+            query="What is the relationship between revenue and profit?",
+            intent=validated,
+            schema=TEST_SCHEMA,
+        )
+        self.assertNotIn("SUM(", sql.upper())
 
 
 if __name__ == "__main__":

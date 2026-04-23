@@ -53,6 +53,29 @@ ANALYTICAL_KEYWORDS = (
     "sales",
 )
 
+PREDICTIVE_KEYWORDS = (
+    "forecast",
+    "predict",
+    "prediction",
+    "projected",
+    "projection",
+    "expected",
+    "future",
+    "next",
+    "upcoming",
+)
+
+_PREDICTIVE_PATTERNS = (
+    r"\bfor\s+the\s+next\b",
+    r"\bin\s+the\s+next\b",
+    r"\bover\s+the\s+next\b",
+    r"\bnext\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b",
+    r"\b(?:for|in|over)\s+the\s+next\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b",
+    r"\bnext\s+(day|week|month|year)\b",
+    r"\btrend\b.*\b(next|future|upcoming|forecast|predict)\b",
+    r"\b(next|future|upcoming|forecast|predict)\b.*\btrend\b",
+)
+
 _ANALYTICAL_PATTERNS = (
     r"\b(total|sum|average|avg|mean|count|number\s+of|max|min)\b",
     r"\b(by|per|across|for each|in each)\b",
@@ -90,14 +113,22 @@ def _build_decision_payload(
     llm_error: str = "",
     llm_explicit_decision: bool = False,
 ) -> dict[str, Any]:
-    normalized = "analytical" if str(classification).strip().lower() == "analytical" else "conversational"
-    needs_sql = normalized == "analytical"
-    question_type = "analytical" if normalized == "analytical" else "informational"
+    normalized_raw = str(classification).strip().lower()
+    if normalized_raw in {"predictive", "forecast", "forecasting"}:
+        normalized = "predictive"
+    elif normalized_raw == "analytical":
+        normalized = "analytical"
+    else:
+        normalized = "conversational"
+    needs_sql = normalized in {"analytical", "predictive"}
+    question_type = normalized if normalized in {"analytical", "predictive"} else "informational"
     return {
         "classification": normalized,
         "question_type": question_type,
         "needs_sql": needs_sql,
         "needs_chart": needs_sql,
+        "requires_forecast": normalized == "predictive",
+        "route": "forecasting" if normalized == "predictive" else ("analytical" if normalized == "analytical" else "stop"),
         "decision_source": decision_source,
         "llm_raw_response": llm_raw_response,
         "llm_error": llm_error,
@@ -155,6 +186,13 @@ def _heuristic_classification(question: str) -> dict[str, Any]:
             llm_explicit_decision=False,
         )
 
+    if _has_predictive_signal(normalized):
+        return _build_decision_payload(
+            classification="predictive",
+            decision_source="heuristic_predictive_rule_based",
+            llm_explicit_decision=False,
+        )
+
     if is_force_analytical(normalized):
         return _build_decision_payload(
             classification="analytical",
@@ -181,10 +219,11 @@ def _build_prompt(question: str) -> str:
         "You are an intent classifier for a BI assistant.\n"
         "Classify the user query into exactly one label:\n"
         "- analytical: requires data analysis (aggregations/grouping/comparisons/trends)\n"
+        "- predictive: requires forecasting/prediction for future periods\n"
         "- conversational: greeting/chitchat/help text without data analysis\n\n"
         "Output constraints:\n"
         "- Output exactly one lowercase word.\n"
-        "- Allowed outputs: analytical OR conversational\n"
+        "- Allowed outputs: analytical OR predictive OR conversational\n"
         "- No punctuation.\n"
         "- No explanations.\n\n"
         f"Query: {question}\n"
@@ -206,8 +245,10 @@ def _extract_ollama_error_message(response: requests.Response) -> str:
 
 def _parse_llm_label(raw_output: str) -> str:
     normalized = _normalize_text(raw_output)
-    if normalized in {"analytical", "conversational"}:
+    if normalized in {"analytical", "predictive", "conversational"}:
         return normalized
+    if normalized in {"forecast", "forecasting"}:
+        return "predictive"
     if normalized in {"informational", "information", "non_analytical", "non-analytical"}:
         return "conversational"
 
@@ -222,16 +263,20 @@ def _parse_llm_label(raw_output: str) -> str:
                 if value is None:
                     continue
                 parsed = _normalize_text(value)
-                if parsed in {"analytical", "conversational"}:
+                if parsed in {"analytical", "predictive", "conversational"}:
                     return parsed
+                if parsed in {"forecast", "forecasting"}:
+                    return "predictive"
                 if parsed in {"informational", "information", "non_analytical", "non-analytical"}:
                     return "conversational"
 
-    match = re.search(r"\b(analytical|conversational|informational)\b", normalized)
+    match = re.search(r"\b(analytical|predictive|forecast|forecasting|conversational|informational)\b", normalized)
     if match:
         value = match.group(1)
         if value == "informational":
             return "conversational"
+        if value in {"forecast", "forecasting"}:
+            return "predictive"
         return value
 
     raise ValueError(f"Unsupported classifier output: {raw_output!r}")
@@ -334,6 +379,13 @@ def classify_question(question: str) -> dict[str, Any]:
         )
 
     # Rule-based guard (higher priority than LLM).
+    if _has_predictive_signal(normalized_question):
+        return _build_decision_payload(
+            classification="predictive",
+            decision_source="predictive_rule_based_guard",
+            llm_explicit_decision=False,
+        )
+
     if is_force_analytical(normalized_question):
         return _build_decision_payload(
             classification="analytical",
@@ -358,3 +410,12 @@ def classify_question(question: str) -> dict[str, Any]:
         fallback = _heuristic_classification(normalized_question)
         fallback["llm_error"] = str(exc)
         return fallback
+
+
+def _has_predictive_signal(question: str) -> bool:
+    normalized = _normalize_text(question)
+    if not normalized:
+        return False
+    if any(_contains_phrase(normalized, keyword) for keyword in PREDICTIVE_KEYWORDS):
+        return True
+    return any(re.search(pattern, normalized) for pattern in _PREDICTIVE_PATTERNS)

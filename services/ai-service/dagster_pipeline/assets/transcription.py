@@ -15,6 +15,12 @@ class PipelineRequestConfig(Config):
     language: Optional[str] = None
     initial_prompt: Optional[str] = None
     user_id: Optional[str] = None
+    manager_id: Optional[str] = None
+    dataset_id: Optional[str] = None
+    source_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    report_id: Optional[str] = None
+    table_name: Optional[str] = None
 
 
 @asset(
@@ -30,6 +36,12 @@ def pipeline_request_asset(context: AssetExecutionContext, config: PipelineReque
         "language": str(config.language or "").strip() or None,
         "initial_prompt": str(config.initial_prompt or "").strip() or None,
         "user_id": str(config.user_id or "").strip() or None,
+        "manager_id": str(config.manager_id or "").strip() or None,
+        "dataset_id": str(config.dataset_id or "").strip() or None,
+        "source_id": str(config.source_id or "").strip() or None,
+        "workspace_id": str(config.workspace_id or "").strip() or None,
+        "report_id": str(config.report_id or "").strip() or None,
+        "table_name": str(config.table_name or "").strip() or None,
     }
     context.log.info(
         "Pipeline request received | has_audio=%s has_text=%s user_id_present=%s",

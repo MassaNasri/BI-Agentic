@@ -11,6 +11,7 @@ redis
 
 requests
 python-dotenv
+rapidfuzz
 
 langchain
 langchain-community

@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+from shared.pipeline_guards import is_technical_column_name
+
 
 NUMERIC_TYPE_TOKENS = (
     "int",
@@ -45,15 +47,18 @@ def is_dimension_type(col_type: str) -> bool:
 
 def build_table_metadata(columns: list[dict[str, Any]]) -> dict[str, Any]:
     column_map = {col["name"]: col for col in columns}
-    numeric_columns = [c["name"] for c in columns if c.get("is_numeric")]
-    date_columns = [c["name"] for c in columns if c.get("is_date")]
-    dimension_columns = [c["name"] for c in columns if c.get("is_dimension")]
+    business_columns = [c for c in columns if not is_technical_column_name(str(c.get("name", "")))]
+    numeric_columns = [c["name"] for c in business_columns if c.get("is_numeric")]
+    date_columns = [c["name"] for c in business_columns if c.get("is_date")]
+    dimension_columns = [c["name"] for c in business_columns if c.get("is_dimension")]
+    technical_columns = [c["name"] for c in columns if is_technical_column_name(str(c.get("name", "")))]
     return {
         "columns": columns,
         "column_map": column_map,
         "numeric_columns": numeric_columns,
         "date_columns": date_columns,
         "dimension_columns": dimension_columns,
+        "technical_columns": technical_columns,
     }
 
 

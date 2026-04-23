@@ -10,10 +10,13 @@ PreprocessActionType = Literal["retry", "stop"]
 
 
 class PreprocessResult(TypedDict):
-    status: Literal["success", "failed"]
+    status: Literal["success", "failed", "degraded"]
     cleaned_text: str
     error_type: str
     action_taken: PreprocessActionType
+    degraded: bool
+    degradation_reason: str
+    confidence: float
     detected_changes: list[dict[str, str]]
     warnings: list[dict[str, str]]
     errors: list[dict[str, str]]
@@ -58,6 +61,9 @@ def build_preprocess_success_result(cleaned_text: str) -> PreprocessResult:
         "cleaned_text": cleaned_text,
         "error_type": "none",
         "action_taken": "stop",
+        "degraded": False,
+        "degradation_reason": "",
+        "confidence": 0.0,
         "detected_changes": [],
         "warnings": [],
         "errors": [],
@@ -79,6 +85,9 @@ def build_preprocess_failed_result(
         "cleaned_text": "",
         "error_type": error_type,
         "action_taken": action_taken,
+        "degraded": False,
+        "degradation_reason": "",
+        "confidence": 0.0,
         "detected_changes": [],
         "warnings": [],
         "errors": [],

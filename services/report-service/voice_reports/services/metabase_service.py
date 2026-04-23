@@ -26,6 +26,20 @@ METABASE_AUTH_RETRIES = int(os.getenv("METABASE_AUTH_RETRIES", "2"))
 METABASE_HEALTH_RETRIES = int(os.getenv("METABASE_HEALTH_RETRIES", "2"))
 METABASE_SESSION_TTL_SECONDS = int(os.getenv("METABASE_SESSION_TTL_SECONDS", "1800"))
 
+CHART_TYPE_MAPPING: Dict[str, str] = {
+    "line": "line",
+    "bar": "bar",
+    "scatter": "scatter",
+    "histogram": "histogram",
+    "kpi": "scalar",
+    "card": "scalar",
+    "scalar": "scalar",
+    "number": "scalar",
+    "grouped_bar": "bar",
+    "table": "table",
+}
+SUPPORTED_DISPLAYS = {"line", "bar", "scatter", "scalar", "table", "histogram"}
+
 
 def _metabase_base_url() -> str:
     return (os.getenv("METABASE_URL") or "http://localhost:3000").rstrip("/")
@@ -134,6 +148,9 @@ class MetabaseService:
         self.embed_base_url = _metabase_embed_base_url()
         self.database_id = int(os.getenv("METABASE_DATABASE_ID", "1"))
         self.last_error: Optional[str] = None
+        self.last_display: Optional[str] = None
+        self.last_fallback_applied: bool = False
+        self.last_fallback_reason: str = ""
 
     @staticmethod
     def _clean_non_blank_string(value: Optional[str]) -> Optional[str]:
@@ -153,6 +170,103 @@ class MetabaseService:
 
     def _set_last_error(self, message: Optional[str]) -> None:
         self.last_error = message
+
+    @staticmethod
+    def _string_list(values: Any) -> list[str]:
+        if not isinstance(values, (list, tuple)):
+            return []
+        return [str(value).strip() for value in values if str(value or "").strip()]
+
+    @staticmethod
+    def _normalize_display(value: Optional[str]) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip().lower()
+        if not cleaned:
+            return None
+        return CHART_TYPE_MAPPING.get(cleaned, cleaned)
+
+    def _safe_display_from_shape(self, settings: Dict[str, Any]) -> str:
+        numeric_columns = self._string_list(settings.get("numeric_columns"))
+        time_columns = self._string_list(settings.get("time_columns"))
+        category_columns = self._string_list(settings.get("category_columns"))
+        row_count = int(settings.get("row_count") or 0)
+        if time_columns and numeric_columns and row_count > 1:
+            settings["graph.dimensions"] = [time_columns[0]]
+            settings["graph.metrics"] = [numeric_columns[0]]
+            return "line"
+        if len(numeric_columns) >= 2 and row_count > 1:
+            settings["graph.dimensions"] = [numeric_columns[0]]
+            settings["graph.metrics"] = [numeric_columns[1]]
+            return "scatter"
+        if category_columns and numeric_columns:
+            settings["graph.dimensions"] = [category_columns[0]]
+            settings["graph.metrics"] = [numeric_columns[0]]
+            return "bar"
+        if len(numeric_columns) == 1 and row_count == 1:
+            settings["graph.metrics"] = [numeric_columns[0]]
+            return "scalar"
+        return "table"
+
+    def _prepare_visualization_settings(self, visualization_settings: Optional[Dict[str, Any]]) -> tuple[str, Dict[str, Any]]:
+        settings: Dict[str, Any] = dict(visualization_settings or {})
+        requested_display = self._normalize_display(settings.get("display") or settings.get("chart_type"))
+        fallback_applied = False
+        fallback_reason = ""
+        if not requested_display:
+            requested_display = self._safe_display_from_shape(settings)
+            fallback_applied = True
+            fallback_reason = "missing_requested_display"
+
+        display = requested_display
+        if display not in SUPPORTED_DISPLAYS:
+            display = self._safe_display_from_shape(settings)
+            fallback_applied = True
+            fallback_reason = f"unsupported_display:{requested_display}"
+
+        if display == "line":
+            dimensions = self._string_list(settings.get("graph.dimensions")) or self._string_list(settings.get("time_columns"))
+            metrics = self._string_list(settings.get("graph.metrics")) or self._string_list(settings.get("numeric_columns"))
+            if dimensions and metrics:
+                settings["graph.dimensions"] = [dimensions[0]]
+                settings["graph.metrics"] = [metrics[0]]
+            else:
+                fallback_applied = True
+                fallback_reason = "invalid_line_shape"
+                display = self._safe_display_from_shape(settings)
+        elif display == "scatter":
+            dimensions = self._string_list(settings.get("graph.dimensions"))
+            metrics = self._string_list(settings.get("graph.metrics"))
+            numeric_columns = self._string_list(settings.get("numeric_columns"))
+            x_axis = dimensions[0] if dimensions else (numeric_columns[0] if len(numeric_columns) >= 1 else "")
+            y_axis = metrics[0] if metrics else (numeric_columns[1] if len(numeric_columns) >= 2 else "")
+            if x_axis and y_axis and x_axis != y_axis:
+                settings["graph.dimensions"] = [x_axis]
+                settings["graph.metrics"] = [y_axis]
+            else:
+                fallback_applied = True
+                fallback_reason = "invalid_scatter_shape"
+                display = self._safe_display_from_shape(settings)
+        elif display == "bar":
+            dimensions = self._string_list(settings.get("graph.dimensions")) or self._string_list(settings.get("category_columns"))
+            metrics = self._string_list(settings.get("graph.metrics")) or self._string_list(settings.get("numeric_columns"))
+            if dimensions:
+                settings["graph.dimensions"] = [dimensions[0]]
+            if metrics:
+                settings["graph.metrics"] = [metrics[0]]
+        elif display in {"histogram", "scalar"}:
+            metrics = self._string_list(settings.get("graph.metrics")) or self._string_list(settings.get("numeric_columns"))
+            if metrics:
+                settings["graph.metrics"] = [metrics[0]]
+
+        settings["display"] = display
+        settings["requested_display"] = requested_display
+        settings["fallback_applied"] = fallback_applied
+        settings["fallback_reason"] = fallback_reason
+        self.last_display = display
+        self.last_fallback_applied = fallback_applied
+        self.last_fallback_reason = fallback_reason
+        return display, settings
 
     def health_check(self) -> bool:
         healthy = check_metabase_health()
@@ -225,7 +339,7 @@ class MetabaseService:
         visualization_settings: Optional[Dict] = None,
     ) -> Optional[int]:
         self._set_last_error(None)
-        visualization_settings = visualization_settings or {}
+        display, visualization_settings = self._prepare_visualization_settings(visualization_settings)
 
         payload: Dict[str, Any] = {
             "name": name,
@@ -234,7 +348,7 @@ class MetabaseService:
                 "native": {"query": sql},
                 "database": self.database_id,
             },
-            "display": visualization_settings.get("display", "table"),
+            "display": display,
             "visualization_settings": visualization_settings,
         }
         clean_description = self._clean_non_blank_string(description)
@@ -277,7 +391,7 @@ class MetabaseService:
         visualization_settings: Optional[Dict] = None,
     ) -> bool:
         self._set_last_error(None)
-        visualization_settings = visualization_settings or {}
+        display, visualization_settings = self._prepare_visualization_settings(visualization_settings)
 
         payload: Dict[str, Any] = {
             "name": name,
@@ -286,7 +400,7 @@ class MetabaseService:
                 "native": {"query": sql},
                 "database": self.database_id,
             },
-            "display": visualization_settings.get("display", "table"),
+            "display": display,
             "visualization_settings": visualization_settings,
         }
         clean_description = self._clean_non_blank_string(description)

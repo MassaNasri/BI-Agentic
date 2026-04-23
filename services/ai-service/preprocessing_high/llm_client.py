@@ -64,8 +64,23 @@ _DETERMINISTIC_FALLBACK_STOP_TOKENS = {
     "get",
     "give",
     "display",
+    "what",
     "how",
     "many",
+    "do",
+    "we",
+    "have",
+    "had",
+    "has",
+    "which",
+    "when",
+    "where",
+    "from",
+    "between",
+    "over",
+    "under",
+    "is",
+    "are",
     "number",
     "numbers",
     "each",
@@ -81,11 +96,53 @@ _DETERMINISTIC_FALLBACK_STOP_TOKENS = {
     "count",
     "min",
     "max",
+    "impact",
+    "effect",
+    "influence",
+    "relationship",
+    "correlation",
+    "distribution",
+    "distributed",
+    "spread",
+    "histogram",
+    "frequency",
+    "trend",
+    "trends",
+    "values",
+    "value",
 }
 _SEMANTIC_MAPPING_MIN_SCORE = 2.0
 _SEMANTIC_MAPPING_MIN_MARGIN = 0.25
 _RANKING_WORDS = ("highest", "lowest", "largest", "smallest", "top", "bottom", "best", "worst")
 _COMPARISON_WORDS = ("above", "below", "over", "under", "greater than", "less than", "between")
+_TOKEN_SYNONYMS = {
+    "revenue": {"sales", "total_sales", "sale", "amount"},
+    "sales": {"revenue", "sale", "total_sales"},
+}
+
+# Reserved predictive vocabulary that must never be interpreted as schema entities.
+FORECAST_RESERVED_TERMS = {
+    "forecast",
+    "forecasting",
+    "predict",
+    "predictive",
+    "prediction",
+    "predictions",
+    "future",
+    "next",
+    "expected",
+    "trend",
+    "trends",
+    "upcoming",
+    "day",
+    "days",
+    "week",
+    "weeks",
+    "month",
+    "months",
+    "year",
+    "years",
+}
 
 
 def _schema_for_prompt(loaded_schema: LoadedUserSchema) -> str:
@@ -557,15 +614,25 @@ def _token_forms(token: str) -> set[str]:
     return forms
 
 
+def _expanded_token_forms(token: str) -> set[str]:
+    forms = _token_forms(token)
+    expanded = set(forms)
+    for form in list(forms):
+        expanded.update(_TOKEN_SYNONYMS.get(form, set()))
+    return expanded
+
+
 def _find_semantic_schema_mentions(
     *,
     query: str,
     loaded_schema: LoadedUserSchema,
     existing_requested: set[str],
+    ignored_terms: set[str] | None = None,
 ) -> list[ValidationMapping]:
     mappings: list[ValidationMapping] = []
     raw_tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(query or "").lower())
     seen_requested = set(existing_requested)
+    ignored = {str(term).strip().lower() for term in (ignored_terms or set()) if str(term).strip()}
 
     column_catalog: list[tuple[str, str, set[str]]] = []
     for table_name, columns in loaded_schema.schema["columns"].items():
@@ -579,12 +646,14 @@ def _find_semantic_schema_mentions(
             column_catalog.append((table_name, column_name, column_tokens))
 
     for token in raw_tokens:
-        token_forms = _token_forms(token)
+        token_forms = _expanded_token_forms(token)
         if not token_forms:
             continue
         if token_forms & _DETERMINISTIC_FALLBACK_STOP_TOKENS:
             continue
         canonical_requested = token.lower()
+        if canonical_requested in ignored:
+            continue
         if canonical_requested in seen_requested:
             continue
 
@@ -678,14 +747,22 @@ def build_deterministic_schema_validation_result(
     *,
     corrected_query: str,
     loaded_schema: LoadedUserSchema,
+    ignored_terms: set[str] | None = None,
 ) -> SchemaValidationResult:
     mappings = _find_direct_schema_mentions(query=corrected_query, loaded_schema=loaded_schema)
+    ignored = {str(term).strip().lower() for term in (ignored_terms or set()) if str(term).strip()}
+    mappings = [
+        mapping
+        for mapping in mappings
+        if str(mapping.get("requested", "")).strip().lower() not in ignored
+    ]
     existing_requested = {str(mapping.get("requested", "")).strip().lower() for mapping in mappings}
     mappings.extend(
         _find_semantic_schema_mentions(
             query=corrected_query,
             loaded_schema=loaded_schema,
             existing_requested=existing_requested,
+            ignored_terms=ignored,
         )
     )
     derivable_mappings: list[ValidationMapping] = []
@@ -698,6 +775,8 @@ def build_deterministic_schema_validation_result(
     fallback_datetime_column = get_fallback_derivable_column(loaded_schema)
 
     for token in sorted(normalized_query_tokens):
+        if token in ignored:
+            continue
         if token not in _DERIVABLE_TIME_TERMS:
             continue
 
@@ -799,13 +878,52 @@ def validate_query_schema_usage(
     if not valid_mappings:
         valid_mappings = _find_direct_schema_mentions(query=corrected_query, loaded_schema=loaded_schema)
 
-    if invalid_mappings:
+    deterministic_result = build_deterministic_schema_validation_result(
+        corrected_query=corrected_query,
+        loaded_schema=loaded_schema,
+    )
+
+    # Use deterministic validation as authority so LLM-only false invalid references
+    # (e.g., ranking/comparison words) do not block valid analytical queries.
+    deterministic_invalid = list(deterministic_result.get("invalid_mappings", []) or [])
+    deterministic_missing = str(deterministic_result.get("missing_column", "") or "").strip()
+    deterministic_mappings = list(deterministic_result.get("mappings", []) or [])
+    deterministic_derivable = list(deterministic_result.get("derivable_columns", []) or [])
+
+    merged_mappings: list[ValidationMapping] = []
+    seen_mapping_keys: set[tuple[str, str, str, str]] = set()
+
+    for mapping in valid_mappings + deterministic_mappings:
+        requested = str(mapping.get("requested", "")).strip()
+        matched_table = str(mapping.get("matched_table", "")).strip()
+        matched_column = str(mapping.get("matched_column", "")).strip()
+        status = str(mapping.get("status", "")).strip().lower()
+        key = (requested.lower(), matched_table.lower(), matched_column.lower(), status)
+        if key in seen_mapping_keys:
+            continue
+        seen_mapping_keys.add(key)
+        merged_mappings.append(mapping)
+
+    merged_derivable: list[ValidationMapping] = []
+    seen_derivable_keys: set[tuple[str, str, str, str]] = set()
+    for mapping in derivable_mappings + deterministic_derivable:
+        requested = str(mapping.get("requested", "")).strip()
+        matched_table = str(mapping.get("matched_table", "")).strip()
+        matched_column = str(mapping.get("matched_column", "")).strip()
+        status = str(mapping.get("status", "")).strip().lower()
+        key = (requested.lower(), matched_table.lower(), matched_column.lower(), status)
+        if key in seen_derivable_keys:
+            continue
+        seen_derivable_keys.add(key)
+        merged_derivable.append(mapping)
+
+    if deterministic_invalid:
         return {
             "is_valid": False,
-            "missing_column": missing_column or "unknown",
-            "mappings": valid_mappings,
-            "derivable_columns": derivable_mappings,
-            "invalid_mappings": invalid_mappings,
+            "missing_column": deterministic_missing or missing_column or "unknown",
+            "mappings": merged_mappings,
+            "derivable_columns": merged_derivable,
+            "invalid_mappings": deterministic_invalid,
         }
 
     # If still no explicit references, this query can proceed and downstream intent extraction
@@ -814,14 +932,14 @@ def validate_query_schema_usage(
         logger,
         logging.INFO,
         "Schema validation completed",
-        reference_count=len(valid_mappings),
-        derivable_count=len(derivable_mappings),
+        reference_count=len(merged_mappings),
+        derivable_count=len(merged_derivable),
         schema_valid=True,
     )
     return {
         "is_valid": True,
         "missing_column": "",
-        "mappings": valid_mappings,
-        "derivable_columns": derivable_mappings,
+        "mappings": merged_mappings,
+        "derivable_columns": merged_derivable,
         "invalid_mappings": [],
     }

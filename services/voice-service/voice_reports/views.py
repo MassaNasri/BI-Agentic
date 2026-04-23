@@ -33,12 +33,15 @@ from .services import (
     get_notification_client,
 )
 from .services.clickhouse_executor import sanitize_query_results
+from .services.forecasting_bridge import build_forecast_payload, detect_forecast_metadata
+from .services.ai_trace_service import build_ai_trace_payload
+from .utils import extract_upstream_chart_type, infer_chart_type
 from users.permissions import IsManager, IsAnalyst, IsExecutive
 
 logger = logging.getLogger(__name__)
 LOW_CHANGE_TYPES = {"removed_noise", "normalized", "reduced_repetition", "removed_filler_words", "removed_noise_tags", "removed_noise_tokens", "normalized_repeated_characters", "normalized_punctuation", "normalized_whitespace", "removed_control_chars", "removed_malformed_symbols", "normalized_control_chars"}
 HIGH_ADJUSTMENT_TYPES = {"derived_field", "mapped_column"}
-ANALYTICAL_QUESTION_TYPES = {"analytical", "forecast"}
+ANALYTICAL_QUESTION_TYPES = {"analytical", "predictive", "forecast", "forecasting"}
 NON_ANALYTICAL_QUESTION_TYPES = {
     "conversational",
     "informational",
@@ -49,6 +52,28 @@ NON_ANALYTICAL_QUESTION_TYPES = {
     "transcription_failure",
     "no_speech_detected",
 }
+
+
+def build_report_ai_trace(report, *, embed_url: str = "") -> dict:
+    return build_ai_trace_payload(
+        report_id=report.id,
+        transcription=report.transcription,
+        preprocessing_low=report.preprocessing_low,
+        preprocessing_high=report.preprocessing_high,
+        intent_json=report.intent_json,
+        pipeline_trace=report.pipeline_trace,
+        generated_sql=report.generated_sql,
+        reviewed_sql=report.final_sql,
+        query_result=report.query_result,
+        execution_time_ms=report.execution_time_ms,
+        row_count=report.row_count,
+        chart_type=report.chart_type,
+        metabase_question_id=report.metabase_question_id,
+        metabase_dashboard_id=report.metabase_dashboard_id,
+        embed_url=embed_url,
+        chart_config=report.chart_config,
+        error_message=report.error_message,
+    )
 
 
 def normalize_question_type(question_type: str | None) -> str:
@@ -64,6 +89,15 @@ def is_analytical_question_type(question_type: str | None) -> bool:
 
 def is_explicit_non_analytical_question_type(question_type: str | None) -> bool:
     return normalize_question_type(question_type) in NON_ANALYTICAL_QUESTION_TYPES
+
+
+def _extract_pipeline_final_route(pipeline_trace: dict | None) -> str:
+    if not isinstance(pipeline_trace, dict):
+        return ""
+    overall_status = pipeline_trace.get("overall_status", {})
+    if isinstance(overall_status, dict):
+        return str(overall_status.get("final_route", "")).strip().lower()
+    return ""
 
 
 def publish_kafka_event(topic, payload, key=None):
@@ -83,15 +117,23 @@ def normalize_chart_payload(chart_payload):
     """
     if not isinstance(chart_payload, dict):
         return chart_payload
-    raw_type = chart_payload.get("type")
-    normalized_type = normalize_chart_type(raw_type, default=ChartType.TABLE)
+    raw_type = (
+        chart_payload.get("selected_chart_type")
+        or chart_payload.get("chart_type")
+        or chart_payload.get("type")
+    )
+    normalized_type = normalize_chart_type(raw_type, default="")
+    normalized_payload = dict(chart_payload)
+    if not normalized_type:
+        return normalized_payload
     if raw_type and raw_type != normalized_type:
         logger.info(
             "Chart type mapping applied: source=%s mapped=%s",
             raw_type,
             normalized_type,
         )
-    normalized_payload = dict(chart_payload)
+    normalized_payload["selected_chart_type"] = normalized_type
+    normalized_payload["chart_type"] = normalized_type
     normalized_payload["type"] = normalized_type
     return normalized_payload
 
@@ -136,6 +178,54 @@ def get_report_embed_url(report, metabase_service=None):
     return ""
 
 
+def _service_headers_with_auth(request):
+    headers = {"Content-Type": "application/json"}
+    auth_header = request.META.get("HTTP_AUTHORIZATION")
+    if auth_header:
+        headers["Authorization"] = auth_header
+    return headers
+
+
+def _resolve_dataset_binding_context(
+    *,
+    request,
+    workspace_id: str,
+    manager_id: str,
+    explicit_dataset_id: str = "",
+    explicit_source_id: str = "",
+    explicit_table_name: str = "",
+) -> dict[str, str]:
+    dataset_id = str(explicit_dataset_id or "").strip()
+    source_id = str(explicit_source_id or "").strip()
+    table_name = str(explicit_table_name or "").strip()
+
+    if not (dataset_id and table_name):
+        query_service_url = os.getenv("QUERY_SERVICE_URL", "http://query-service:8006").rstrip("/")
+        try:
+            response = requests.get(
+                f"{query_service_url}/database/",
+                headers=_service_headers_with_auth(request),
+                timeout=10,
+            )
+            if response.status_code == status.HTTP_200_OK:
+                raw_payload = response.json()
+                payload = raw_payload if isinstance(raw_payload, dict) else {}
+                data = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
+                dataset_id = dataset_id or str(data.get("id") or "").strip()
+                source_id = source_id or dataset_id
+                table_name = table_name or str(data.get("clickhouse_table_name") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to resolve ETL dataset binding from query-service: %s", exc)
+
+    return {
+        "workspace_id": str(workspace_id or "").strip(),
+        "manager_id": str(manager_id or "").strip(),
+        "dataset_id": dataset_id,
+        "source_id": source_id or dataset_id,
+        "table_name": table_name,
+    }
+
+
 def build_default_preprocessing_low(original_text: str = "") -> dict:
     normalized_text = str(original_text or "")
     return {
@@ -149,6 +239,7 @@ def build_default_preprocessing_high(corrected_query: str = "") -> dict:
     return {
         "corrected_query": str(corrected_query or ""),
         "term_corrections": [],
+        "user_friendly_messages": [],
         "schema_used": {"tables": [], "columns": []},
         "schema_adjustments": [],
         "unresolved_terms": [],
@@ -159,6 +250,8 @@ def build_default_preprocessing_high(corrected_query: str = "") -> dict:
         "candidate_tables": [],
         "selected_table": "",
         "selected_columns": [],
+        "skipped_schema_terms": [],
+        "routing_decision": {},
     }
 
 
@@ -190,6 +283,52 @@ def normalize_pipeline_trace(payload) -> dict:
         },
     )
     return normalized
+
+
+def extract_pipeline_contract(
+    pipeline_trace,
+    *,
+    confidence=None,
+    confidence_breakdown=None,
+    degraded=None,
+) -> dict:
+    trace = pipeline_trace if isinstance(pipeline_trace, dict) else {}
+    overall = trace.get("overall_status", {}) if isinstance(trace.get("overall_status"), dict) else {}
+    status_value = str(overall.get("status") or trace.get("status") or "").strip().lower()
+    breakdown = confidence_breakdown or overall.get("confidence_breakdown") or trace.get("confidence_breakdown")
+    score = confidence
+    if score is None:
+        score = overall.get("confidence", trace.get("confidence"))
+    try:
+        score = None if score is None else max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        score = None
+    derived_degraded = degraded
+    if derived_degraded is None:
+        derived_degraded = status_value == "degraded" or any(
+            isinstance(stage, dict)
+            and (
+                str(stage.get("status", "")).strip().lower() == "degraded"
+                or bool(stage.get("degraded"))
+            )
+            for stage in trace.values()
+        )
+    return {
+        "status": status_value or "unknown",
+        "degraded": bool(derived_degraded),
+        "confidence": score,
+        "confidence_breakdown": breakdown if isinstance(breakdown, dict) else None,
+    }
+
+
+def extract_report_contract(report) -> dict:
+    chart_config = report.chart_config if isinstance(report.chart_config, dict) else {}
+    stored = chart_config.get("ai_contract", {}) if isinstance(chart_config.get("ai_contract"), dict) else {}
+    trace_contract = extract_pipeline_contract(report.pipeline_trace)
+    return {
+        **trace_contract,
+        **{key: value for key, value in stored.items() if value is not None},
+    }
 
 
 def _flatten_schema_columns(columns_payload) -> list[str]:
@@ -366,11 +505,29 @@ def normalize_preprocessing_high(payload, fallback_query: str = "") -> dict:
         for correction in raw_corrections:
             if not isinstance(correction, dict):
                 continue
+            original_value = (
+                correction.get("original")
+                or correction.get("from")
+                or correction.get("source")
+                or ""
+            )
+            corrected_value = (
+                correction.get("corrected")
+                or correction.get("to")
+                or correction.get("target")
+                or ""
+            )
             term_corrections.append(
                 {
-                    "original": str(correction.get("original", "")).strip(),
-                    "corrected": str(correction.get("corrected", "")).strip(),
-                    "matched_column": str(correction.get("matched_column", "")).strip(),
+                    "original": str(original_value).strip(),
+                    "corrected": str(corrected_value).strip(),
+                    "matched_column": str(
+                        correction.get("matched_column", "") or correction.get("matched", "")
+                    ).strip(),
+                    "from": str(original_value).strip(),
+                    "to": str(corrected_value).strip(),
+                    "type": str(correction.get("type", "")).strip(),
+                    "message": str(correction.get("message", "")).strip(),
                 }
             )
     if not term_corrections and mappings:
@@ -434,6 +591,13 @@ def normalize_preprocessing_high(payload, fallback_query: str = "") -> dict:
     return {
         "corrected_query": corrected_query,
         "term_corrections": term_corrections,
+        "user_friendly_messages": [
+            str(message).strip()
+            for message in payload.get("user_friendly_messages", [])
+            if str(message).strip()
+        ]
+        if isinstance(payload.get("user_friendly_messages"), list)
+        else [],
         "schema_used": {
             "tables": tables,
             "columns": columns,
@@ -465,6 +629,16 @@ def normalize_preprocessing_high(payload, fallback_query: str = "") -> dict:
         else [],
         "selected_table": selected_table,
         "selected_columns": selected_columns,
+        "skipped_schema_terms": [
+            str(term).strip()
+            for term in payload.get("skipped_schema_terms", [])
+            if str(term).strip()
+        ]
+        if isinstance(payload.get("skipped_schema_terms"), list)
+        else [],
+        "routing_decision": payload.get("routing_decision", {})
+        if isinstance(payload.get("routing_decision"), dict)
+        else {},
     }
 
 
@@ -552,9 +726,22 @@ class VoiceUploadView(APIView):
             
             # Call Small Whisper (STATELESS - no user context needed)
             whisper_client = get_small_whisper_client()
+            binding_context = _resolve_dataset_binding_context(
+                request=request,
+                workspace_id=str(workspace.id),
+                manager_id=str(request.user.id),
+                explicit_dataset_id=str(request.data.get("dataset_id") or "").strip(),
+                explicit_source_id=str(request.data.get("source_id") or "").strip(),
+                explicit_table_name=str(request.data.get("table_name") or "").strip(),
+            )
             whisper_result = whisper_client.process_audio(
                 audio_file=audio_path,
                 user_id=str(request.user.id),
+                workspace_id=binding_context.get("workspace_id"),
+                manager_id=binding_context.get("manager_id"),
+                dataset_id=binding_context.get("dataset_id"),
+                source_id=binding_context.get("source_id"),
+                table_name=binding_context.get("table_name"),
             )
             
             if not whisper_result['success']:
@@ -584,6 +771,12 @@ class VoiceUploadView(APIView):
                 fallback_query=preprocessing_low.get("cleaned_text", ""),
             )
             pipeline_trace = normalize_pipeline_trace(whisper_result.get("pipeline_trace"))
+            ai_contract = extract_pipeline_contract(
+                pipeline_trace,
+                confidence=whisper_result.get("confidence"),
+                confidence_breakdown=whisper_result.get("confidence_breakdown"),
+                degraded=whisper_result.get("degraded"),
+            )
             
             # ALWAYS create a report record, even for conversational questions
             # This ensures we always return a valid report_id
@@ -598,12 +791,15 @@ class VoiceUploadView(APIView):
                 preprocessing_low=preprocessing_low,
                 preprocessing_high=preprocessing_high,
                 pipeline_trace=pipeline_trace,
+                chart_config={"ai_contract": ai_contract},
                 status=(
                     VoiceReport.STATUS_PENDING
                     if (is_analytical_question and sql)
                     else VoiceReport.STATUS_UPLOADED
-                )
+                ),
             )
+            report.ai_trace = build_report_ai_trace(report)
+            report.save(update_fields=['ai_trace', 'updated_at'])
 
             event_base = {
                 'report_id': report.id,
@@ -647,7 +843,8 @@ class VoiceUploadView(APIView):
                 )
                 report.status = VoiceReport.STATUS_FAILED
                 report.error_message = analytical_error_message
-                report.save(update_fields=['status', 'error_message'])
+                report.ai_trace = build_report_ai_trace(report)
+                report.save(update_fields=['status', 'error_message', 'ai_trace', 'updated_at'])
                 logger.error(
                     "Analytical SQL generation failed for report=%s workspace=%s message=%s",
                     report.id,
@@ -664,6 +861,9 @@ class VoiceUploadView(APIView):
                         'preprocessing_low': preprocessing_low,
                         'preprocessing_high': preprocessing_high,
                         'pipeline_trace': pipeline_trace,
+                        'confidence': ai_contract.get('confidence'),
+                        'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                        'degraded': ai_contract.get('degraded'),
                         'overall_status': whisper_result.get('overall_status'),
                         'root_cause': whisper_result.get('root_cause'),
                         'dagster_runtime': whisper_result.get('dagster_runtime'),
@@ -691,6 +891,9 @@ class VoiceUploadView(APIView):
                     'preprocessing_low': preprocessing_low,
                     'preprocessing_high': preprocessing_high,
                     'pipeline_trace': pipeline_trace,
+                    'confidence': ai_contract.get('confidence'),
+                    'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                    'degraded': ai_contract.get('degraded'),
                     'overall_status': whisper_result.get('overall_status'),
                     'root_cause': whisper_result.get('root_cause'),
                     'dagster_runtime': whisper_result.get('dagster_runtime'),
@@ -708,7 +911,8 @@ class VoiceUploadView(APIView):
                 )
                 report.status = VoiceReport.STATUS_FAILED
                 report.error_message = unresolved_error_message
-                report.save(update_fields=['status', 'error_message'])
+                report.ai_trace = build_report_ai_trace(report)
+                report.save(update_fields=['status', 'error_message', 'ai_trace', 'updated_at'])
                 logger.error(
                     "Voice pipeline missing SQL without explicit conversational classification "
                     "for report=%s workspace=%s question_type=%s message=%s",
@@ -727,6 +931,9 @@ class VoiceUploadView(APIView):
                         'preprocessing_low': preprocessing_low,
                         'preprocessing_high': preprocessing_high,
                         'pipeline_trace': pipeline_trace,
+                        'confidence': ai_contract.get('confidence'),
+                        'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                        'degraded': ai_contract.get('degraded'),
                         'overall_status': whisper_result.get('overall_status'),
                         'root_cause': whisper_result.get('root_cause'),
                         'dagster_runtime': whisper_result.get('dagster_runtime'),
@@ -753,6 +960,12 @@ class VoiceUploadView(APIView):
             logger.info(f"Voice report created: {report.id}")
 
             normalized_chart = normalize_chart_payload(whisper_result.get('chart'))
+            if isinstance(normalized_chart, dict):
+                report.chart_config = {
+                    **(report.chart_config if isinstance(report.chart_config, dict) else {}),
+                    "upstream_chart": normalized_chart,
+                }
+                report.save(update_fields=['chart_config', 'updated_at'])
             
             return Response({
                 'success': True,
@@ -763,7 +976,9 @@ class VoiceUploadView(APIView):
                 'intent': whisper_result.get('intent'),
                 'sql': sql,
                 'chart': normalized_chart,
-                'confidence': whisper_result.get('confidence'),
+                'confidence': ai_contract.get('confidence'),
+                'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                'degraded': ai_contract.get('degraded'),
                 'message': 'Audio processed successfully. Ready to execute.',
                 'preprocessing_low': preprocessing_low,
                 'preprocessing_high': preprocessing_high,
@@ -856,9 +1071,22 @@ class TextQueryView(APIView):
                 )
 
             whisper_client = get_small_whisper_client()
+            binding_context = _resolve_dataset_binding_context(
+                request=request,
+                workspace_id=str(workspace.id),
+                manager_id=str(request.user.id),
+                explicit_dataset_id=str(request.data.get("dataset_id") or "").strip(),
+                explicit_source_id=str(request.data.get("source_id") or "").strip(),
+                explicit_table_name=str(request.data.get("table_name") or "").strip(),
+            )
             text_result = whisper_client.process_text(
                 text=text,
                 user_id=str(request.user.id),
+                workspace_id=binding_context.get("workspace_id"),
+                manager_id=binding_context.get("manager_id"),
+                dataset_id=binding_context.get("dataset_id"),
+                source_id=binding_context.get("source_id"),
+                table_name=binding_context.get("table_name"),
             )
 
             if not text_result.get('success'):
@@ -888,6 +1116,12 @@ class TextQueryView(APIView):
                 fallback_query=preprocessing_low.get("cleaned_text", transcription_text),
             )
             pipeline_trace = normalize_pipeline_trace(text_result.get("pipeline_trace"))
+            ai_contract = extract_pipeline_contract(
+                pipeline_trace,
+                confidence=text_result.get("confidence"),
+                confidence_breakdown=text_result.get("confidence_breakdown"),
+                degraded=text_result.get("degraded"),
+            )
 
             report = VoiceReport(
                 workspace=workspace,
@@ -899,6 +1133,7 @@ class TextQueryView(APIView):
                 preprocessing_low=preprocessing_low,
                 preprocessing_high=preprocessing_high,
                 pipeline_trace=pipeline_trace,
+                chart_config={"ai_contract": ai_contract},
                 status=(
                     VoiceReport.STATUS_PENDING
                     if (is_analytical_question and sql)
@@ -910,6 +1145,7 @@ class TextQueryView(APIView):
                 ContentFile(transcription_text.encode('utf-8')),
                 save=False
             )
+            report.ai_trace = build_report_ai_trace(report)
             report.save()
 
             event_base = {
@@ -952,7 +1188,8 @@ class TextQueryView(APIView):
                 )
                 report.status = VoiceReport.STATUS_FAILED
                 report.error_message = analytical_error_message
-                report.save(update_fields=['status', 'error_message'])
+                report.ai_trace = build_report_ai_trace(report)
+                report.save(update_fields=['status', 'error_message', 'ai_trace', 'updated_at'])
                 logger.error(
                     "Analytical SQL generation failed for text report=%s workspace=%s message=%s",
                     report.id,
@@ -969,6 +1206,9 @@ class TextQueryView(APIView):
                         'preprocessing_low': preprocessing_low,
                         'preprocessing_high': preprocessing_high,
                         'pipeline_trace': pipeline_trace,
+                        'confidence': ai_contract.get('confidence'),
+                        'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                        'degraded': ai_contract.get('degraded'),
                         'overall_status': text_result.get('overall_status'),
                         'root_cause': text_result.get('root_cause'),
                         'dagster_runtime': text_result.get('dagster_runtime'),
@@ -994,6 +1234,9 @@ class TextQueryView(APIView):
                     'preprocessing_low': preprocessing_low,
                     'preprocessing_high': preprocessing_high,
                     'pipeline_trace': pipeline_trace,
+                    'confidence': ai_contract.get('confidence'),
+                    'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                    'degraded': ai_contract.get('degraded'),
                     'overall_status': text_result.get('overall_status'),
                     'root_cause': text_result.get('root_cause'),
                     'dagster_runtime': text_result.get('dagster_runtime'),
@@ -1009,7 +1252,8 @@ class TextQueryView(APIView):
                 )
                 report.status = VoiceReport.STATUS_FAILED
                 report.error_message = unresolved_error_message
-                report.save(update_fields=['status', 'error_message'])
+                report.ai_trace = build_report_ai_trace(report)
+                report.save(update_fields=['status', 'error_message', 'ai_trace', 'updated_at'])
                 logger.error(
                     "Text pipeline missing SQL without explicit conversational classification "
                     "for report=%s workspace=%s question_type=%s message=%s",
@@ -1028,6 +1272,9 @@ class TextQueryView(APIView):
                         'preprocessing_low': preprocessing_low,
                         'preprocessing_high': preprocessing_high,
                         'pipeline_trace': pipeline_trace,
+                        'confidence': ai_contract.get('confidence'),
+                        'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                        'degraded': ai_contract.get('degraded'),
                         'overall_status': text_result.get('overall_status'),
                         'root_cause': text_result.get('root_cause'),
                         'dagster_runtime': text_result.get('dagster_runtime'),
@@ -1041,6 +1288,12 @@ class TextQueryView(APIView):
                 )
 
             normalized_chart = normalize_chart_payload(text_result.get('chart'))
+            if isinstance(normalized_chart, dict):
+                report.chart_config = {
+                    **(report.chart_config if isinstance(report.chart_config, dict) else {}),
+                    "upstream_chart": normalized_chart,
+                }
+                report.save(update_fields=['chart_config', 'updated_at'])
 
             return Response({
                 'success': True,
@@ -1051,7 +1304,9 @@ class TextQueryView(APIView):
                 'intent': text_result.get('intent'),
                 'sql': sql,
                 'chart': normalized_chart,
-                'confidence': text_result.get('confidence'),
+                'confidence': ai_contract.get('confidence'),
+                'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                'degraded': ai_contract.get('degraded'),
                 'message': 'Text processed successfully. Ready to execute.',
                 'preprocessing_low': preprocessing_low,
                 'preprocessing_high': preprocessing_high,
@@ -1131,6 +1386,7 @@ class QueryExecuteView(APIView):
             if not is_valid:
                 report.status = VoiceReport.STATUS_FAILED
                 report.error_message = f"SQL validation failed: {error_msg}"
+                report.ai_trace = build_report_ai_trace(report)
                 report.save()
                 
                 return Response(
@@ -1150,6 +1406,7 @@ class QueryExecuteView(APIView):
             if not query_result.get('success'):
                 report.status = VoiceReport.STATUS_FAILED
                 report.error_message = query_result.get('error', 'Query execution failed')
+                report.ai_trace = build_report_ai_trace(report)
                 report.save()
 
                 logger.error(
@@ -1167,45 +1424,121 @@ class QueryExecuteView(APIView):
                     status=status.HTTP_502_BAD_GATEWAY
                 )
             
-            # Save query results
-            # ðŸ”’ NaN-SAFE: Apply sanitization before saving to PostgreSQL JSONField
-            # This is defense-in-depth - results are already sanitized in executor,
-            # but we sanitize again here to ensure PostgreSQL storage never fails
-            sanitized_rows = sanitize_query_results(query_result['rows'])
+            base_columns = query_result.get('columns', [])
+            base_rows = sanitize_query_results(query_result.get('rows', []))
+            visualization_sql = clean_sql
+            visualization_columns = base_columns
+            visualization_rows = base_rows
+            chart_config = dict(report.chart_config) if isinstance(report.chart_config, dict) else {}
+            chart_config.pop("forecasting", None)
+
+            forecast_request = detect_forecast_metadata(
+                intent=report.intent_json if isinstance(report.intent_json, dict) else {},
+                question_type=(
+                    (report.intent_json or {}).get("question_type")
+                    if isinstance(report.intent_json, dict)
+                    else None
+                ),
+                final_route=_extract_pipeline_final_route(report.pipeline_trace),
+            )
+            if forecast_request.get("requires_forecast"):
+                forecast_payload = None
+                try:
+                    forecast_payload = build_forecast_payload(
+                        columns=base_columns,
+                        rows=base_rows,
+                        intent=report.intent_json if isinstance(report.intent_json, dict) else {},
+                    )
+                except Exception as forecast_error:  # noqa: BLE001
+                    forecast_code = str(getattr(forecast_error, "code", "forecasting_failed"))
+                    forecast_message = str(getattr(forecast_error, "message", str(forecast_error)))
+                    forecast_details = getattr(forecast_error, "details", {})
+                    structured_error = {
+                        "code": forecast_code,
+                        "message": forecast_message,
+                        "details": forecast_details if isinstance(forecast_details, dict) else {},
+                    }
+                    chart_config["forecasting"] = {
+                        "enabled": True,
+                        "status": "failed",
+                        "request": forecast_request,
+                        "error": structured_error,
+                        "forecast_status": "failed",
+                        "reason": forecast_message or forecast_code,
+                        "fallback": "analytical_only",
+                    }
+                    visualization_sql = clean_sql
+                    visualization_columns = base_columns
+                    visualization_rows = base_rows
+
+                if forecast_payload is not None:
+                    forecast_meta = forecast_payload.get("meta", {}) if isinstance(forecast_payload.get("meta"), dict) else {}
+                    forecast_available = bool(forecast_meta.get("forecast_available", False))
+                    visualization_sql = forecast_payload["sql"]
+                    visualization_columns = forecast_payload["columns"]
+                    visualization_rows = sanitize_query_results(forecast_payload["rows"])
+                    chart_config["forecasting"] = {
+                        "enabled": True,
+                        "status": "success" if forecast_available else "degraded",
+                        "request": forecast_request,
+                        "meta": forecast_meta,
+                        "forecast_status": "success" if forecast_available else "degraded",
+                        "degraded": not forecast_available,
+                        "degradation_reason": "" if forecast_available else str(forecast_meta.get("fallback_reason", "forecast_unavailable")),
+                        "chart_series_config": forecast_meta.get("chart_series_config", []),
+                        "forecast_available": forecast_available,
+                    }
+            else:
+                chart_config.pop("forecasting", None)
+
+            # Save query/forecast dataset.
+            ai_contract = extract_report_contract(report)
+            if chart_config.get("forecasting", {}).get("status") == "failed":
+                prior_confidence = ai_contract.get("confidence")
+                ai_contract = {
+                    **ai_contract,
+                    "degraded": True,
+                    "status": "degraded",
+                    "confidence": (
+                        min(float(prior_confidence), 0.6)
+                        if isinstance(prior_confidence, (int, float))
+                        else prior_confidence
+                    ),
+                }
+            chart_config["ai_contract"] = ai_contract
             report.query_result = {
-                'columns': query_result.get('columns', []),
-                'rows': sanitized_rows
+                'columns': visualization_columns,
+                'rows': visualization_rows,
             }
             report.execution_time_ms = query_result['execution_time_ms']
-            report.row_count = query_result['row_count']
+            report.row_count = len(visualization_rows)
+            report.chart_config = chart_config
             report.status = VoiceReport.STATUS_EXECUTED
+            report.ai_trace = build_report_ai_trace(report)
             logger.info(
-                "ClickHouse result ready for report %s: columns=%s row_count=%s",
+                "ClickHouse result ready for report %s: base_columns=%s base_row_count=%s visualized_row_count=%s",
                 report.id,
-                len(query_result.get('columns', [])),
-                query_result['row_count']
+                len(base_columns),
+                query_result['row_count'],
+                len(visualization_rows),
             )
-            
+
             # ðŸ”’ NaN-SAFE: Catch JSON serialization errors during save
-            # This is a final safety net in case any NaN/Infinity values slip through
             try:
                 report.save()
             except (ValueError, TypeError) as json_error:
-                # JSON serialization failed - likely NaN/Infinity in data
                 logger.error(f"JSON serialization error when saving report {report.id}: {json_error}")
-                logger.error(f"This indicates NaN/Infinity values weren't properly sanitized")
-                # Try one more sanitization pass and save again
-                sanitized_rows = sanitize_query_results(sanitized_rows)
+                visualization_rows = sanitize_query_results(visualization_rows)
                 report.query_result = {
-                    'columns': query_result.get('columns', []),
-                    'rows': sanitized_rows
+                    'columns': visualization_columns,
+                    'rows': visualization_rows
                 }
                 try:
                     report.save()
                 except Exception as final_error:
-                    # If it still fails after re-sanitization, return error
                     report.status = VoiceReport.STATUS_FAILED
                     report.error_message = f"Data serialization error: {str(final_error)}"
+                    report.ai_trace = build_report_ai_trace(report)
                     report.save()
                     return Response(
                         {
@@ -1222,32 +1555,61 @@ class QueryExecuteView(APIView):
                     'report_id': report.id,
                     'workspace_id': report.workspace_id,
                     'user_id': request.user.id,
-                    'row_count': query_result.get('row_count', 0),
+                    'row_count': len(visualization_rows),
+                    'source_row_count': query_result.get('row_count', 0),
                     'execution_time_ms': query_result.get('execution_time_ms', 0),
                 },
                 key=str(report.id),
             )
             
             # Infer chart type
-            chart_type = self._infer_chart_type(
-                query_result['columns'],
-                query_result['rows'],
-                report.intent_json
+            upstream_chart_type = extract_upstream_chart_type(
+                chart_config=report.chart_config if isinstance(report.chart_config, dict) else {},
+                pipeline_trace=report.pipeline_trace if isinstance(report.pipeline_trace, dict) else {},
+            )
+            chart_type = (
+                ChartType.LINE
+                if forecast_request.get("requires_forecast")
+                and chart_config.get("forecasting", {}).get("status") in {"success", "degraded"}
+                else self._infer_chart_type(
+                    visualization_columns,
+                    visualization_rows,
+                    report.intent_json,
+                    preferred_chart_type=upstream_chart_type,
+                )
             )
             report.chart_type = chart_type
+            chart_config["selected_chart_type"] = chart_type
+            chart_config["chart_type"] = chart_type
+            chart_config["reason_chart_selected"] = (
+                "forecast_actual_overlay"
+                if chart_config.get("forecasting", {}).get("forecast_available")
+                else (
+                    "historical_only_forecast_fallback"
+                    if chart_config.get("forecasting", {}).get("enabled")
+                    else upstream_chart_type or "shape_and_intent_inference"
+                )
+            )
+            report.chart_config = chart_config
+            chart_settings = self._build_visualization_settings(report, chart_type)
+            axes_dimensions = chart_settings.get("graph.dimensions", [])
+            axes_metrics = chart_settings.get("graph.metrics", [])
+            chart_config["x_axis"] = axes_dimensions[0] if axes_dimensions else ""
+            chart_config["y_axis"] = axes_metrics[0] if axes_metrics else ""
             
             # Create visualization through Visualization Service.
             visualization_result = self._create_visualization_with_service(
                 request=request,
                 report=report,
-                sql=clean_sql,
+                sql=visualization_sql,
                 chart_type=chart_type,
+                visualization_settings=chart_settings,
             )
             if not visualization_result.get('success'):
                 return self._metabase_failure_response(
                     report=report,
                     chart_type=chart_type,
-                    row_count=query_result['row_count'],
+                    row_count=len(visualization_rows),
                     execution_time_ms=query_result['execution_time_ms'],
                     failure_reason=visualization_result.get('failure_reason', 'visualization_service_failed'),
                     details=visualization_result.get('error'),
@@ -1276,6 +1638,23 @@ class QueryExecuteView(APIView):
             report.status = VoiceReport.STATUS_VISUALIZATION_CREATED
             report.error_message = ''
             report.embed_url = ''
+            chart_config["metabase"] = {
+                "question_id": question_id,
+                "dashboard_id": dashboard_id,
+                "display": visualization_result.get("display") or chart_type,
+                "fallback_applied": bool(visualization_result.get("fallback_applied")),
+                "fallback_reason": visualization_result.get("fallback_reason", ""),
+            }
+            metabase_settings = visualization_result.get("visualization_settings", {})
+            if isinstance(metabase_settings, dict):
+                dimensions = metabase_settings.get("graph.dimensions", [])
+                metrics = metabase_settings.get("graph.metrics", [])
+                if isinstance(dimensions, list) and dimensions:
+                    chart_config["x_axis"] = dimensions[0]
+                if isinstance(metrics, list) and metrics:
+                    chart_config["y_axis"] = metrics[0]
+            report.chart_config = chart_config
+            report.ai_trace = build_report_ai_trace(report, embed_url=embed_url)
             report.save()
 
             publish_kafka_event(
@@ -1330,16 +1709,22 @@ class QueryExecuteView(APIView):
             
             logger.info(f"Report {report.id} executed successfully")
             
-            return Response({
+            response_payload = {
                 'success': True,
                 'report_id': report.id,
-                'row_count': query_result['row_count'],
+                'row_count': len(visualization_rows),
                 'execution_time_ms': query_result['execution_time_ms'],
                 'chart_type': chart_type,
                 'status': report.status,
                 'embed_url': embed_url,
-                'metabase_question_id': question_id
-            })
+                'metabase_question_id': question_id,
+                'confidence': ai_contract.get('confidence'),
+                'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                'degraded': ai_contract.get('degraded'),
+            }
+            if isinstance(chart_config.get("forecasting"), dict):
+                response_payload['forecasting'] = chart_config.get("forecasting")
+            return Response(response_payload)
         
         except Exception as e:
             logger.error(f"Error in QueryExecuteView: {e}", exc_info=True)
@@ -1377,6 +1762,7 @@ class QueryExecuteView(APIView):
         if clear_question:
             report.metabase_question_id = None
             report.metabase_dashboard_id = None
+        report.ai_trace = build_report_ai_trace(report)
         report.save()
 
         response_payload = {
@@ -1392,37 +1778,15 @@ class QueryExecuteView(APIView):
 
         return Response(response_payload, status=http_status)
     
-    def _infer_chart_type(self, columns, rows, intent):
-        """Infer appropriate chart type from data and intent."""
-        raw_chart_type = ChartType.TABLE
-
-        if not rows:
-            return ChartType.TABLE
-        
-        num_columns = len(columns)
-        
-        # Single value -> number display
-        if num_columns == 1 and len(rows) == 1:
-            raw_chart_type = 'scalar'
-        elif num_columns == 2:
-            # Check if first column is date/time
-            first_col_name = columns[0].lower()
-            if any(term in first_col_name for term in ['date', 'time', 'year', 'month', 'day']):
-                raw_chart_type = ChartType.LINE
-            else:
-                raw_chart_type = ChartType.BAR
-        elif num_columns > 2:
-            # Multiple numeric columns -> bar chart
-            raw_chart_type = ChartType.BAR
-        
-        normalized_chart_type = normalize_chart_type(raw_chart_type, default=ChartType.TABLE)
-        if raw_chart_type != normalized_chart_type:
-            logger.info(
-                "Chart type mapping applied in QueryExecuteView: source=%s mapped=%s",
-                raw_chart_type,
-                normalized_chart_type,
-            )
-        return normalized_chart_type
+    def _infer_chart_type(self, columns, rows, intent, preferred_chart_type: str = ""):
+        """Infer a render-safe chart using intent + result shape, preserving valid upstream choices."""
+        resolved = infer_chart_type(
+            columns=columns if isinstance(columns, list) else [],
+            rows=rows if isinstance(rows, list) else [],
+            intent=intent if isinstance(intent, dict) else {},
+            preferred_chart_type=preferred_chart_type,
+        )
+        return normalize_chart_type(resolved, default=ChartType.TABLE)
     
     def _service_headers(self, request):
         headers = {'Content-Type': 'application/json'}
@@ -1480,12 +1844,167 @@ class QueryExecuteView(APIView):
                 'error': f'query_service_and_fallback_failed: {exc}',
             }
 
-    def _create_visualization_with_service(self, request, report, sql, chart_type):
+    def _build_visualization_settings(self, report, chart_type):
+        query_result = report.query_result if isinstance(report.query_result, dict) else {}
+        columns_payload = query_result.get('columns', []) if isinstance(query_result.get('columns', []), list) else []
+        rows_payload = query_result.get('rows', []) if isinstance(query_result.get('rows', []), list) else []
+        intent_payload = report.intent_json if isinstance(report.intent_json, dict) else {}
+
+        def _is_numeric_like(value):
+            if isinstance(value, bool):
+                return False
+            if isinstance(value, (int, float)):
+                return True
+            if isinstance(value, str):
+                stripped = value.strip()
+                if not stripped:
+                    return False
+                if stripped.startswith('-'):
+                    stripped = stripped[1:]
+                return stripped.replace('.', '', 1).isdigit()
+            return False
+
+        def _type_is_numeric(column_type):
+            lowered = str(column_type or '').strip().lower()
+            if not lowered:
+                return False
+            return any(token in lowered for token in ('int', 'float', 'double', 'decimal', 'numeric'))
+
+        column_names = []
+        column_specs = []
+        for column in columns_payload:
+            if isinstance(column, dict):
+                name = str(column.get('name', '')).strip()
+                col_type = str(column.get('type', '')).strip()
+            else:
+                name = str(column or '').strip()
+                col_type = ''
+            if name:
+                column_names.append(name)
+                column_specs.append({'name': name, 'type': col_type, 'is_numeric': _type_is_numeric(col_type)})
+
+        numeric_columns = []
+        for index, name in enumerate(column_names):
+            column_spec = column_specs[index] if index < len(column_specs) else {}
+            if column_spec.get('is_numeric'):
+                numeric_columns.append(name)
+                continue
+            sample_values = [row.get(name) for row in rows_payload[:25] if isinstance(row, dict) and row.get(name) is not None]
+            if sample_values and all(_is_numeric_like(value) for value in sample_values):
+                numeric_columns.append(name)
+
+        time_columns = [
+            name for name in column_names
+            if any(token in name.lower() for token in ('date', 'time', 'period', 'day', 'week', 'month', 'year'))
+        ]
+        categorical_columns = [name for name in column_names if name not in numeric_columns]
+        normalized_chart_type = normalize_chart_type(chart_type, default=ChartType.TABLE)
+        chart_config = report.chart_config if isinstance(report.chart_config, dict) else {}
+        forecasting_config = chart_config.get("forecasting", {}) if isinstance(chart_config.get("forecasting"), dict) else {}
+        forecast_meta = forecasting_config.get("meta", {}) if isinstance(forecasting_config.get("meta"), dict) else {}
+
+        metrics_from_intent = []
+        for metric in (intent_payload.get("metrics", []) or []):
+            if isinstance(metric, dict):
+                metric_name = str(metric.get("alias") or metric.get("column") or "").strip()
+            else:
+                metric_name = str(metric or "").strip()
+            if metric_name:
+                metrics_from_intent.append(metric_name)
+        dimensions_from_intent = [
+            str(dim).strip()
+            for dim in (intent_payload.get("dimensions", []) or [])
+            if str(dim).strip()
+        ]
+        preferred_metric = next((metric for metric in metrics_from_intent if metric in column_names), "")
+        preferred_dimension = next((dim for dim in dimensions_from_intent if dim in column_names), "")
+
+        settings = {
+            'display': normalized_chart_type,
+            'chart_type': normalized_chart_type,
+            'numeric_columns': numeric_columns,
+            'time_columns': time_columns,
+            'category_columns': categorical_columns,
+            'row_count': len(rows_payload),
+            'dataset_columns': column_specs,
+            'result_rows': [row for row in rows_payload[:100] if isinstance(row, dict)],
+            'reason_chart_selected': chart_config.get('reason_chart_selected', ''),
+        }
+        if forecasting_config:
+            settings['forecast_available'] = bool(forecasting_config.get('forecast_available'))
+            settings['forecasting_status'] = forecasting_config.get('status', '')
+            settings['series_type_field'] = 'series_type'
+            settings['series_label_field'] = 'series_label'
+            settings['preferred_color_role_field'] = 'preferred_color_role'
+            settings['chart_series_config'] = (
+                forecasting_config.get('chart_series_config')
+                if isinstance(forecasting_config.get('chart_series_config'), list)
+                else forecast_meta.get('chart_series_config', [])
+            )
+            settings['forecast_start_date'] = forecast_meta.get('forecast_start_date', '')
+            settings['forecast_boundary_index'] = forecast_meta.get('actual_points', None)
+
+        if normalized_chart_type == ChartType.SCATTER:
+            x_axis = preferred_dimension if preferred_dimension in numeric_columns else ""
+            y_axis = preferred_metric if preferred_metric in numeric_columns else ""
+            if not x_axis and len(numeric_columns) >= 1:
+                x_axis = numeric_columns[0]
+            if not y_axis and len(numeric_columns) >= 2:
+                y_axis = numeric_columns[1]
+            if not y_axis and len(numeric_columns) >= 1:
+                y_axis = numeric_columns[0]
+            if x_axis and y_axis:
+                if x_axis == y_axis and len(numeric_columns) >= 2:
+                    y_axis = numeric_columns[1]
+                settings['graph.dimensions'] = [x_axis]
+                settings['graph.metrics'] = [y_axis]
+        elif normalized_chart_type == ChartType.LINE:
+            time_dimension = preferred_dimension if preferred_dimension in time_columns else ""
+            metric_column = preferred_metric if preferred_metric in numeric_columns else ""
+            if not time_dimension and time_columns:
+                time_dimension = time_columns[0]
+            if not metric_column and numeric_columns:
+                metric_column = numeric_columns[0]
+            if time_dimension and metric_column:
+                settings['graph.dimensions'] = [time_dimension]
+                settings['graph.metrics'] = [metric_column]
+                if forecasting_config and 'series_type' in column_names:
+                    settings['graph.breakout'] = ['series_type']
+        elif normalized_chart_type == ChartType.HISTOGRAM:
+            metric_column = preferred_metric if preferred_metric in numeric_columns else ""
+            if not metric_column and numeric_columns:
+                metric_column = numeric_columns[0]
+            if metric_column:
+                settings['graph.metrics'] = [metric_column]
+        elif normalized_chart_type == ChartType.BAR:
+            dimension_column = preferred_dimension if preferred_dimension in categorical_columns else ""
+            metric_column = preferred_metric if preferred_metric in numeric_columns else ""
+            if not dimension_column and categorical_columns:
+                dimension_column = categorical_columns[0]
+            if not metric_column and numeric_columns:
+                metric_column = numeric_columns[0]
+            if dimension_column and metric_column:
+                settings['graph.dimensions'] = [dimension_column]
+                settings['graph.metrics'] = [metric_column]
+        return settings
+
+    def _create_visualization_with_service(self, request, report, sql, chart_type, visualization_settings=None):
         visualization_service_url = os.getenv(
             'VISUALIZATION_SERVICE_URL',
             'http://visualization-service:8007'
         ).rstrip('/')
         headers = self._service_headers(request)
+        visualization_settings = (
+            visualization_settings
+            if isinstance(visualization_settings, dict)
+            else self._build_visualization_settings(report, chart_type)
+        )
+        logger.info(
+            "chart_selected=%s fallback_applied=%s report_id=%s",
+            chart_type,
+            False,
+            report.id,
+        )
         try:
             question_response = requests.post(
                 f'{visualization_service_url}/visualization/question/create/',
@@ -1493,6 +2012,7 @@ class QueryExecuteView(APIView):
                     'name': f"Voice Report #{report.id}: {report.transcription[:50]}",
                     'sql': sql,
                     'chart_type': chart_type,
+                    'visualization_settings': visualization_settings,
                 },
                 headers=headers,
                 timeout=120,
@@ -1521,6 +2041,18 @@ class QueryExecuteView(APIView):
                 'error': 'visualization_service_missing_question_id',
                 'http_status': status.HTTP_502_BAD_GATEWAY,
             }
+        logger.info(
+            "chart_sent_to_metabase=%s report_id=%s question_id=%s",
+            visualization_settings.get('display'),
+            report.id,
+            question_id,
+        )
+        result_metadata = {
+            'display': question_payload.get('display') or visualization_settings.get('display'),
+            'fallback_applied': bool(question_payload.get('fallback_applied')),
+            'fallback_reason': question_payload.get('fallback_reason', ''),
+            'visualization_settings': visualization_settings,
+        }
 
         dashboard_id = self._get_or_create_dashboard(
             workspace=report.workspace,
@@ -1583,6 +2115,7 @@ class QueryExecuteView(APIView):
             'question_id': question_id,
             'dashboard_id': dashboard_id,
             'embed_url': embed_url,
+            **result_metadata,
         }
 
     def _get_or_create_dashboard(self, workspace, visualization_service_url, headers):
@@ -1673,6 +2206,7 @@ class SQLEditView(APIView):
             report.edited_by = request.user
             report.sql_validated = True
             report.status = VoiceReport.STATUS_PENDING  # Needs re-execution
+            report.ai_trace = build_report_ai_trace(report)
             report.save()
             
             # TODO: Create history entry when ReportHistory model is added
@@ -1732,6 +2266,7 @@ class ReportListView(APIView):
             data = []
             for report in reports:
                 embed_url = get_report_embed_url(report, metabase_service=metabase)
+                ai_contract = extract_report_contract(report)
                 data.append({
                     'id': report.id,
                     'transcription': report.transcription,
@@ -1744,6 +2279,9 @@ class ReportListView(APIView):
                     'sql': report.final_sql,
                     'embed_url': embed_url,
                     'metabase_question_id': report.metabase_question_id,
+                    'confidence': ai_contract.get('confidence'),
+                    'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                    'degraded': ai_contract.get('degraded'),
                     'can_edit': request.user.role == 'analyst'
                 })
             logger.info(
@@ -1807,6 +2345,11 @@ class ReportDetailView(APIView):
                 fallback_query=preprocessing_low.get("cleaned_text", report.transcription),
             )
             pipeline_trace = normalize_pipeline_trace(report.pipeline_trace)
+            ai_contract = extract_report_contract(report)
+            ai_trace = build_report_ai_trace(report, embed_url=embed_url)
+            if report.ai_trace != ai_trace:
+                report.ai_trace = ai_trace
+                report.save(update_fields=['ai_trace', 'updated_at'])
             
             return Response({
                 'success': True,
@@ -1829,6 +2372,10 @@ class ReportDetailView(APIView):
                     'preprocessing_low': preprocessing_low,
                     'preprocessing_high': preprocessing_high,
                     'pipeline_trace': pipeline_trace,
+                    'ai_trace': ai_trace,
+                    'confidence': ai_contract.get('confidence'),
+                    'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                    'degraded': ai_contract.get('degraded'),
                     'overall_status': pipeline_trace.get('overall_status'),
                     'root_cause': pipeline_trace.get('root_cause'),
                     'error_message': report.error_message,

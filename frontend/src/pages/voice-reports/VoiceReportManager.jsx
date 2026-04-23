@@ -96,6 +96,11 @@ function VoiceReportManager() {
   const isProcessingRequest = isUploading || isSubmittingText || isExecuting
   const isPrimaryStepComplete = ['generating', 'executing', 'rendering'].includes(processingPhase)
   const isPrimaryStepActive = processingPhase === 'transcribing' || processingPhase === 'classifying'
+  const formatConfidence = (value) => {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) return '-'
+    return `${Math.round(Math.max(0, Math.min(1, numeric)) * 100)}%`
+  }
 
   const handleSubmissionResult = async (response, sourceMode) => {
     if (!response.data.success) {
@@ -139,7 +144,9 @@ function VoiceReportManager() {
         sql: null,
         intent: response.data.intent,
         status: 'uploaded',
-        message: response.data.message
+        message: response.data.message,
+        confidence: response.data.confidence,
+        degraded: response.data.degraded,
       })
       setSelectedFile(null)
       setTextInput('')
@@ -159,7 +166,9 @@ function VoiceReportManager() {
         sql: null,
         intent: response.data.intent,
         status: response.data.status || 'failed',
-        message: fallbackMessage
+        message: fallbackMessage,
+        confidence: response.data.confidence,
+        degraded: response.data.degraded,
       })
       setSelectedFile(null)
       setTextInput('')
@@ -181,7 +190,11 @@ function VoiceReportManager() {
       setProcessingPhase('rendering')
       await new Promise(resolve => setTimeout(resolve, 500))
 
-      toast.success(`Chart generated! ${executeResponse.data.row_count} rows visualized`)
+      if (executeResponse.data.degraded) {
+        toast.success(`Chart generated with reduced confidence. ${executeResponse.data.row_count} rows visualized`)
+      } else {
+        toast.success(`Chart generated! ${executeResponse.data.row_count} rows visualized`)
+      }
 
       setCurrentReport({
         id: reportId,
@@ -192,7 +205,9 @@ function VoiceReportManager() {
         embedUrl: executeResponse.data.embed_url,
         rowCount: executeResponse.data.row_count,
         executionTime: executeResponse.data.execution_time_ms,
-        chartType: executeResponse.data.chart_type
+        chartType: executeResponse.data.chart_type,
+        confidence: executeResponse.data.confidence ?? response.data.confidence,
+        degraded: Boolean(executeResponse.data.degraded ?? response.data.degraded),
       })
 
       setSelectedFile(null)
@@ -205,10 +220,12 @@ function VoiceReportManager() {
     setCurrentReport({
       id: reportId,
       transcription: response.data.transcription,
-      sql: response.data.sql,
-      intent: response.data.intent,
-      status: 'failed'
-    })
+        sql: response.data.sql,
+        intent: response.data.intent,
+        status: 'failed',
+        confidence: response.data.confidence,
+        degraded: response.data.degraded,
+      })
   }
 
   const handleUpload = async () => {
@@ -317,7 +334,9 @@ function VoiceReportManager() {
           embedUrl: report.embed_url,
           rowCount: report.row_count,
           executionTime: report.execution_time_ms,
-          chartType: report.chart_type
+          chartType: report.chart_type,
+          confidence: report.confidence,
+          degraded: report.degraded,
         })
       }
     } catch (error) {
@@ -592,7 +611,7 @@ function VoiceReportManager() {
               {isReportCompleted(currentReport.status) && (
                 <>
                   {/* Metrics */}
-                  <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-4">
                     <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                       <div className="flex items-center gap-2 text-green-600 dark:text-green-400 mb-1">
                         <Database className="w-4 h-4" />
@@ -621,6 +640,21 @@ function VoiceReportManager() {
                       <p className="text-2xl font-bold text-gray-900 dark:text-white capitalize">
                         {currentReport.chartType}
                       </p>
+                    </div>
+
+                    <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                      <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 mb-1">
+                        <CheckCircle className="w-4 h-4" />
+                        <span className="text-sm font-medium">Confidence</span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                        {formatConfidence(currentReport.confidence)}
+                      </p>
+                      {currentReport.degraded && (
+                        <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                          Degraded
+                        </p>
+                      )}
                     </div>
                   </div>
 

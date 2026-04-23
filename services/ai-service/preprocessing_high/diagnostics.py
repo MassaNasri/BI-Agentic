@@ -26,6 +26,12 @@ _TIME_TERMS = {
     "time",
     "hour",
     "hours",
+    "daily",
+    "weekly",
+    "monthly",
+    "quarterly",
+    "yearly",
+    "hourly",
 }
 
 _STOP_WORDS = {
@@ -50,6 +56,11 @@ _STOP_WORDS = {
     "display",
     "how",
     "many",
+    "do",
+    "we",
+    "have",
+    "had",
+    "has",
     "number",
     "numbers",
     "each",
@@ -116,6 +127,10 @@ _STOP_WORDS = {
     "ranking",
     "first",
     "last",
+    "trend",
+    "trends",
+    "relationship",
+    "relationships",
 }
 
 _TYPO_SCORE_THRESHOLD = 0.82
@@ -138,6 +153,58 @@ _COMPARISON_CONNECTORS = {
     "is",
     "are",
 }
+_TOKEN_SYNONYMS = {
+    "revenue": {"sales", "sale", "total_sales", "amount"},
+    "sales": {"revenue", "sale", "total_sales"},
+}
+
+_SUPPORTED_TEMPORAL_PHRASES = (
+    "over time",
+    "across time",
+    "through time",
+)
+
+_ANALYTICAL_LANGUAGE_TERMS = {
+    "analysis",
+    "analytical",
+    "distribution",
+    "distributed",
+    "spread",
+    "histogram",
+    "frequency",
+    "impact",
+    "effect",
+    "influence",
+    "correlation",
+    "insight",
+    "insights",
+    "pattern",
+    "patterns",
+    "relationship",
+    "relationships",
+    "trend",
+    "trends",
+    "variance",
+    "variation",
+    "value",
+    "values",
+}
+
+
+def _supported_temporal_phrase_terms(query_text: str) -> set[str]:
+    normalized_query = _normalize_phrase(query_text)
+    terms: set[str] = set()
+    for phrase in _SUPPORTED_TEMPORAL_PHRASES:
+        if phrase in normalized_query:
+            terms.update(phrase.split())
+    return terms
+
+
+def _is_analytical_language_term(term: str) -> bool:
+    normalized = _normalize_phrase(term)
+    if not normalized:
+        return False
+    return normalized in _ANALYTICAL_LANGUAGE_TERMS
 
 
 def _safe_singular_forms(value: str) -> list[str]:
@@ -210,6 +277,10 @@ def _column_token_lookup(columns_by_table: dict[str, list[str]]) -> dict[str, li
                 if len(token) <= 1:
                     continue
                 lookup[token].append(f"{table_name}:{column_name}")
+                for synonym in _TOKEN_SYNONYMS.get(token, set()):
+                    if len(str(synonym)) <= 1:
+                        continue
+                    lookup[str(synonym)].append(f"{table_name}:{column_name}")
     return lookup
 
 
@@ -350,7 +421,23 @@ def _best_typo_candidate(
 
 
 def _has_any_datetime_columns(loaded_schema: LoadedUserSchema) -> bool:
-    return bool(loaded_schema.date_columns_by_name)
+    if loaded_schema.date_columns_by_name:
+        return True
+
+    # Heuristic fallback: some datasets store date keys (e.g., `ds`) as String.
+    # Treat clearly date-like column names as temporal-capable for diagnostics.
+    date_like_tokens = {"date", "day", "week", "month", "quarter", "year", "time", "timestamp"}
+    for table_columns in loaded_schema.schema.get("columns", {}).values():
+        for column in table_columns:
+            column_name = str(column.get("name", "")).strip().lower()
+            if not column_name:
+                continue
+            if column_name == "ds":
+                return True
+            tokens = set(re.findall(r"[a-z0-9]+", column_name.replace("_", " ")))
+            if tokens & date_like_tokens:
+                return True
+    return False
 
 
 def _mapping_resolution_map(mappings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -428,6 +515,7 @@ def build_schema_resolution_diagnostics(
     corrected_query: str,
     loaded_schema: LoadedUserSchema,
     validation_result: dict[str, Any] | None,
+    ignored_terms: set[str] | None = None,
 ) -> dict[str, Any]:
     validation_payload = validation_result or {}
     mappings = validation_payload.get("mappings", []) if isinstance(validation_payload.get("mappings", []), list) else []
@@ -445,10 +533,15 @@ def build_schema_resolution_diagnostics(
     alias_lookup = _column_alias_lookup(columns_by_table)
 
     explicit_matches = _extract_explicit_column_matches(query_text=original_query, alias_lookup=alias_lookup)
+    supported_temporal_terms = _supported_temporal_phrase_terms(original_query)
     residual_terms = _extract_residual_terms(
         query_text=original_query,
         explicit_matches=explicit_matches,
-        ignored_terms=_extract_literal_filter_terms(original_query),
+        ignored_terms=(
+            _extract_literal_filter_terms(original_query)
+            | set(ignored_terms or set())
+            | supported_temporal_terms
+        ),
     )
 
     term_resolutions: list[dict[str, Any]] = []
@@ -553,7 +646,17 @@ def build_schema_resolution_diagnostics(
                 matched_columns.append(matched_column)
                 continue
 
-        if normalized_term in _TIME_TERMS and not _has_any_datetime_columns(loaded_schema):
+        if normalized_term in _TIME_TERMS:
+            if _has_any_datetime_columns(loaded_schema):
+                term_resolutions.append(
+                    {
+                        "term": term,
+                        "resolution_status": "analytical_language",
+                        "matched_column": "",
+                        "reason": "Supported temporal analytical language.",
+                    }
+                )
+                continue
             unsupported_terms.append(term)
             term_resolutions.append(
                 {
@@ -618,6 +721,17 @@ def build_schema_resolution_diagnostics(
             matched_columns.append(candidate_column)
             continue
 
+        if _is_analytical_language_term(term):
+            term_resolutions.append(
+                {
+                    "term": term,
+                    "resolution_status": "analytical_language",
+                    "matched_column": "",
+                    "reason": "Generic analytical wording; not treated as a schema reference.",
+                }
+            )
+            continue
+
         unresolved_lexical_terms.append(term)
         candidate_columns[term] = [
             candidate
@@ -655,7 +769,11 @@ def build_schema_resolution_diagnostics(
                 query_text=corrected_query,
                 alias_lookup=alias_lookup,
             ),
-            ignored_terms=_extract_literal_filter_terms(corrected_query),
+            ignored_terms=(
+                _extract_literal_filter_terms(corrected_query)
+                | set(ignored_terms or set())
+                | _supported_temporal_phrase_terms(corrected_query)
+            ),
         ),
         "unresolved_terms": sorted(set(unresolved_schema_terms)),
         "unresolved_lexical_terms": sorted(set(unresolved_lexical_terms)),

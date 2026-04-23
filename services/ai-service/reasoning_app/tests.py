@@ -117,7 +117,9 @@ class ReasoningRulesTests(unittest.TestCase):
             source="text",
             transcription_status="success",
         )
-        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status"], "degraded")
+        self.assertTrue(result.get("degraded"))
+        self.assertEqual(result.get("degradation_reason"), "intent_classification_llm_error_fallback")
         self.assertEqual(result["classification"], "conversational")
         self.assertFalse(result["is_analytical"])
         self.assertEqual(result["classification_reason"], "safety_default_conversational_on_llm_error")
@@ -137,7 +139,9 @@ class ReasoningRulesTests(unittest.TestCase):
     @patch("preprocessing_low.preprocess_task._call_ollama_preprocessor", side_effect=RuntimeError("ollama down"))
     def test_low_preprocess_uses_rule_based_fallback_when_llm_fails(self, _mock_llm):
         result = run_preprocess_text("show total population by region")
-        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status"], "degraded")
+        self.assertTrue(result.get("degraded"))
+        self.assertEqual(result.get("degradation_reason"), "llm_preprocessing_fallback")
         self.assertEqual(result["cleaned_text"], "show total population by region")
         warning_types = {warning.get("type") for warning in result.get("warnings", [])}
         self.assertIn("llm_preprocessing_fallback", warning_types)
@@ -580,6 +584,88 @@ class PipelineCaseCoverageTests(unittest.TestCase):
         self.assertEqual(diagnostics["schema_validation_status"], "valid")
         self.assertNotIn("highest", diagnostics["unresolved_terms"])
 
+    def test_case_k2b_relationship_language_is_not_marked_unresolved_schema(self):
+        schema = _build_loaded_schema(
+            {
+                "sales_3months_realistic_csv": [
+                    {"name": "ds", "type": "Date"},
+                    {"name": "total_sales", "type": "Float64"},
+                    {"name": "orders", "type": "UInt64"},
+                    {"name": "customers", "type": "UInt64"},
+                ]
+            }
+        )
+        diagnostics = build_schema_resolution_diagnostics(
+            original_query="what is the relationship between customers and total sales",
+            corrected_query="what is the relationship between customers and total_sales",
+            loaded_schema=schema,
+            validation_result={
+                "is_valid": True,
+                "missing_column": "",
+                "mappings": [
+                    {
+                        "requested": "customers",
+                        "matched_table": "sales_3months_realistic_csv",
+                        "matched_column": "customers",
+                        "status": "exact",
+                        "reason": "Exact match.",
+                    },
+                    {
+                        "requested": "sales",
+                        "matched_table": "sales_3months_realistic_csv",
+                        "matched_column": "total_sales",
+                        "status": "mapped",
+                        "reason": "Metric mapping.",
+                    },
+                ],
+                "derivable_columns": [],
+                "invalid_mappings": [],
+            },
+        )
+        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assertNotIn("relationship", diagnostics["unresolved_terms"])
+
+    def test_case_k2c_value_language_is_not_marked_unresolved_schema(self):
+        schema = _build_loaded_schema(
+            {
+                "sales_3months_realistic_csv": [
+                    {"name": "ds", "type": "Date"},
+                    {"name": "total_sales", "type": "Float64"},
+                    {"name": "orders", "type": "UInt64"},
+                    {"name": "customers", "type": "UInt64"},
+                ]
+            }
+        )
+        diagnostics = build_schema_resolution_diagnostics(
+            original_query="what is the average order value per day",
+            corrected_query="what is the average orders value per ds",
+            loaded_schema=schema,
+            validation_result={
+                "is_valid": True,
+                "missing_column": "",
+                "mappings": [
+                    {
+                        "requested": "orders",
+                        "matched_table": "sales_3months_realistic_csv",
+                        "matched_column": "orders",
+                        "status": "exact",
+                        "reason": "Exact match.",
+                    },
+                    {
+                        "requested": "day",
+                        "matched_table": "sales_3months_realistic_csv",
+                        "matched_column": "ds",
+                        "status": "mapped",
+                        "reason": "Mapped date axis.",
+                    },
+                ],
+                "derivable_columns": [],
+                "invalid_mappings": [],
+            },
+        )
+        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assertNotIn("value", diagnostics["unresolved_terms"])
+
     def test_case_k3_literal_filter_value_is_not_schema_unresolved(self):
         schema = self._population_schema()
         diagnostics = build_schema_resolution_diagnostics(
@@ -651,6 +737,107 @@ class PipelineCaseCoverageTests(unittest.TestCase):
         self.assertEqual(diagnostics["schema_validation_status"], "valid")
         self.assertNotIn("where", diagnostics["unresolved_terms"])
         self.assertNotIn("above", diagnostics["unresolved_terms"])
+
+    def test_case_k5_over_time_phrase_is_not_unsupported(self):
+        schema = _build_loaded_schema(
+            {
+                "sales_3months_realistic_csv": [
+                    {"name": "ds", "type": "String"},
+                    {"name": "total_sales", "type": "Float64"},
+                    {"name": "orders", "type": "UInt64"},
+                    {"name": "customers", "type": "UInt64"},
+                ]
+            }
+        )
+        diagnostics = build_schema_resolution_diagnostics(
+            original_query="show total sales over time",
+            corrected_query="show total_sales over time",
+            loaded_schema=schema,
+            validation_result={
+                "is_valid": True,
+                "missing_column": "",
+                "mappings": [
+                    {
+                        "requested": "sales",
+                        "matched_table": "sales_3months_realistic_csv",
+                        "matched_column": "total_sales",
+                        "status": "mapped",
+                        "reason": "Metric mapping.",
+                    }
+                ],
+                "derivable_columns": [],
+                "invalid_mappings": [],
+            },
+        )
+        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assertNotIn("time", diagnostics["unsupported_terms"])
+        self.assertNotIn("time", diagnostics["unresolved_terms"])
+        self.assertIn("total_sales", diagnostics["selected_columns"])
+
+    def test_case_k6_daily_per_month_is_not_unresolved_with_ds_time_key(self):
+        schema = _build_loaded_schema(
+            {
+                "sales_3months_realistic_csv": [
+                    {"name": "ds", "type": "String"},
+                    {"name": "total_sales", "type": "Float64"},
+                    {"name": "orders", "type": "UInt64"},
+                    {"name": "customers", "type": "UInt64"},
+                ]
+            }
+        )
+        diagnostics = build_schema_resolution_diagnostics(
+            original_query="what is the average daily sales per month",
+            corrected_query="what is the average daily total_sales per month",
+            loaded_schema=schema,
+            validation_result={
+                "is_valid": True,
+                "missing_column": "",
+                "mappings": [
+                    {
+                        "requested": "sales",
+                        "matched_table": "sales_3months_realistic_csv",
+                        "matched_column": "total_sales",
+                        "status": "mapped",
+                        "reason": "Metric mapping.",
+                    }
+                ],
+                "derivable_columns": [],
+                "invalid_mappings": [],
+            },
+        )
+        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assertNotIn("daily", diagnostics["unresolved_terms"])
+        self.assertNotIn("daily", diagnostics["unsupported_terms"])
+        self.assertNotIn("month", diagnostics["unresolved_terms"])
+        self.assertNotIn("month", diagnostics["unsupported_terms"])
+        self.assertIn("total_sales", diagnostics["selected_columns"])
+
+    def test_case_k7_revenue_maps_to_total_sales_for_sales_schema(self):
+        schema = _build_loaded_schema(
+            {
+                "sales_3months_realistic_csv": [
+                    {"name": "ds", "type": "Date"},
+                    {"name": "total_sales", "type": "Float64"},
+                    {"name": "orders", "type": "UInt64"},
+                    {"name": "customers", "type": "UInt64"},
+                ]
+            }
+        )
+        diagnostics = build_schema_resolution_diagnostics(
+            original_query="what is the total revenue per week",
+            corrected_query="what is the total revenue per week",
+            loaded_schema=schema,
+            validation_result={
+                "is_valid": True,
+                "missing_column": "",
+                "mappings": [],
+                "derivable_columns": [],
+                "invalid_mappings": [],
+            },
+        )
+        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assertNotIn("revenue", diagnostics["unresolved_terms"])
+        self.assertIn("total_sales", diagnostics["selected_columns"])
 
     def test_case_l_invalid_revenue_by_region(self):
         schema = self._population_schema()
@@ -801,6 +988,22 @@ class PipelineCaseCoverageTests(unittest.TestCase):
         result = classify_input(raw_text="uhhh", cleaned_text="")
         self.assertEqual(result["classification"], "noise_input")
         self.assertEqual(result["route"], "stop")
+
+    def test_case_w_distribution_classification(self):
+        result = classify_input(
+            raw_text="How are orders distributed?",
+            cleaned_text="How are orders distributed?",
+        )
+        self.assertEqual(result["classification"], "analytical")
+        self.assertEqual(result["route"], "proceed")
+
+    def test_case_x_impact_classification(self):
+        result = classify_input(
+            raw_text="How do customers impact total sales?",
+            cleaned_text="How do customers impact total sales?",
+        )
+        self.assertEqual(result["classification"], "analytical")
+        self.assertEqual(result["route"], "proceed")
 
     def test_attempt_visibility_in_trace_payload(self):
         trace = build_pipeline_trace_template({"request_id": "attempt-case"})

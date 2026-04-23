@@ -14,6 +14,8 @@ from preprocessing_high.error_handler import (
     PreprocessHighSchemaLoadError,
 )
 from preprocessing_high.schemas import HighPreprocessConfig, UserSchema
+from shared.dataset_binding import normalize_dataset_context, validate_dataset_context
+from shared.pipeline_guards import dataset_scope_guard, is_technical_column_name
 from shared.schema_filtering import filter_business_schema
 from shared.schema_utils import is_date_type, unqualify_table_name
 
@@ -128,16 +130,40 @@ def _build_loaded_schema(
     user_id: str,
     database: str,
     rows: list[tuple[str, str, str]],
+    dataset_scope: dict[str, object] | None = None,
 ) -> LoadedUserSchema:
     raw_columns: dict[str, list[dict[str, str]]] = {}
     for table_raw, column_raw, col_type_raw in rows:
         table_name = unqualify_table_name(str(table_raw))
         column_name = str(column_raw)
         column_type = str(col_type_raw)
-        raw_columns.setdefault(table_name, []).append({"name": column_name, "type": column_type})
+        role = "technical" if is_technical_column_name(column_name) else "business"
+        raw_columns.setdefault(table_name, []).append({"name": column_name, "type": column_type, "column_role": role})
 
     filtered_columns, _ = filter_business_schema(raw_columns)
-    columns = filtered_columns if filtered_columns else raw_columns
+    candidate_columns = filtered_columns if filtered_columns else raw_columns
+    columns: dict[str, list[dict[str, str]]] = {}
+    for table_name, table_columns in candidate_columns.items():
+        business_columns = [
+            column
+            for column in table_columns
+            if not is_technical_column_name(str(column.get("name", "")))
+        ]
+        if business_columns:
+            columns[table_name] = business_columns
+
+    if not columns:
+        columns = candidate_columns
+
+    normalized_scope = normalize_dataset_context(dataset_scope)
+    validated_scope = validate_dataset_context(normalized_scope)
+    scoped_columns, _ = dataset_scope_guard(
+        schema=columns,
+        dataset_scope=validated_scope,
+        selected_table=validated_scope.get("table_name", ""),
+        strict=True,
+    )
+    columns = scoped_columns
     tables = sorted(columns.keys())
 
     columns_by_name: dict[str, list[ColumnReference]] = {}
@@ -170,10 +196,20 @@ def load_user_schema(
     config: HighPreprocessConfig,
     logger: logging.Logger,
     log_event: Callable[..., None],
+    dataset_scope: dict[str, object] | None = None,
 ) -> LoadedUserSchema:
     sanitized_user_id = _sanitize_user_id(user_id)
     database = _resolve_database_name(sanitized_user_id, config)
-    key = _cache_key(sanitized_user_id, database)
+    normalized_scope = normalize_dataset_context(dataset_scope)
+    validated_scope = validate_dataset_context(normalized_scope)
+    scope_key = "|".join(
+        sorted(
+            f"{key}={value}"
+            for key, value in validated_scope.items()
+            if str(value).strip()
+        )
+    )
+    key = f"{_cache_key(sanitized_user_id, database)}:{scope_key}"
     now = time.time()
 
     if config.schema_cache_ttl_seconds > 0:
@@ -192,7 +228,12 @@ def load_user_schema(
                 return cached[1]
 
     rows = _fetch_user_schema_rows(config=config, database=database)
-    loaded = _build_loaded_schema(user_id=sanitized_user_id, database=database, rows=rows)
+    loaded = _build_loaded_schema(
+        user_id=sanitized_user_id,
+        database=database,
+        rows=rows,
+        dataset_scope=validated_scope,
+    )
 
     if config.schema_cache_ttl_seconds > 0:
         with _SCHEMA_CACHE_LOCK:
@@ -235,4 +276,17 @@ def get_fallback_derivable_column(loaded_schema: LoadedUserSchema) -> ColumnRefe
     for references in loaded_schema.date_columns_by_name.values():
         if references:
             return references[0]
+    # Heuristic fallback for datasets that store time keys as String
+    # (for example `ds`) but still support time-granularity analytics.
+    date_like_tokens = {"date", "day", "week", "month", "quarter", "year", "time", "timestamp"}
+    for references in loaded_schema.columns_by_name.values():
+        for reference in references:
+            column_name = str(reference.name).strip().lower()
+            if not column_name:
+                continue
+            if column_name == "ds":
+                return reference
+            tokens = set(re.findall(r"[a-z0-9]+", column_name.replace("_", " ")))
+            if tokens & date_like_tokens:
+                return reference
     return None

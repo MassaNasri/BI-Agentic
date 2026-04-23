@@ -5,6 +5,7 @@ from typing import Any
 from shared.schema_filtering import is_technical_table_name
 from shared.schema_utils import (
     build_table_metadata,
+    is_technical_column_name,
     is_date_type,
     is_numeric_type,
     tokenize,
@@ -46,6 +47,54 @@ RATE_LIKE_TOKENS = ("rate", "ratio", "percent", "percentage", "pct", "share")
 AVG_LIKE_TOKENS = ("avg", "average", "mean", "median")
 ADDITIVE_HINT_TOKENS = ("total", "count", "population", "amount", "sales", "revenue", "cost", "profit")
 IDENTIFIER_LIKE_TOKENS = ("id", "code", "uuid", "key", "number", "num")
+BUSINESS_METRIC_HINT_TOKENS = (
+    "sales",
+    "total_sales",
+    "revenue",
+    "orders",
+    "order_count",
+    "customers",
+    "customer_count",
+    "quantity",
+    "amount",
+)
+ROW_COUNT_INTENT_PATTERNS = (
+    r"\bnumber of rows\b",
+    r"\bnumber of records\b",
+    r"\bcount of (?:rows|records|entries|transactions|days|weeks|items)\b",
+    r"\bcount (?:rows|records|entries|transactions|days|weeks|items)\b",
+    r"\bhow many rows\b",
+    r"\bhow many records\b",
+    r"\bhow many entries\b",
+    r"\bhow many transactions\b",
+    r"\bhow many days\b",
+    r"\bhow many weeks\b",
+    r"\bhow many items\b",
+)
+TIME_GRANULARITY_EXPRESSIONS = {
+    "hour": "toStartOfHour({column})",
+    "day": "toDate({column})",
+    "week": "toStartOfWeek({column})",
+    "month": "toStartOfMonth({column})",
+    "quarter": "toStartOfQuarter({column})",
+    "year": "toYear({column})",
+}
+TIME_GRANULARITY_TERMS = {"hour", "day", "week", "month", "quarter", "year"}
+RELATIONSHIP_KEYWORDS = (
+    "relationship",
+    "correlation",
+    "associate",
+    "association",
+    "impact",
+    "effect",
+    "influence",
+    "compare",
+    "comparison",
+    "compared",
+    "versus",
+    " vs ",
+)
+DISTRIBUTION_KEYWORDS = ("distribution", "distributed", "histogram", "spread", "frequency")
 
 NUMERIC_FILTER_PATTERNS = [
     {
@@ -106,6 +155,92 @@ TEXT_CONTAINS_PATTERNS = [
     r"\b([a-z_][a-z0-9_ ]+?)\s+like\s+['\"]?([a-z0-9_ -%]+?)['\"]?(?:\b|$)",
 ]
 
+LANGUAGE_STOP_TOKENS = {
+    "a",
+    "an",
+    "all",
+    "and",
+    "are",
+    "as",
+    "at",
+    "between",
+    "by",
+    "compare",
+    "compared",
+    "comparison",
+    "do",
+    "does",
+    "day",
+    "days",
+    "for",
+    "from",
+    "give",
+    "had",
+    "has",
+    "have",
+    "how",
+    "in",
+    "is",
+    "list",
+    "me",
+    "month",
+    "months",
+    "of",
+    "on",
+    "or",
+    "over",
+    "please",
+    "quarter",
+    "quarters",
+    "relationship",
+    "show",
+    "the",
+    "to",
+    "trend",
+    "trends",
+    "versus",
+    "vs",
+    "was",
+    "week",
+    "weeks",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "year",
+    "years",
+}
+
+
+DERIVED_METRIC_PATTERNS = [
+    {
+        "aliases": ("average order value", "aov"),
+        "numerator_tokens": ("sales", "revenue", "amount"),
+        "denominator_tokens": ("orders", "order"),
+        "alias": "average_order_value",
+    },
+    {
+        "aliases": ("conversion rate", "conversion"),
+        "numerator_tokens": ("orders", "conversions"),
+        "denominator_tokens": ("customers", "visitors", "users", "leads"),
+        "alias": "conversion_rate",
+    },
+    {
+        "aliases": ("revenue per customer", "sales per customer"),
+        "numerator_tokens": ("revenue", "sales", "amount"),
+        "denominator_tokens": ("customers", "customer"),
+        "alias": "revenue_per_customer",
+    },
+    {
+        "aliases": ("average basket size", "basket size"),
+        "numerator_tokens": ("items", "quantity", "units"),
+        "denominator_tokens": ("orders", "order"),
+        "alias": "average_basket_size",
+    },
+]
+
 
 def build_schema_metadata(schema: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
     metadata: dict[str, dict[str, Any]] = {}
@@ -113,20 +248,210 @@ def build_schema_metadata(schema: dict[str, list[dict[str, Any]]]) -> dict[str, 
         normalized_columns = []
         for col in columns:
             col_type = col.get("type", "")
+            col_name = str(col.get("name", "")).strip()
+            if not col_name or is_technical_column_name(col_name):
+                continue
+            inferred_is_date = bool(is_date_type(col_type) or _looks_temporal_column_name(col_name))
             normalized_columns.append(
                 {
-                    "name": col["name"],
+                    "name": col_name,
                     "type": col_type,
                     "is_numeric": col.get("is_numeric", is_numeric_type(col_type)),
-                    "is_date": col.get("is_date", is_date_type(col_type)),
+                    "is_date": col.get("is_date", inferred_is_date),
                     "is_dimension": col.get(
                         "is_dimension",
-                        not is_numeric_type(col_type) and not is_date_type(col_type),
+                        not is_numeric_type(col_type) and not inferred_is_date,
                     ),
                 }
             )
         metadata[table] = build_table_metadata(normalized_columns)
     return metadata
+
+
+def _looks_temporal_column_name(column_name: str) -> bool:
+    lowered = str(column_name or "").strip().lower()
+    if not lowered:
+        return False
+    if lowered in {"ds", "date", "timestamp", "created_at"}:
+        return True
+    return bool(
+        lowered.endswith(("_at", "_date", "_time"))
+        or any(token in lowered for token in ("date", "time", "timestamp", "day", "week", "month", "year"))
+    )
+
+
+def _is_relationship_question(question_lower: str) -> bool:
+    normalized = str(question_lower or "").strip().lower()
+    if any(keyword in f" {normalized} " for keyword in RELATIONSHIP_KEYWORDS):
+        return True
+    return bool(
+        re.search(r"\b(?:relationship|correlation|association)\s+(?:of|between)\b", normalized)
+        or re.search(r"\bcompare\s+.+?\s+(?:and|with|to|against|vs|versus)\s+.+", normalized)
+    )
+
+
+def _is_distribution_question(question_lower: str) -> bool:
+    normalized = str(question_lower or "").strip().lower()
+    return any(keyword in normalized for keyword in DISTRIBUTION_KEYWORDS)
+
+
+def _resolve_numeric_hint(hint: str, table_meta: dict[str, Any], ambiguities: list[dict[str, Any]]) -> str | None:
+    numeric_columns = table_meta.get("numeric_columns", [])
+    if not numeric_columns:
+        return None
+    return _resolve_column_name_with_ambiguity(
+        candidate=hint,
+        columns=[table_meta["column_map"][c] for c in numeric_columns],
+        context="metric",
+        ambiguities=ambiguities,
+    )
+
+
+def _derive_metric_by_token_groups(
+    *,
+    table_meta: dict[str, Any],
+    ambiguities: list[dict[str, Any]],
+    numerator_tokens: tuple[str, ...],
+    denominator_tokens: tuple[str, ...],
+    alias: str,
+) -> dict[str, Any] | None:
+    numerator_column = None
+    denominator_column = None
+
+    for token in numerator_tokens:
+        numerator_column = _resolve_numeric_hint(token, table_meta, ambiguities)
+        if numerator_column:
+            break
+    for token in denominator_tokens:
+        denominator_column = _resolve_numeric_hint(token, table_meta, ambiguities)
+        if denominator_column:
+            break
+
+    if not numerator_column or not denominator_column:
+        return None
+    if numerator_column == denominator_column:
+        return None
+
+    return {
+        "column": numerator_column,
+        "aggregation": "SUM",
+        "alias": alias,
+        "formula": {
+            "type": "ratio",
+            "numerator": {"column": numerator_column, "aggregation": "SUM"},
+            "denominator": {"column": denominator_column, "aggregation": "SUM"},
+            "safe_division": True,
+        },
+    }
+
+
+def _infer_derived_metric(
+    *,
+    question_lower: str,
+    table_meta: dict[str, Any],
+    ambiguities: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    for pattern in DERIVED_METRIC_PATTERNS:
+        aliases = pattern.get("aliases", ())
+        if not any(alias in question_lower for alias in aliases):
+            continue
+        derived = _derive_metric_by_token_groups(
+            table_meta=table_meta,
+            ambiguities=ambiguities,
+            numerator_tokens=tuple(pattern.get("numerator_tokens", ())),
+            denominator_tokens=tuple(pattern.get("denominator_tokens", ())),
+            alias=str(pattern.get("alias", "derived_metric")).strip() or "derived_metric",
+        )
+        if derived:
+            return derived
+
+    per_match = re.search(r"\b([a-z_][a-z0-9_ ]+?)\s+per\s+([a-z_][a-z0-9_ ]+?)\b", question_lower)
+    if per_match:
+        denominator_hint = per_match.group(2).strip().lower()
+        if denominator_hint not in TIME_GRANULARITY_TERMS:
+            numerator_hint = per_match.group(1).strip()
+            numerator_column = _resolve_numeric_hint(numerator_hint, table_meta, ambiguities)
+            denominator_column = _resolve_numeric_hint(denominator_hint, table_meta, ambiguities)
+            if numerator_column and denominator_column and numerator_column != denominator_column:
+                return {
+                    "column": numerator_column,
+                    "aggregation": "SUM",
+                    "alias": f"{numerator_column}_per_{denominator_column}",
+                    "formula": {
+                        "type": "ratio",
+                        "numerator": {"column": numerator_column, "aggregation": "SUM"},
+                        "denominator": {"column": denominator_column, "aggregation": "SUM"},
+                        "safe_division": True,
+                    },
+                }
+    return None
+
+
+def _infer_relationship_metrics(
+    *,
+    question: str,
+    table_meta: dict[str, Any],
+    ambiguities: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    all_columns = table_meta["columns"]
+    numeric_columns = table_meta["numeric_columns"]
+    if not numeric_columns:
+        return []
+
+    resolved: list[str] = []
+    relation_match = re.search(
+        r"\bbetween\s+([a-z_][a-z0-9_ ]+?)\s+and\s+([a-z_][a-z0-9_ ]+)",
+        question.lower(),
+    )
+    if not relation_match:
+        relation_match = re.search(
+            r"\bcompare\s+([a-z_][a-z0-9_ ]+?)\s+(?:and|with|to|against|vs|versus)\s+([a-z_][a-z0-9_ ]+)",
+            question.lower(),
+        )
+    if relation_match:
+        candidates = [_clean_metric_hint(relation_match.group(1).strip()), _clean_metric_hint(relation_match.group(2).strip())]
+        for candidate in candidates:
+            mapped = _resolve_column_name_with_ambiguity(
+                candidate=candidate,
+                columns=[table_meta["column_map"][c] for c in numeric_columns],
+                context="metric",
+                ambiguities=ambiguities,
+            )
+            if mapped and mapped not in resolved:
+                resolved.append(mapped)
+
+    if len(resolved) < 2:
+        for hint in _extract_metric_hints_from_question(question):
+            mapped = _resolve_column_name_with_ambiguity(
+                candidate=hint,
+                columns=[table_meta["column_map"][c] for c in numeric_columns],
+                context="metric",
+                ambiguities=ambiguities,
+            )
+            if mapped and mapped not in resolved:
+                resolved.append(mapped)
+            if len(resolved) >= 2:
+                break
+
+    if len(resolved) < 2:
+        scored = sorted(
+            numeric_columns,
+            key=lambda col: _score_metric_column(col, tokenize(question)),
+            reverse=True,
+        )
+        for col in scored[:2]:
+            if col not in resolved:
+                resolved.append(col)
+            if len(resolved) >= 2:
+                break
+
+    if len(resolved) < 2:
+        return []
+
+    return [
+        {"column": resolved[0], "aggregation": None, "alias": resolved[0]},
+        {"column": resolved[1], "aggregation": None, "alias": resolved[1]},
+    ]
 
 
 def normalize_analytical_intent(
@@ -147,17 +472,66 @@ def normalize_analytical_intent(
 
     table_meta = schema_metadata[table]
     question_lower = question.lower()
+    relationship_requested = _is_relationship_question(question_lower)
+    distribution_requested = _is_distribution_question(question_lower)
 
     dimensions = _infer_dimensions(question, raw_intent, table_meta, ambiguities=ambiguities)
+    time_granularity = _infer_time_granularity(question_lower)
+    time_column = _select_time_column(table_meta) if time_granularity else ""
+    time_dimension_expression = ""
+    time_dimension_alias = ""
+    time_grouping_detected = bool(time_granularity and time_column)
+    if time_granularity == "hour" and not _supports_hour_granularity(table_meta=table_meta, column_name=time_column):
+        raise ValueError("Granularity not supported: hour-level data not available")
+    if time_grouping_detected:
+        time_dimension_alias = "period"
+        time_dimension_expression = _time_dimension_expression(
+            table_meta=table_meta,
+            column_name=time_column,
+            granularity=time_granularity,
+        )
+        if time_column not in dimensions:
+            dimensions = [time_column, *dimensions]
+            ambiguities.append(
+                {
+                    "type": "dimension_inference",
+                    "message": f"Time grouping detected ({time_granularity}); auto-selected time dimension.",
+                    "candidates": [time_column],
+                    "selected_dimension": time_column,
+                    "resolution": "auto_selected_dimension",
+                }
+            )
 
     ranking = _infer_ranking(question_lower=question_lower, raw_intent=raw_intent)
+    explicit_top_n_requested = bool(ranking.get("explicit_limit_requested"))
+    if (time_grouping_detected or relationship_requested) and not explicit_top_n_requested:
+        ranking["direction"] = None
+        ranking["source"] = "time_series_or_relationship_override"
     limit = ranking["limit"]
+    ranking_requested = bool(ranking.get("direction")) or isinstance(limit, int)
+    overall_total_requested = _is_overall_total_request(question_lower)
+
+    if ranking_requested and not dimensions and not relationship_requested:
+        auto_dimension = _auto_select_ranking_dimension(
+            table_meta=table_meta,
+            ambiguities=ambiguities,
+        )
+        if auto_dimension:
+            dimensions = [auto_dimension]
 
     filters = _normalize_filters(question, raw_intent, table_meta, ambiguities=ambiguities)
     if not filters:
         year_filter = _infer_year_filter(question_lower, table_meta)
         if year_filter:
             filters.append(year_filter)
+
+    source_grain_matches_requested = _source_grain_matches_requested(
+        table_meta=table_meta,
+        time_column=time_column,
+        time_granularity=time_granularity,
+        time_grouping_detected=time_grouping_detected,
+    )
+    time_rollup_required = bool(time_grouping_detected and not source_grain_matches_requested)
 
     metrics = _infer_metrics(
         question=question,
@@ -166,9 +540,19 @@ def normalize_analytical_intent(
         dimensions=dimensions,
         ranking=ranking,
         ambiguities=ambiguities,
+        relationship_requested=relationship_requested,
+        distribution_requested=distribution_requested,
+        preserve_time_grain_metric=bool(time_grouping_detected and source_grain_matches_requested),
     )
     if not metrics:
         metrics = [{"column": "*", "aggregation": "COUNT", "alias": _metric_alias("COUNT", "*")}]
+
+    if relationship_requested:
+        dimensions = []
+        ranking_requested = False
+        ranking["direction"] = None
+        ranking["source"] = "relationship_override"
+        limit = None
 
     order_by = _normalize_order_by(
         raw_intent,
@@ -184,9 +568,38 @@ def normalize_analytical_intent(
     elif limit and not order_by and metrics:
         primary_metric_alias = metrics[0]["alias"]
         order_by = [{"column": primary_metric_alias, "direction": "DESC"}]
+    if (time_grouping_detected or relationship_requested) and not explicit_top_n_requested:
+        limit = None
+    if time_grouping_detected and not ranking["direction"]:
+        order_by = [{"column": time_dimension_alias or "period", "direction": "ASC"}]
+    if relationship_requested:
+        order_by = []
 
-    operations = _derive_operations(metrics=metrics, dimensions=dimensions, filters=filters, order_by=order_by, limit=limit)
-    primary_intent = _infer_primary_intent(operations)
+    operations = _derive_operations(
+        metrics=metrics,
+        dimensions=dimensions,
+        filters=filters,
+        order_by=order_by,
+        limit=limit,
+        ranking_requested=bool(ranking.get("direction")) or explicit_top_n_requested,
+        relationship_requested=relationship_requested,
+        distribution_requested=distribution_requested,
+        time_grouping_detected=time_grouping_detected,
+    )
+    primary_intent = _infer_primary_intent(
+        operations=operations,
+        relationship_requested=relationship_requested,
+        distribution_requested=distribution_requested,
+        time_grouping_detected=time_grouping_detected,
+    )
+    if time_grouping_detected:
+        primary_intent = "time_series"
+        if "time_grouping" not in operations:
+            operations.append("time_grouping")
+        operations = [op for op in operations if op != "ranking"]
+    if relationship_requested and "comparison" not in operations:
+        operations.append("comparison")
+    ambiguities = _normalize_dimension_ambiguities(ambiguities)
 
     aggregations = {str(metric.get("aggregation") or "").upper() for metric in metrics if metric.get("aggregation")}
     if len(aggregations) == 1:
@@ -197,6 +610,7 @@ def normalize_analytical_intent(
         aggregation_summary = None
 
     return {
+        "intent_type": "analytical",
         "table": unqualify_table_name(table),
         "intent": primary_intent,
         "operations": operations,
@@ -211,9 +625,255 @@ def normalize_analytical_intent(
         },
         "order_by": order_by,
         "limit": limit,
+        "time_granularity": time_granularity,
+        "time_column": time_column,
+        "time_grouping_detected": time_grouping_detected,
+        "source_grain_matches_requested": source_grain_matches_requested,
+        "time_rollup_required": time_rollup_required,
+        "time_dimension_expression": time_dimension_expression,
+        "time_dimension_alias": time_dimension_alias,
+        "explicit_top_n_requested": explicit_top_n_requested,
         "ambiguities": ambiguities,
+        "kpi_allowed_without_dimension": overall_total_requested,
+        "row_count_requested": _is_explicit_row_count_request(question_lower),
+        "analysis_mode": "relationship" if relationship_requested else "distribution" if distribution_requested else "",
         "reasoning_version": "semantic_ir_v1",
     }
+
+
+def _is_overall_total_request(question_lower: str) -> bool:
+    if not question_lower:
+        return False
+    if "overall total" in question_lower or "overall" in question_lower:
+        return True
+    if "in total" in question_lower and not re.search(r"\b(by|per|across|for each|in each)\b", question_lower):
+        return True
+    return False
+
+
+def _infer_time_granularity(question_lower: str) -> str:
+    normalized = str(question_lower or "").strip().lower()
+    if not normalized:
+        return ""
+    explicit_patterns = (
+        (r"\b(?:per|by|for each|in each|grouped by)\s+hour\b", "hour"),
+        (r"\b(?:per|by|for each|in each|grouped by)\s+day\b", "day"),
+        (r"\b(?:per|by|for each|in each|grouped by)\s+week\b", "week"),
+        (r"\b(?:per|by|for each|in each|grouped by)\s+month\b", "month"),
+        (r"\b(?:per|by|for each|in each|grouped by)\s+quarter\b", "quarter"),
+        (r"\b(?:per|by|for each|in each|grouped by)\s+year\b", "year"),
+    )
+    for pattern, granularity in explicit_patterns:
+        if re.search(pattern, normalized):
+            return granularity
+
+    if _is_trend_over_time_question(normalized):
+        return "day"
+
+    # Soft inference when time concepts are present without explicit "per".
+    soft_patterns = (
+        (r"\bhourly\b|\bhour\b", "hour"),
+        (r"\bdaily\b|\bday\b", "day"),
+        (r"\bweekly\b|\bweek\b", "week"),
+        (r"\bmonthly\b|\bmonth\b", "month"),
+        (r"\bquarterly\b|\bquarter\b", "quarter"),
+        (r"\byearly\b|\byear\b|\bannual\b|\bannually\b", "year"),
+    )
+    for pattern, granularity in soft_patterns:
+        if re.search(pattern, normalized):
+            return granularity
+    return ""
+
+
+def _is_trend_over_time_question(question_lower: str) -> bool:
+    normalized = str(question_lower or "").strip().lower()
+    if not normalized:
+        return False
+    trend_terms = (
+        r"\btrend\b",
+        r"\btrends\b",
+        r"\bchanged?\b",
+        r"\bchange over\b",
+        r"\bevolv(?:e|ed|ing)\b",
+        r"\bover time\b",
+        r"\bthrough time\b",
+        r"\bacross time\b",
+        r"\btime series\b",
+    )
+    has_trend_language = any(re.search(pattern, normalized) for pattern in trend_terms)
+    has_time_axis = bool(
+        re.search(r"\bover\s+time\b|\bthrough\s+time\b|\bacross\s+time\b|\btime\s+series\b", normalized)
+        or re.search(r"\bby\s+(?:date|time|day|week|month|quarter|year)\b", normalized)
+    )
+    return has_trend_language and has_time_axis
+
+
+def _select_time_column(table_meta: dict[str, Any]) -> str:
+    date_columns = [str(col).strip() for col in table_meta.get("date_columns", []) if str(col).strip()]
+    if not date_columns:
+        return ""
+    ranked_dates = sorted(
+        date_columns,
+        key=lambda col: (_time_column_priority(col), col.lower()),
+    )
+    return ranked_dates[0] if ranked_dates else ""
+
+
+def _time_dimension_expression(*, table_meta: dict[str, Any], column_name: str, granularity: str) -> str:
+    template = TIME_GRANULARITY_EXPRESSIONS.get(granularity, "")
+    if not template or not column_name:
+        return ""
+    column_meta = table_meta.get("column_map", {}).get(column_name, {})
+    column_type = str(column_meta.get("type", "")).strip().lower()
+    normalized_column = column_name
+    already_to_date = normalized_column.lower().startswith("todate(")
+    if (
+        "string" in column_type
+        or "fixedstring" in column_type
+        or "varchar" in column_type
+        or "char" in column_type
+    ):
+        normalized_column = f"toDate({column_name})" if not already_to_date else normalized_column
+    if granularity == "hour":
+        if "string" in column_type or "fixedstring" in column_type or "varchar" in column_type or "char" in column_type:
+            normalized_column = f"toDateTime({column_name})"
+        elif "date" in column_type and "datetime" not in column_type and "timestamp" not in column_type:
+            normalized_column = f"toDateTime({column_name})"
+    return template.format(column=normalized_column)
+
+
+def _source_grain_matches_requested(
+    *,
+    table_meta: dict[str, Any],
+    time_column: str,
+    time_granularity: str,
+    time_grouping_detected: bool,
+) -> bool:
+    """
+    Infer whether the selected time column is already at the requested analysis grain.
+
+    This is intentionally schema-based and table-agnostic: Date columns are already
+    day-grain, while explicit week/month/quarter/year columns can satisfy matching
+    rollups without re-aggregating. Datetime/timestamp columns do not count as
+    day-grain because multiple rows per day are common.
+    """
+    if not time_grouping_detected or not time_column or not time_granularity:
+        return False
+
+    column_meta = table_meta.get("column_map", {}).get(time_column, {})
+    column_type = str(column_meta.get("type", "")).strip().lower()
+    column_name = str(time_column or "").strip().lower()
+
+    if time_granularity == "day":
+        if "datetime" in column_type or "timestamp" in column_type:
+            return False
+        if column_type.startswith("date") or column_name in {"ds", "date", "day"}:
+            return True
+        return column_name.endswith("_date") or column_name.endswith("_day")
+
+    grain_name_markers = {
+        "week": ("week",),
+        "month": ("month", "yyyy_mm", "year_month"),
+        "quarter": ("quarter",),
+        "year": ("year",),
+    }
+    markers = grain_name_markers.get(time_granularity, ())
+    return any(marker in column_name for marker in markers)
+
+
+def _supports_hour_granularity(*, table_meta: dict[str, Any], column_name: str) -> bool:
+    if not column_name:
+        return False
+    column_meta = table_meta.get("column_map", {}).get(column_name, {})
+    column_type = str(column_meta.get("type", "")).strip().lower()
+    if not column_type:
+        return False
+    return ("datetime" in column_type) or ("timestamp" in column_type) or ("time" in column_type and "date" in column_type)
+
+
+def _normalize_dimension_ambiguities(ambiguities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not ambiguities:
+        return []
+    has_auto = any(
+        isinstance(item, dict) and str(item.get("resolution", "")).strip() == "auto_selected_dimension"
+        for item in ambiguities
+    )
+    if not has_auto:
+        return ambiguities
+    normalized: list[dict[str, Any]] = []
+    for item in ambiguities:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("resolution", "")).strip() == "auto_selected_dimension":
+            normalized.append(item)
+    return normalized
+
+
+def _time_column_priority(column_name: str) -> int:
+    lowered = str(column_name or "").strip().lower()
+    if lowered in {"ds", "date", "timestamp", "created_at"}:
+        return 0
+    if lowered.endswith("_at") or lowered.endswith("_date") or lowered.endswith("_time"):
+        return 1
+    if any(token in lowered for token in ("date", "time", "timestamp", "day", "week", "month", "year")):
+        return 2
+    return 3
+
+
+def _categorical_column_priority(column_name: str) -> int:
+    lowered = str(column_name or "").strip().lower()
+    preferred = ("region", "product", "category", "city")
+    for idx, token in enumerate(preferred):
+        if token == lowered or lowered.startswith(f"{token}_") or lowered.endswith(f"_{token}"):
+            return idx
+    if any(token in lowered for token in preferred):
+        return len(preferred)
+    return len(preferred) + 1
+
+
+def _auto_select_ranking_dimension(
+    *,
+    table_meta: dict[str, Any],
+    ambiguities: list[dict[str, Any]],
+) -> str | None:
+    date_columns = [str(col).strip() for col in table_meta.get("date_columns", []) if str(col).strip()]
+    dimension_columns = [str(col).strip() for col in table_meta.get("dimension_columns", []) if str(col).strip()]
+
+    if date_columns:
+        ranked_dates = sorted(
+            date_columns,
+            key=lambda col: (_time_column_priority(col), col.lower()),
+        )
+        chosen = ranked_dates[0]
+        ambiguities.append(
+            {
+                "type": "dimension_inference",
+                "message": "Ranking requested without explicit dimension; auto-selected time dimension.",
+                "candidates": ranked_dates[:3],
+                "selected_dimension": chosen,
+                "resolution": "auto_selected_dimension",
+            }
+        )
+        return chosen
+
+    if dimension_columns:
+        ranked_dims = sorted(
+            dimension_columns,
+            key=lambda col: (_categorical_column_priority(col), col.lower()),
+        )
+        chosen = ranked_dims[0]
+        ambiguities.append(
+            {
+                "type": "dimension_inference",
+                "message": "Ranking requested without explicit dimension; auto-selected categorical dimension.",
+                "candidates": ranked_dims[:3],
+                "selected_dimension": chosen,
+                "resolution": "auto_selected_dimension",
+            }
+        )
+        return chosen
+
+    return None
 def _resolve_table(
     question: str,
     raw_intent: dict[str, Any],
@@ -221,6 +881,9 @@ def _resolve_table(
     *,
     ambiguities: list[dict[str, Any]],
 ) -> str | None:
+    if len(schema_metadata.keys()) == 1:
+        return next(iter(schema_metadata.keys()))
+
     requested = (raw_intent.get("table") or "").strip()
     if requested in schema_metadata and not is_technical_table_name(requested):
         return requested
@@ -393,10 +1056,10 @@ def _detect_rank_direction(question_lower: str) -> str | None:
     return None
 
 
-def _extract_limit(question_lower: str, raw_intent: dict[str, Any]) -> int | None:
+def _extract_limit(question_lower: str, raw_intent: dict[str, Any]) -> tuple[int | None, bool]:
     raw_limit = raw_intent.get("limit")
     if isinstance(raw_limit, int) and raw_limit > 0:
-        return raw_limit
+        return raw_limit, True
 
     patterns = (
         r"\btop\s+(\d+)\b",
@@ -410,8 +1073,8 @@ def _extract_limit(question_lower: str, raw_intent: dict[str, Any]) -> int | Non
         if match:
             value = int(match.group(1))
             if value > 0:
-                return value
-    return None
+                return value, True
+    return None, False
 
 
 def _infer_ranking(*, question_lower: str, raw_intent: dict[str, Any]) -> dict[str, Any]:
@@ -426,7 +1089,7 @@ def _infer_ranking(*, question_lower: str, raw_intent: dict[str, Any]) -> dict[s
             direction = raw_direction
             source = "raw_intent"
 
-    limit = _extract_limit(question_lower, raw_intent)
+    limit, explicit_limit_requested = _extract_limit(question_lower, raw_intent)
     implied_limit = 1 if direction and limit is None else None
 
     return {
@@ -434,6 +1097,7 @@ def _infer_ranking(*, question_lower: str, raw_intent: dict[str, Any]) -> dict[s
         "limit": limit,
         "implied_limit": implied_limit,
         "source": source,
+        "explicit_limit_requested": explicit_limit_requested,
     }
 def _detect_explicit_aggregation(question_lower: str) -> str | None:
     if any(k in question_lower for k in AVG_KEYWORDS):
@@ -469,9 +1133,28 @@ def _looks_identifier_like(column_name: str) -> bool:
     return any(token in col_lower for token in IDENTIFIER_LIKE_TOKENS)
 
 
+def _is_business_metric_column(column_name: str) -> bool:
+    col_lower = (column_name or "").lower()
+    return any(token in col_lower for token in BUSINESS_METRIC_HINT_TOKENS)
+
+
+def _is_explicit_row_count_request(question_lower: str) -> bool:
+    normalized = str(question_lower or "").strip().lower()
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in ROW_COUNT_INTENT_PATTERNS)
+
+
 def _aggregation_for_ranking(column_name: str, question_lower: str, has_dimensions: bool) -> str | None:
     explicit = _detect_explicit_aggregation(question_lower)
     if explicit:
+        if (
+            explicit == "COUNT"
+            and has_dimensions
+            and _is_business_metric_column(column_name)
+            and not _is_explicit_row_count_request(question_lower)
+        ):
+            return "SUM"
         return explicit
     if _is_rate_like(column_name) or _is_avg_like(column_name):
         return "AVG"
@@ -523,12 +1206,12 @@ def _extract_metric_hints_from_question(question: str) -> list[str]:
     if select_match:
         projected_part = select_match.group(1)
         projected_part = re.sub(
-            r"\b(the|a|an|all|total|overall|top\s+\d+|bottom\s+\d+)\b",
+            r"\b(the|a|an|all|total|overall|top\s+\d+|bottom\s+\d+|trend|relationship|between|over\s+time)\b",
             " ",
             projected_part,
         )
         for chunk in re.split(r"\band\b|,", projected_part):
-            hint = chunk.strip()
+            hint = _clean_metric_hint(chunk.strip())
             if hint and hint not in {"the", "a", "an"}:
                 hints.append(hint)
 
@@ -537,14 +1220,19 @@ def _extract_metric_hints_from_question(question: str) -> list[str]:
         question_lower,
     )
     if by_match:
-        hints.extend(h.strip() for h in re.split(r"\band\b|,", by_match.group(1)) if h.strip())
+        for chunk in re.split(r"\band\b|,", by_match.group(1)):
+            hint = _clean_metric_hint(chunk.strip())
+            if hint:
+                hints.append(hint)
 
     rank_metric_match = re.search(
         r"\b(?:highest|lowest|largest|smallest|best|worst)\s+([a-z_][a-z0-9_ ]+)\b",
         question_lower,
     )
     if rank_metric_match:
-        hints.append(rank_metric_match.group(1).strip())
+        hint = _clean_metric_hint(rank_metric_match.group(1).strip())
+        if hint:
+            hints.append(hint)
 
     return hints
 
@@ -582,14 +1270,57 @@ def _infer_metrics(
     dimensions: list[str],
     ranking: dict[str, Any],
     ambiguities: list[dict[str, Any]],
-) -> list[dict[str, str | None]]:
+    relationship_requested: bool,
+    distribution_requested: bool,
+    preserve_time_grain_metric: bool = False,
+) -> list[dict[str, Any]]:
     question_lower = question.lower()
+    if relationship_requested:
+        relationship_metrics = _infer_relationship_metrics(
+            question=question,
+            table_meta=table_meta,
+            ambiguities=ambiguities,
+        )
+        if relationship_metrics:
+            return relationship_metrics
+
+    derived_metric = _infer_derived_metric(
+        question_lower=question_lower,
+        table_meta=table_meta,
+        ambiguities=ambiguities,
+    )
+    if derived_metric:
+        return [derived_metric]
+
     question_tokens = tokenize(question)
     explicit_agg = _detect_explicit_aggregation(question_lower)
     grouping_intent = _has_grouping_intent(question_lower) or bool(dimensions)
+    row_count_request = _is_explicit_row_count_request(question_lower)
 
     numeric_columns = table_meta["numeric_columns"]
     all_columns = table_meta["columns"]
+
+    if distribution_requested:
+        # Distribution should project one numeric series without aggregation.
+        distribution_column = None
+        for hint in _extract_metric_hints_from_question(question):
+            distribution_column = _resolve_column_name_with_ambiguity(
+                candidate=hint,
+                columns=[table_meta["column_map"][c] for c in numeric_columns],
+                context="metric",
+                ambiguities=ambiguities,
+            )
+            if distribution_column:
+                break
+        if not distribution_column and numeric_columns:
+            scored = sorted(
+                numeric_columns,
+                key=lambda col: _score_metric_column(col, question_tokens),
+                reverse=True,
+            )
+            distribution_column = scored[0]
+        if distribution_column:
+            return [{"column": distribution_column, "aggregation": None, "alias": distribution_column}]
 
     metric_candidates: list[tuple[str, str | None]] = []
     seen_columns: set[str] = set()
@@ -631,7 +1362,7 @@ def _infer_metrics(
             entity = entity_match.group(1).strip().split(" ")[0]
             metric_column = _resolve_column_name(entity, all_columns)
             if metric_column:
-                metric_candidates.append((metric_column, "COUNT"))
+                metric_candidates.append((metric_column, None))
         if not metric_candidates:
             metric_candidates.append(("*", "COUNT"))
 
@@ -653,9 +1384,20 @@ def _infer_metrics(
             if not metric_candidates:
                 metric_candidates.append(("*", "COUNT"))
 
-    metrics: list[dict[str, str | None]] = []
+    metrics: list[dict[str, Any]] = []
     for metric_column, raw_agg in metric_candidates:
         aggregation: str | None = explicit_agg
+        if preserve_time_grain_metric and aggregation in {"SUM", "AVG"}:
+            aggregation = None
+
+        if (
+            aggregation == "COUNT"
+            and metric_column != "*"
+            and metric_column in numeric_columns
+            and _is_business_metric_column(metric_column)
+            and not row_count_request
+        ):
+            aggregation = "SUM"
 
         if aggregation is None and ranking.get("direction"):
             aggregation = _aggregation_for_ranking(
@@ -666,6 +1408,8 @@ def _infer_metrics(
 
         if aggregation is None and raw_agg in VALID_AGGREGATIONS:
             aggregation = raw_agg
+            if preserve_time_grain_metric and aggregation in {"SUM", "AVG"}:
+                aggregation = None
             if (
                 raw_agg == "SUM"
                 and explicit_agg is None
@@ -679,7 +1423,9 @@ def _infer_metrics(
             elif _is_rate_like(metric_column) or _is_avg_like(metric_column):
                 aggregation = "AVG" if ranking.get("direction") else None
             elif grouping_intent:
-                if _looks_additive(metric_column):
+                if preserve_time_grain_metric and metric_column in numeric_columns:
+                    aggregation = None
+                elif _looks_additive(metric_column):
                     aggregation = "SUM"
                 elif _looks_identifier_like(metric_column):
                     aggregation = "COUNT"
@@ -689,6 +1435,15 @@ def _infer_metrics(
                     aggregation = None
             else:
                 aggregation = None
+
+        if (
+            aggregation == "COUNT"
+            and metric_column != "*"
+            and metric_column in numeric_columns
+            and _is_business_metric_column(metric_column)
+            and not row_count_request
+        ):
+            aggregation = "SUM"
 
         if aggregation and aggregation != "COUNT" and metric_column not in numeric_columns:
             if numeric_columns:
@@ -711,9 +1466,18 @@ def _infer_metrics(
 
     return metrics
 def _clean_dimension_phrase(phrase: str) -> str:
-    stop_tokens = {"where", "with", "that", "having", "from", "for", "in", "of", "the"}
-    tokens = [t for t in re.findall(r"[a-z0-9_]+", phrase.lower()) if t not in stop_tokens]
+    tokens = [t for t in re.findall(r"[a-z0-9_]+", phrase.lower()) if t not in LANGUAGE_STOP_TOKENS]
     return " ".join(tokens[:4])
+
+
+def _clean_metric_hint(phrase: str) -> str:
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9_]+", str(phrase or "").lower())
+        if token not in LANGUAGE_STOP_TOKENS
+        and token not in {"total", "overall", "sum", "average", "avg", "mean", "number", "count"}
+    ]
+    return " ".join(tokens[:5])
 
 
 def _extract_dimension_hints(question: str) -> list[str]:
@@ -746,12 +1510,14 @@ def _extract_dimension_hints(question: str) -> list[str]:
     if rank_subject_match:
         hints.append(rank_subject_match.group(1))
 
-    projection_subject_match = re.search(
-        r"\b(?:show|list|display|give)\s+([a-z_][a-z0-9_ ]+?)(?:\s+where\b|\s+in\b|$)",
-        question_lower,
-    )
-    if projection_subject_match:
-        hints.append(projection_subject_match.group(1))
+    # Keep projection-subject fallback conservative to avoid weak/over-eager dimensions.
+    if not re.search(r"\b(?:by|per|across|for each|in each)\b", question_lower):
+        projection_subject_match = re.search(
+            r"\b(?:show|list|display|give)\s+([a-z_][a-z0-9_ ]+?)(?:\s+where\b|\s+in\b|$)",
+            question_lower,
+        )
+        if projection_subject_match:
+            hints.append(projection_subject_match.group(1))
 
     return [_clean_dimension_phrase(h) for h in hints if h.strip()]
 
@@ -781,26 +1547,39 @@ def _infer_dimensions(
 
     question_hints = _extract_dimension_hints(question)
     for hint in question_hints:
+        normalized_hint = _clean_dimension_phrase(hint)
         mapped = _resolve_column_name_with_ambiguity(
-            candidate=hint,
+            candidate=normalized_hint,
             columns=[table_meta["column_map"][c] for c in dimension_candidates],
             context="dimension",
             ambiguities=ambiguities,
         )
+        # Avoid over-eager mapping for generic grouping words (e.g., "by order").
+        if mapped:
+            generic_grouping_terms = {"order", "orders", "item", "items", "record", "records", "data", "value"}
+            hint_tokens = _expand_tokens(tokenize(normalized_hint))
+            if len(hint_tokens) == 1:
+                hint_token = next(iter(hint_tokens))
+                normalized_mapped = str(mapped).strip().lower()
+                if (
+                    hint_token in generic_grouping_terms
+                    and normalized_mapped != hint_token
+                    and normalized_mapped.startswith(f"{hint_token}_")
+                ):
+                    ambiguities.append(
+                        {
+                            "type": "dimension_inference",
+                            "message": (
+                                f"Grouping phrase '{normalized_hint}' is ambiguous; "
+                                f"skipped weak inferred dimension '{mapped}'."
+                            ),
+                            "candidates": [mapped],
+                            "resolution": None,
+                        }
+                    )
+                    mapped = None
         if mapped and mapped not in resolved:
             resolved.append(mapped)
-
-    if not resolved and _has_grouping_intent(question.lower()) and dimension_candidates:
-        fallback_dimension = dimension_candidates[0]
-        resolved.append(fallback_dimension)
-        ambiguities.append(
-            {
-                "type": "dimension_inference",
-                "message": "Grouping intent detected without explicit dimension; applied safe default.",
-                "candidates": dimension_candidates[:3],
-                "resolution": fallback_dimension,
-            }
-        )
 
     return resolved
 
@@ -1078,6 +1857,10 @@ def _derive_operations(
     filters: list[dict[str, Any]],
     order_by: list[dict[str, Any]],
     limit: int | None,
+    ranking_requested: bool,
+    relationship_requested: bool,
+    distribution_requested: bool,
+    time_grouping_detected: bool,
 ) -> list[str]:
     operations: list[str] = ["projection"]
 
@@ -1087,21 +1870,43 @@ def _derive_operations(
         operations.append("grouping")
     if filters:
         operations.append("filtering")
-    if order_by:
+    if ranking_requested:
         operations.append("ranking")
     if limit:
         operations.append("limiting")
     if dimensions and len(metrics) > 1:
         operations.append("comparison")
+    if relationship_requested:
+        operations.append("relationship")
+        if "comparison" not in operations:
+            operations.append("comparison")
+    if distribution_requested:
+        operations.append("distribution")
+    if time_grouping_detected:
+        operations.append("time_grouping")
 
     return operations
 
 
-def _infer_primary_intent(operations: list[str]) -> str:
+def _infer_primary_intent(
+    *,
+    operations: list[str],
+    relationship_requested: bool,
+    distribution_requested: bool,
+    time_grouping_detected: bool,
+) -> str:
+    if time_grouping_detected:
+        return "time_series"
+    if relationship_requested:
+        return "correlation"
+    if distribution_requested:
+        return "distribution"
     if "ranking" in operations:
         return "ranking"
     if "aggregation" in operations and "grouping" in operations:
         return "aggregation"
+    if "comparison" in operations:
+        return "comparison"
     if "filtering" in operations:
         return "filtering"
     return "projection"

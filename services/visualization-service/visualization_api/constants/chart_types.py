@@ -8,38 +8,46 @@ from typing import Optional
 class ChartType:
     BAR = "bar"
     LINE = "line"
-    PIE = "pie"
     TABLE = "table"
-    KPI = "kpi"
+    CARD = "card"
+    SCATTER = "scatter"
+    HISTOGRAM = "histogram"
+    # Legacy alias retained for backward compatibility.
+    KPI = CARD
 
 
 VALID_CHART_TYPES = {
     ChartType.BAR,
     ChartType.LINE,
-    ChartType.PIE,
     ChartType.TABLE,
-    ChartType.KPI,
+    ChartType.CARD,
+    ChartType.SCATTER,
+    ChartType.HISTOGRAM,
 }
 
 # Normalize legacy or external values to canonical chart types.
 LEGACY_TO_CANONICAL_CHART_TYPE = {
     "grouped_bar": ChartType.BAR,
-    "scalar": ChartType.KPI,
-    "number": ChartType.KPI,
-    "kpi": ChartType.KPI,
+    "scalar": ChartType.CARD,
+    "number": ChartType.CARD,
+    "kpi": ChartType.CARD,
+    "card": ChartType.CARD,
     "bar": ChartType.BAR,
     "line": ChartType.LINE,
-    "pie": ChartType.PIE,
+    "pie": ChartType.BAR,
     "table": ChartType.TABLE,
+    "scatter": ChartType.SCATTER,
+    "histogram": ChartType.HISTOGRAM,
 }
 
 # Map canonical chart types to Metabase display types.
 CHART_TYPE_TO_METABASE_DISPLAY = {
     ChartType.BAR: "bar",
     ChartType.LINE: "line",
-    ChartType.PIE: "pie",
     ChartType.TABLE: "table",
-    ChartType.KPI: "scalar",
+    ChartType.CARD: "scalar",
+    ChartType.SCATTER: "scatter",
+    ChartType.HISTOGRAM: "histogram",
 }
 
 
@@ -62,4 +70,3 @@ def to_metabase_display(chart_type: Optional[str]) -> str:
     """
     canonical_chart_type = normalize_chart_type(chart_type)
     return CHART_TYPE_TO_METABASE_DISPLAY.get(canonical_chart_type, "table")
-

@@ -23,6 +23,7 @@ NOTIFICATION_SERVICE_URL = os.getenv('NOTIFICATION_SERVICE_URL', 'http://notific
 VOICE_EXECUTE_PATTERN = re.compile(r'^/voice-reports/\d+/execute/$')
 VOICE_SQL_PATTERN = re.compile(r'^/voice-reports/\d+/sql/$')
 VOICE_DETAIL_PATTERN = re.compile(r'^/voice-reports/\d+/$')
+VOICE_AI_TRACE_PATTERN = re.compile(r'^/voice-reports/\d+/ai-trace/$')
 VOICE_TEXT_QUERY_PATH = '/voice-reports/text-query/'
 
 
@@ -74,6 +75,7 @@ def resolve_target(path: str) -> Optional[RouteTarget]:
         or path == '/voice-reports/dashboard/'
         or path == '/voice-reports/dashboard/stats/'
         or VOICE_SQL_PATTERN.match(path)
+        or VOICE_AI_TRACE_PATTERN.match(path)
         or VOICE_DETAIL_PATTERN.match(path)
     ):
         return RouteTarget(service='report-service', base_url=REPORT_SERVICE_URL)

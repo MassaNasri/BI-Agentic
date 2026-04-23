@@ -36,9 +36,13 @@ class SchemaValidationResult(TypedDict):
 
 
 class PreprocessHighResult(TypedDict, total=False):
-    status: Literal["success", "failed", "rejected"]
+    status: Literal["success", "failed", "rejected", "degraded"]
     final_query: str
     schema_valid: bool
+    degraded: bool
+    deferred: bool
+    degradation_reason: str
+    confidence: float
     error_type: str
     action_taken: HighPreprocessActionType
     message: str
@@ -58,10 +62,14 @@ class PreprocessHighResult(TypedDict, total=False):
     selected_table: str
     selected_columns: list[str]
     schema_validation_status: str
+    route: str
+    skipped_schema_terms: list[str]
     attempts: list[dict[str, object]]
     attempts_count: int
     warnings: list[dict[str, str]]
     errors: list[dict[str, str]]
+    term_corrections: list[dict[str, str]]
+    user_friendly_messages: list[str]
     debug_metadata: dict[str, object]
     started_at: str
     finished_at: str
@@ -105,12 +113,12 @@ class HighPreprocessConfig:
 
     @classmethod
     def from_env(cls) -> "HighPreprocessConfig":
-        retries = _env_int("PREPROCESS_HIGH_MAX_RETRIES", 1)
+        retries = _env_int("PREPROCESS_HIGH_MAX_RETRIES", 2)
         return cls(
             ollama_url=os.getenv("PREPROCESS_HIGH_OLLAMA_URL", "http://localhost:11434/api/generate"),
             ollama_model=os.getenv("PREPROCESS_HIGH_OLLAMA_MODEL", "gemma3:1b"),
             request_timeout_seconds=_env_float("PREPROCESS_HIGH_TIMEOUT_SECONDS", 20.0),
-            max_retries=max(0, min(retries, 1)),
+            max_retries=max(0, min(retries, 3)),
             clickhouse_host=os.getenv("CLICKHOUSE_HOST", "localhost"),
             clickhouse_port=_env_int("CLICKHOUSE_PORT", 8123),
             clickhouse_user=os.getenv("CLICKHOUSE_USER", "etl_user"),
@@ -134,6 +142,7 @@ def build_preprocess_high_success_result(
         "status": "success",
         "final_query": final_query,
         "schema_valid": True,
+        "confidence": 0.0,
         "error_type": "none",
         "action_taken": "proceed",
     }
@@ -162,6 +171,7 @@ def build_preprocess_high_failed_result(
         "status": "failed",
         "final_query": final_query,
         "schema_valid": False,
+        "confidence": 0.0,
         "error_type": error_type,
         "action_taken": action_taken,
     }
@@ -190,6 +200,7 @@ def build_preprocess_high_rejected_result(
         "status": "rejected",
         "final_query": final_query,
         "schema_valid": False,
+        "confidence": 0.0,
         "error_type": "business",
         "action_taken": "stop",
         "message": message,

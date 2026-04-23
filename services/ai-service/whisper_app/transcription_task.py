@@ -24,6 +24,7 @@ from reasoning_app.intent_classification_task import (
     intent_classification_task,
     route_intent_classification,
 )
+from shared.stage_contract import stage_allows_progress
 
 try:
     import redis
@@ -1031,7 +1032,7 @@ def _run_legacy_whisper_transcription_preprocess_intent(
         }
 
     preprocess_result = preprocess_text_task(text=transcription_result["text"])
-    if preprocess_result["status"] != "success":
+    if not stage_allows_progress(preprocess_result.get("status"), degraded=bool(preprocess_result.get("degraded"))):
         return {
             "status": "failed",
             "stage": "preprocess",
@@ -1040,7 +1041,7 @@ def _run_legacy_whisper_transcription_preprocess_intent(
         }
 
     intent_result = intent_classification_task(cleaned_text=preprocess_result["cleaned_text"])
-    if intent_result["status"] != "success":
+    if not stage_allows_progress(intent_result.get("status"), degraded=bool(intent_result.get("degraded"))):
         return {
             "status": "failed",
             "stage": "intent_classification",
@@ -1058,7 +1059,7 @@ def _run_legacy_whisper_transcription_preprocess_intent(
     if routing_result.get("status") == "rejected":
         return routing_result
 
-    if routing_result.get("status") != "routed":
+    if not stage_allows_progress(routing_result.get("status"), degraded=bool(routing_result.get("degraded"))):
         return {
             "status": "failed",
             "stage": "routing",
@@ -1076,6 +1077,7 @@ def _run_legacy_whisper_transcription_preprocess_intent(
     preprocess_high_result = preprocess_high_task(
         cleaned_text=payload.get("cleaned_text", preprocess_result["cleaned_text"]),
         user_id=effective_user_id,
+        route=str(routing_result.get("route", "analytical")).strip().lower() or "analytical",
     )
 
     if preprocess_high_result.get("status") == "rejected":
@@ -1093,7 +1095,10 @@ def _run_legacy_whisper_transcription_preprocess_intent(
             "preprocess_high": preprocess_high_result,
         }
 
-    if preprocess_high_result.get("status") != "success":
+    if not stage_allows_progress(
+        preprocess_high_result.get("status"),
+        degraded=bool(preprocess_high_result.get("degraded")),
+    ):
         return {
             "status": "failed",
             "stage": "preprocessing_high",
@@ -1102,6 +1107,30 @@ def _run_legacy_whisper_transcription_preprocess_intent(
             "intent": intent_result,
             "routing": routing_result,
             "preprocess_high": preprocess_high_result,
+        }
+
+    if (
+        str(routing_result.get("route", "")).strip().lower() != "forecasting"
+        and preprocess_high_result.get("schema_valid") is False
+    ):
+        return {
+            "status": "rejected",
+            "stage": "preprocessing_high",
+            "message": (
+                "SQL generation was blocked because schema validation did not prove "
+                "the query safe against the selected dataset."
+            ),
+            "transcription": transcription_result,
+            "preprocess": preprocess_result,
+            "intent": intent_result,
+            "routing": routing_result,
+            "preprocess_high": preprocess_high_result,
+            "intent_extraction": {
+                "status": "rejected",
+                "error_type": "schema_mismatch",
+                "action_taken": "stop",
+                "sql_query": "",
+            },
         }
 
     try:
@@ -1122,7 +1151,10 @@ def _run_legacy_whisper_transcription_preprocess_intent(
         query=preprocess_high_result["final_query"],
         schema=schema_snapshot,
     )
-    if intent_extraction_result.get("status") != "success":
+    if not stage_allows_progress(
+        intent_extraction_result.get("status"),
+        degraded=bool(intent_extraction_result.get("degraded")),
+    ):
         return {
             "status": "failed",
             "stage": "intent_extraction",
@@ -1135,7 +1167,13 @@ def _run_legacy_whisper_transcription_preprocess_intent(
         }
 
     return {
-        "status": "success",
+        "status": "degraded"
+        if any(
+            bool(stage.get("degraded"))
+            for stage in (preprocess_result, intent_result, preprocess_high_result, intent_extraction_result)
+            if isinstance(stage, dict)
+        )
+        else "success",
         "transcription": transcription_result,
         "preprocess": preprocess_result,
         "intent": intent_result,
@@ -1151,6 +1189,12 @@ def whisper_transcription_preprocess_intent_flow(
     language: Optional[str] = None,
     initial_prompt: Optional[str] = None,
     user_id: Optional[str] = None,
+    manager_id: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    source_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    report_id: Optional[str] = None,
+    table_name: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Dagster orchestration entrypoint for:
@@ -1166,16 +1210,37 @@ def whisper_transcription_preprocess_intent_flow(
             language=language,
             initial_prompt=initial_prompt,
             user_id=user_id,
+            manager_id=manager_id,
+            dataset_id=dataset_id,
+            source_id=source_id,
+            workspace_id=workspace_id,
+            report_id=report_id,
+            table_name=table_name,
         )
     except Exception as exc:  # noqa: BLE001
         logger = _get_logger()
+        legacy_fallback_enabled = str(
+            os.getenv("AI_SERVICE_ENABLE_LEGACY_FALLBACK", "false")
+        ).strip().lower() in {"1", "true", "yes", "on"}
         _log_event(
             logger,
             logging.ERROR,
-            "Dagster full pipeline orchestration failed; using direct fallback",
+            "Dagster full pipeline orchestration failed",
             error=str(exc),
+            legacy_fallback_enabled=legacy_fallback_enabled,
             audio_path=audio_path,
         )
+        if not legacy_fallback_enabled:
+            return {
+                "status": "failed",
+                "stage": "dagster_orchestration",
+                "message": "Dagster full pipeline orchestration failed.",
+                "error_type": "system",
+                "action_taken": "stop",
+                "final_route": "stop",
+                "final_user_message": "AI orchestration failed before analytical routing.",
+                "debug_metadata": {"legacy_fallback_enabled": False, "error": str(exc)},
+            }
         return _run_legacy_whisper_transcription_preprocess_intent(
             audio_path=audio_path,
             request_id=request_id,

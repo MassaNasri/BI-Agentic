@@ -5,9 +5,13 @@ from dagster import AssetExecutionContext, asset
 
 from dagster_pipeline import ASSET_RETRY_POLICY, pipeline_failure_hook
 from intent_extraction.intent_extraction_task import run_intent_extraction_stage
-from llm_app.schema_provider import get_schema
+from llm_app.schema_provider import get_schema_for_dataset
+from shared.dataset_binding import DatasetBindingError, normalize_dataset_context, validate_dataset_context
+from shared.confidence import stage_confidence
 from shared.pipeline_trace import make_attempt, utc_now_iso
-from shared.schema_filtering import filter_business_schema, rank_tables_for_question
+from shared.pipeline_guards import dataset_scope_guard
+from shared.schema_filtering import filter_business_schema
+from shared.stage_contract import stage_allows_progress
 
 
 def _schema_from_preprocessing_high(preprocessing_high_asset: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -44,25 +48,23 @@ def _schema_from_preprocessing_high(preprocessing_high_asset: dict[str, Any]) ->
     return normalized_schema
 
 
-def _resolve_selected_table_name(
+def _bound_table_schema_or_error(
     *,
-    selected_table: str,
     schema_snapshot: dict[str, list[dict[str, Any]]],
-) -> str:
-    normalized_selected = str(selected_table or "").strip()
-    if not normalized_selected:
-        return ""
-
-    normalized_suffix = normalized_selected.split(".")[-1].lower()
-    for table_name in schema_snapshot.keys():
+    dataset_context: dict[str, str],
+) -> dict[str, list[dict[str, Any]]]:
+    bound_table = str(dataset_context.get("table_name", "")).strip()
+    normalized_bound_suffix = bound_table.split(".")[-1].lower()
+    for table_name, columns in schema_snapshot.items():
         normalized_table = str(table_name).strip()
         if not normalized_table:
             continue
-        if normalized_table.lower() == normalized_selected.lower():
-            return normalized_table
-        if normalized_table.split(".")[-1].lower() == normalized_suffix:
-            return normalized_table
-    return ""
+        if (
+            normalized_table.lower() == bound_table.lower()
+            or normalized_table.split(".")[-1].lower() == normalized_bound_suffix
+        ):
+            return {normalized_table: columns}
+    raise DatasetBindingError("Dataset-table mismatch: invalid ETL binding")
 
 
 @asset(
@@ -77,7 +79,7 @@ def intent_extraction_asset(
     stage_started_at = utc_now_iso()
     stage_started_perf = time.perf_counter()
     high_status = preprocessing_high_asset.get("status")
-    if high_status != "success":
+    if not stage_allows_progress(high_status, degraded=bool(preprocessing_high_asset.get("degraded"))):
         context.log.warning(
             "Skipping intent extraction because high preprocessing did not succeed | status=%s",
             high_status,
@@ -148,14 +150,128 @@ def intent_extraction_asset(
             "warnings": [],
             "errors": [{"type": "input", "message": "final_query is empty after high preprocessing."}],
             "debug_metadata": {},
+            "confidence": 0.0,
+        }
+
+    route = str(
+        (
+            preprocessing_high_asset.get("routing", {})
+            if isinstance(preprocessing_high_asset.get("routing"), dict)
+            else {}
+        ).get("route", preprocessing_high_asset.get("route", "analytical"))
+    ).strip().lower() or "analytical"
+    if route != "forecasting" and preprocessing_high_asset.get("schema_valid") is False:
+        message = (
+            "SQL generation was blocked because schema validation did not prove the query "
+            "safe against the selected dataset."
+        )
+        attempts = [
+            make_attempt(
+                attempt_number=1,
+                input_payload={
+                    "final_query": final_query,
+                    "schema_valid": preprocessing_high_asset.get("schema_valid"),
+                    "schema_validation_status": preprocessing_high_asset.get("schema_validation_status"),
+                },
+                output_payload={},
+                success=False,
+                retry_triggered=False,
+                model_or_method_used="schema_sql_safety_gate",
+                duration_ms=0,
+                validation_result={"is_valid": False, "sql_generation_allowed": False},
+                error_type="schema_mismatch",
+                error_message=message,
+            )
+        ]
+        result = {
+            "status": "rejected",
+            "intent_type": "analytical",
+            "next_step": "metabase",
+            "error_type": "schema_mismatch",
+            "action_taken": "stop",
+            "message": message,
+            "query": final_query,
+            "schema": {},
+            "extracted_intent": {},
+            "validated_intent": {},
+            "attempts": attempts,
+            "attempts_count": len(attempts),
+            "started_at": stage_started_at,
+            "finished_at": utc_now_iso(),
+            "duration_ms": int((time.perf_counter() - stage_started_perf) * 1000),
+            "warnings": [
+                {
+                    "type": "schema_sql_safety_gate",
+                    "message": message,
+                }
+            ],
+            "errors": [],
+            "debug_metadata": {
+                "schema_validation_status": preprocessing_high_asset.get("schema_validation_status"),
+                "unresolved_terms": preprocessing_high_asset.get("unresolved_terms", []),
+                "unsupported_terms": preprocessing_high_asset.get("unsupported_terms", []),
+                "sql_generation_allowed": False,
+                "reason_for_selection": "schema_sql_safety_gate",
+            },
+        }
+        result["confidence"] = stage_confidence(result, base_success=0.86, base_degraded=0.45)
+        return result
+
+    dataset_scope = (
+        preprocessing_high_asset.get("dataset_scope")
+        if isinstance(preprocessing_high_asset.get("dataset_scope"), dict)
+        else {}
+    )
+    try:
+        dataset_context = validate_dataset_context(normalize_dataset_context(dataset_scope))
+    except DatasetBindingError as exc:
+        attempts = [
+            make_attempt(
+                attempt_number=1,
+                input_payload={"dataset_scope": dataset_scope},
+                output_payload={},
+                success=False,
+                retry_triggered=False,
+                model_or_method_used="dataset_binding_validator",
+                duration_ms=0,
+                validation_result={"is_valid": False},
+                error_type="input",
+                error_message=str(exc),
+            )
+        ]
+        return {
+            "status": "failed",
+            "intent_type": "analytical",
+            "next_step": "metabase",
+            "error_type": "input",
+            "action_taken": "stop",
+            "message": str(exc),
+            "attempts": attempts,
+            "attempts_count": len(attempts),
+            "started_at": stage_started_at,
+            "finished_at": utc_now_iso(),
+            "duration_ms": int((time.perf_counter() - stage_started_perf) * 1000),
+            "warnings": [],
+            "errors": [{"type": "input", "message": str(exc)}],
+            "debug_metadata": {
+                "dataset_scope": normalize_dataset_context(dataset_scope),
+                "reason_for_selection": "missing_dataset_binding",
+            },
         }
 
     schema_snapshot = _schema_from_preprocessing_high(preprocessing_high_asset)
     schema_source = "preprocessing_high.schema_used"
     if not schema_snapshot:
         try:
-            schema_snapshot = get_schema()
-            schema_source = "schema_provider.get_schema"
+            schema_snapshot = get_schema_for_dataset(
+                workspace_id=dataset_context.get("workspace_id", ""),
+                dataset_id=dataset_context.get("dataset_id", ""),
+                manager_id=dataset_context.get("manager_id", ""),
+                table_name=dataset_context.get("table_name", ""),
+                source_id=dataset_context.get("source_id", ""),
+                report_id=dataset_context.get("report_id", ""),
+            )
+            schema_source = "schema_provider.get_schema_for_dataset"
         except Exception as exc:  # noqa: BLE001
             context.log.error("Schema loading failed for intent extraction | error=%s", str(exc))
             attempts = [
@@ -165,7 +281,7 @@ def intent_extraction_asset(
                     output_payload={},
                     success=False,
                     retry_triggered=False,
-                    model_or_method_used="schema_provider.get_schema",
+                    model_or_method_used="schema_provider.get_schema_for_dataset",
                     duration_ms=0,
                     validation_result={"is_valid": False},
                     error_type="system",
@@ -196,57 +312,69 @@ def intent_extraction_asset(
 
     schema_snapshot, schema_filter_meta = filter_business_schema(schema_snapshot)
 
-    selected_table = str(preprocessing_high_asset.get("selected_table", "")).strip()
     selected_columns = [
         str(column).strip()
         for column in preprocessing_high_asset.get("selected_columns", [])
         if str(column).strip()
     ]
-    resolved_selected_table = _resolve_selected_table_name(
-        selected_table=selected_table,
-        schema_snapshot=schema_snapshot,
-    )
-    should_scope_schema = bool(resolved_selected_table)
-    if should_scope_schema:
-        # Keep full table columns by default to avoid dropping semantically relevant fields.
-        # Column-level narrowing is intentionally avoided unless extraction confidence is explicit.
-        schema_snapshot = {resolved_selected_table: schema_snapshot.get(resolved_selected_table, [])}
-        context.log.info(
-            "Schema narrowed to selected table for intent extraction | table=%s selected_columns=%s",
-            resolved_selected_table,
-            selected_columns,
+    try:
+        bound_table = dataset_context.get("table_name", "")
+        schema_snapshot = _bound_table_schema_or_error(
+            schema_snapshot=schema_snapshot,
+            dataset_context=dataset_context,
         )
-    elif selected_table:
-        context.log.warning(
-            "Selected table could not be resolved in schema. Keeping full schema | selected_table=%s",
-            selected_table,
-        )
-    else:
-        candidate_tables = [
-            str(table).strip()
-            for table in preprocessing_high_asset.get("candidate_tables", [])
-            if str(table).strip()
-        ]
-        ranked_tables = rank_tables_for_question(
-            schema=schema_snapshot,
-            question=final_query,
-            limit=3,
-            preferred_tables=candidate_tables,
-        )
-        if ranked_tables:
-            schema_snapshot = {
-                table_name: schema_snapshot[table_name]
-                for table_name in ranked_tables
-                if table_name in schema_snapshot
-            }
-            context.log.info(
-                "Schema narrowed by ranked table relevance | ranked_tables=%s",
-                ranked_tables,
+    except DatasetBindingError as exc:
+        attempts = [
+            make_attempt(
+                attempt_number=1,
+                input_payload={
+                    "final_query": final_query,
+                    "dataset_scope": dataset_scope,
+                },
+                output_payload={},
+                success=False,
+                retry_triggered=False,
+                model_or_method_used="dataset_scope_guard",
+                duration_ms=0,
+                validation_result={"is_valid": False},
+                error_type="input",
+                error_message=str(exc),
             )
+        ]
+        return {
+            "status": "failed",
+            "intent_type": "analytical",
+            "next_step": "metabase",
+            "error_type": "input",
+            "action_taken": "stop",
+            "message": str(exc),
+            "attempts": attempts,
+            "attempts_count": len(attempts),
+            "started_at": stage_started_at,
+            "finished_at": utc_now_iso(),
+            "duration_ms": int((time.perf_counter() - stage_started_perf) * 1000),
+            "warnings": [],
+            "errors": [{"type": "input", "message": str(exc)}],
+            "debug_metadata": {
+                "dataset_scope": normalize_dataset_context(dataset_scope),
+                "reason_for_selection": "dataset_table_mismatch",
+            },
+        }
+
+    scoped_schema, scope_meta = dataset_scope_guard(
+        schema=schema_snapshot,
+        dataset_scope=dataset_context,
+        selected_table=bound_table,
+        candidate_tables=list(schema_snapshot.keys()),
+        strict=True,
+    )
+    schema_snapshot = scoped_schema
+    should_scope_schema = True
 
     result = run_intent_extraction_stage(
         query=final_query,
         schema=schema_snapshot,
+        route=route,
     )
     result.setdefault("started_at", stage_started_at)
     result.setdefault("finished_at", utc_now_iso())
@@ -258,12 +386,23 @@ def intent_extraction_asset(
     result.setdefault("errors", [])
     result.setdefault("debug_metadata", {})
     result["debug_metadata"]["final_query"] = final_query
-    result["debug_metadata"]["selected_table"] = resolved_selected_table or selected_table
+    result["debug_metadata"]["selected_table"] = bound_table
     result["debug_metadata"]["selected_columns"] = selected_columns
     result["debug_metadata"]["schema_tables"] = list(schema_snapshot.keys())
     result["debug_metadata"]["schema_source"] = schema_source
     result["debug_metadata"]["schema_scoped"] = should_scope_schema
     result["debug_metadata"]["schema_filtering"] = schema_filter_meta
+    result["debug_metadata"]["dataset_scope"] = dataset_context
+    result["debug_metadata"]["dataset_scope_guard"] = scope_meta
+    result["debug_metadata"]["reason_for_selection"] = scope_meta.get("reason_for_selection", "")
+    if isinstance(result.get("validated_intent"), dict):
+        result["validated_intent"]["table"] = bound_table
+        result["validated_intent"]["dataset_context"] = dataset_context
+    if isinstance(result.get("extracted_intent"), dict):
+        result["extracted_intent"]["table"] = bound_table
+        result["extracted_intent"]["dataset_context"] = dataset_context
+    result["dataset_context"] = dataset_context
+    result["confidence"] = stage_confidence(result, base_success=0.86, base_degraded=0.58)
     context.log.info(
         "Intent extraction stage completed | status=%s intent_type=%s next_step=%s",
         result.get("status"),

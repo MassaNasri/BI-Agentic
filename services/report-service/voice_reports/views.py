@@ -28,11 +28,35 @@ from .services import (
     get_metabase_service
 )
 from .services.clickhouse_executor import sanitize_query_results
+from .services.ai_trace_service import build_ai_trace_payload
+from .utils import infer_chart_type, profile_result_shape
 from users.permissions import IsManager, IsAnalyst, IsExecutive
 
 logger = logging.getLogger(__name__)
 LOW_CHANGE_TYPES = {"removed_noise", "normalized", "reduced_repetition", "removed_filler_words", "removed_noise_tags", "removed_noise_tokens", "normalized_repeated_characters", "normalized_punctuation", "normalized_whitespace", "removed_control_chars", "removed_malformed_symbols", "normalized_control_chars"}
 HIGH_ADJUSTMENT_TYPES = {"derived_field", "mapped_column"}
+
+
+def build_report_ai_trace(report, *, embed_url: str = "") -> dict:
+    return build_ai_trace_payload(
+        report_id=report.id,
+        transcription=report.transcription,
+        preprocessing_low=report.preprocessing_low,
+        preprocessing_high=report.preprocessing_high,
+        intent_json=report.intent_json,
+        pipeline_trace=report.pipeline_trace,
+        generated_sql=report.generated_sql,
+        reviewed_sql=report.final_sql,
+        query_result=report.query_result,
+        execution_time_ms=report.execution_time_ms,
+        row_count=report.row_count,
+        chart_type=report.chart_type,
+        metabase_question_id=report.metabase_question_id,
+        metabase_dashboard_id=report.metabase_dashboard_id,
+        embed_url=embed_url,
+        chart_config=report.chart_config,
+        error_message=report.error_message,
+    )
 
 
 def normalize_chart_payload(chart_payload):
@@ -41,15 +65,23 @@ def normalize_chart_payload(chart_payload):
     """
     if not isinstance(chart_payload, dict):
         return chart_payload
-    raw_type = chart_payload.get("type")
-    normalized_type = normalize_chart_type(raw_type, default=ChartType.TABLE)
+    raw_type = (
+        chart_payload.get("selected_chart_type")
+        or chart_payload.get("chart_type")
+        or chart_payload.get("type")
+    )
+    normalized_type = normalize_chart_type(raw_type, default="")
+    normalized_payload = dict(chart_payload)
+    if not normalized_type:
+        return normalized_payload
     if raw_type and raw_type != normalized_type:
         logger.info(
             "Chart type mapping applied: source=%s mapped=%s",
             raw_type,
             normalized_type,
         )
-    normalized_payload = dict(chart_payload)
+    normalized_payload["selected_chart_type"] = normalized_type
+    normalized_payload["chart_type"] = normalized_type
     normalized_payload["type"] = normalized_type
     return normalized_payload
 
@@ -107,6 +139,7 @@ def build_default_preprocessing_high(corrected_query: str = "") -> dict:
     return {
         "corrected_query": str(corrected_query or ""),
         "term_corrections": [],
+        "user_friendly_messages": [],
         "schema_used": {"tables": [], "columns": []},
         "schema_adjustments": [],
         "unresolved_terms": [],
@@ -148,6 +181,46 @@ def normalize_pipeline_trace(payload) -> dict:
         },
     )
     return normalized
+
+
+def extract_pipeline_contract(pipeline_trace, *, confidence=None, confidence_breakdown=None, degraded=None) -> dict:
+    trace = pipeline_trace if isinstance(pipeline_trace, dict) else {}
+    overall = trace.get("overall_status", {}) if isinstance(trace.get("overall_status"), dict) else {}
+    status_value = str(overall.get("status") or trace.get("status") or "").strip().lower()
+    breakdown = confidence_breakdown or overall.get("confidence_breakdown") or trace.get("confidence_breakdown")
+    score = confidence
+    if score is None:
+        score = overall.get("confidence", trace.get("confidence"))
+    try:
+        score = None if score is None else max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        score = None
+    derived_degraded = degraded
+    if derived_degraded is None:
+        derived_degraded = status_value == "degraded" or any(
+            isinstance(stage, dict)
+            and (
+                str(stage.get("status", "")).strip().lower() == "degraded"
+                or bool(stage.get("degraded"))
+            )
+            for stage in trace.values()
+        )
+    return {
+        "status": status_value or "unknown",
+        "degraded": bool(derived_degraded),
+        "confidence": score,
+        "confidence_breakdown": breakdown if isinstance(breakdown, dict) else None,
+    }
+
+
+def extract_report_contract(report) -> dict:
+    chart_config = report.chart_config if isinstance(report.chart_config, dict) else {}
+    stored = chart_config.get("ai_contract", {}) if isinstance(chart_config.get("ai_contract"), dict) else {}
+    trace_contract = extract_pipeline_contract(report.pipeline_trace)
+    return {
+        **trace_contract,
+        **{key: value for key, value in stored.items() if value is not None},
+    }
 
 
 def _flatten_schema_columns(columns_payload) -> list[str]:
@@ -324,11 +397,29 @@ def normalize_preprocessing_high(payload, fallback_query: str = "") -> dict:
         for correction in raw_corrections:
             if not isinstance(correction, dict):
                 continue
+            original_value = (
+                correction.get("original")
+                or correction.get("from")
+                or correction.get("source")
+                or ""
+            )
+            corrected_value = (
+                correction.get("corrected")
+                or correction.get("to")
+                or correction.get("target")
+                or ""
+            )
             term_corrections.append(
                 {
-                    "original": str(correction.get("original", "")).strip(),
-                    "corrected": str(correction.get("corrected", "")).strip(),
-                    "matched_column": str(correction.get("matched_column", "")).strip(),
+                    "original": str(original_value).strip(),
+                    "corrected": str(corrected_value).strip(),
+                    "matched_column": str(
+                        correction.get("matched_column", "") or correction.get("matched", "")
+                    ).strip(),
+                    "from": str(original_value).strip(),
+                    "to": str(corrected_value).strip(),
+                    "type": str(correction.get("type", "")).strip(),
+                    "message": str(correction.get("message", "")).strip(),
                 }
             )
     if not term_corrections and mappings:
@@ -392,6 +483,13 @@ def normalize_preprocessing_high(payload, fallback_query: str = "") -> dict:
     return {
         "corrected_query": corrected_query,
         "term_corrections": term_corrections,
+        "user_friendly_messages": [
+            str(message).strip()
+            for message in payload.get("user_friendly_messages", [])
+            if str(message).strip()
+        ]
+        if isinstance(payload.get("user_friendly_messages"), list)
+        else [],
         "schema_used": {
             "tables": tables,
             "columns": columns,
@@ -519,8 +617,10 @@ class VoiceUploadView(APIView):
                     VoiceReport.STATUS_PENDING
                     if (question_type == 'analytical' and sql)
                     else VoiceReport.STATUS_UPLOADED
-                )
+                ),
             )
+            report.ai_trace = build_report_ai_trace(report)
+            report.save(update_fields=['ai_trace', 'updated_at'])
             
             # Handle conversational questions (no SQL needed)
             if question_type != 'analytical' or not sql:
@@ -758,6 +858,17 @@ class QueryExecuteView(APIView):
                 report.intent_json
             )
             report.chart_type = chart_type
+            chart_config = dict(report.chart_config) if isinstance(report.chart_config, dict) else {}
+            chart_config["selected_chart_type"] = chart_type
+            chart_config["chart_type"] = chart_type
+            chart_config["reason_chart_selected"] = "shape_and_intent_inference"
+            report.chart_config = chart_config
+            visualization_settings = self._build_visualization_settings(report, chart_type)
+            dimensions = visualization_settings.get("graph.dimensions", [])
+            metrics = visualization_settings.get("graph.metrics", [])
+            chart_config["x_axis"] = dimensions[0] if isinstance(dimensions, list) and dimensions else ""
+            chart_config["y_axis"] = metrics[0] if isinstance(metrics, list) and metrics else ""
+            report.chart_config = chart_config
             
             # Create Metabase question
             metabase = get_metabase_service()
@@ -783,7 +894,7 @@ class QueryExecuteView(APIView):
             question_id = metabase.create_question(
                 name=f"Voice Report #{report.id}: {report.transcription[:50]}",
                 sql=clean_sql,
-                visualization_settings={'display': metabase_display}
+                visualization_settings=visualization_settings
             )
             
             if not question_id:
@@ -858,6 +969,14 @@ class QueryExecuteView(APIView):
             # )
             
             report.chart_type = chart_type
+            chart_config["metabase"] = {
+                "question_id": question_id,
+                "dashboard_id": report.metabase_dashboard_id,
+                "display": getattr(metabase, "last_display", None) or metabase_display,
+                "fallback_applied": bool(getattr(metabase, "last_fallback_applied", False)),
+                "fallback_reason": getattr(metabase, "last_fallback_reason", ""),
+            }
+            report.chart_config = chart_config
             report.status = VoiceReport.STATUS_VISUALIZATION_CREATED
             report.error_message = ''
             report.embed_url = ''
@@ -940,36 +1059,71 @@ class QueryExecuteView(APIView):
         return Response(response_payload, status=http_status)
     
     def _infer_chart_type(self, columns, rows, intent):
-        """Infer appropriate chart type from data and intent."""
-        raw_chart_type = ChartType.TABLE
-
-        if not rows:
-            return ChartType.TABLE
-        
-        num_columns = len(columns)
-        
-        # Single value -> number display
-        if num_columns == 1 and len(rows) == 1:
-            raw_chart_type = 'scalar'
-        elif num_columns == 2:
-            # Check if first column is date/time
-            first_col_name = columns[0].lower()
-            if any(term in first_col_name for term in ['date', 'time', 'year', 'month', 'day']):
-                raw_chart_type = ChartType.LINE
-            else:
-                raw_chart_type = ChartType.BAR
-        elif num_columns > 2:
-            # Multiple numeric columns -> bar chart
-            raw_chart_type = ChartType.BAR
-        
-        normalized_chart_type = normalize_chart_type(raw_chart_type, default=ChartType.TABLE)
-        if raw_chart_type != normalized_chart_type:
-            logger.info(
-                "Chart type mapping applied in QueryExecuteView: source=%s mapped=%s",
-                raw_chart_type,
-                normalized_chart_type,
-            )
+        """Infer render-safe chart type from result shape using canonical chart labels."""
+        normalized_chart_type = infer_chart_type(
+            columns=columns if isinstance(columns, list) else [],
+            rows=rows if isinstance(rows, list) else [],
+            intent=intent if isinstance(intent, dict) else {},
+        )
+        logger.info(
+            "chart_selected=%s fallback_applied=%s",
+            normalized_chart_type,
+            normalized_chart_type == ChartType.TABLE,
+        )
         return normalized_chart_type
+
+    def _build_visualization_settings(self, report, chart_type):
+        query_result = report.query_result if isinstance(report.query_result, dict) else {}
+        columns_payload = query_result.get("columns", []) if isinstance(query_result.get("columns", []), list) else []
+        rows_payload = query_result.get("rows", []) if isinstance(query_result.get("rows", []), list) else []
+        shape = profile_result_shape(columns_payload, rows_payload)
+        chart_config = report.chart_config if isinstance(report.chart_config, dict) else {}
+        normalized_chart_type = normalize_chart_type(chart_type, default=ChartType.TABLE)
+        display = to_metabase_display(normalized_chart_type)
+
+        column_specs = []
+        for column in columns_payload:
+            if isinstance(column, dict):
+                name = str(column.get("name", "")).strip()
+                col_type = str(column.get("type", "")).strip()
+            else:
+                name = str(column or "").strip()
+                col_type = ""
+            if name:
+                column_specs.append({"name": name, "type": col_type})
+
+        settings = {
+            "display": display,
+            "chart_type": normalized_chart_type,
+            "numeric_columns": shape.get("numeric_columns", []),
+            "time_columns": shape.get("time_like_columns", []),
+            "category_columns": [
+                name for name in shape.get("columns", [])
+                if name not in shape.get("numeric_columns", [])
+            ],
+            "row_count": shape.get("row_count", 0),
+            "dataset_columns": column_specs,
+            "result_rows": [row for row in rows_payload[:100] if isinstance(row, dict)],
+            "reason_chart_selected": chart_config.get("reason_chart_selected", ""),
+        }
+
+        numeric_columns = settings["numeric_columns"]
+        time_columns = settings["time_columns"]
+        category_columns = settings["category_columns"]
+        if normalized_chart_type == ChartType.LINE and time_columns and numeric_columns:
+            settings["graph.dimensions"] = [time_columns[0]]
+            settings["graph.metrics"] = [numeric_columns[0]]
+        elif normalized_chart_type == ChartType.SCATTER and len(numeric_columns) >= 2:
+            settings["graph.dimensions"] = [numeric_columns[0]]
+            settings["graph.metrics"] = [numeric_columns[1]]
+        elif normalized_chart_type == ChartType.BAR and category_columns and numeric_columns:
+            settings["graph.dimensions"] = [category_columns[0]]
+            settings["graph.metrics"] = [numeric_columns[0]]
+        elif normalized_chart_type == ChartType.HISTOGRAM and numeric_columns:
+            settings["graph.metrics"] = [numeric_columns[0]]
+        elif normalized_chart_type == ChartType.CARD and numeric_columns:
+            settings["graph.metrics"] = [numeric_columns[0]]
+        return settings
     
     def _get_or_create_dashboard(self, workspace, metabase):
         """Get or create Metabase dashboard for workspace."""
@@ -1101,6 +1255,7 @@ class ReportListView(APIView):
             data = []
             for report in reports:
                 embed_url = get_report_embed_url(report, metabase_service=metabase)
+                ai_contract = extract_report_contract(report)
                 data.append({
                     'id': report.id,
                     'transcription': report.transcription,
@@ -1113,6 +1268,9 @@ class ReportListView(APIView):
                     'sql': report.final_sql,
                     'embed_url': embed_url,
                     'metabase_question_id': report.metabase_question_id,
+                    'confidence': ai_contract.get('confidence'),
+                    'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                    'degraded': ai_contract.get('degraded'),
                     'can_edit': request.user.role == 'analyst'
                 })
             logger.info(
@@ -1176,6 +1334,11 @@ class ReportDetailView(APIView):
                 fallback_query=preprocessing_low.get("cleaned_text", report.transcription),
             )
             pipeline_trace = normalize_pipeline_trace(report.pipeline_trace)
+            ai_contract = extract_report_contract(report)
+            ai_trace = build_report_ai_trace(report, embed_url=embed_url)
+            if report.ai_trace != ai_trace:
+                report.ai_trace = ai_trace
+                report.save(update_fields=['ai_trace', 'updated_at'])
             
             return Response({
                 'success': True,
@@ -1198,6 +1361,10 @@ class ReportDetailView(APIView):
                     'preprocessing_low': preprocessing_low,
                     'preprocessing_high': preprocessing_high,
                     'pipeline_trace': pipeline_trace,
+                    'ai_trace': ai_trace,
+                    'confidence': ai_contract.get('confidence'),
+                    'confidence_breakdown': ai_contract.get('confidence_breakdown'),
+                    'degraded': ai_contract.get('degraded'),
                     'overall_status': pipeline_trace.get('overall_status'),
                     'root_cause': pipeline_trace.get('root_cause'),
                     'error_message': report.error_message,
@@ -1254,6 +1421,46 @@ class ReportDetailView(APIView):
             )
         except Exception as e:
             logger.error(f"Error deleting report: {e}", exc_info=True)
+            return Response(
+                {'success': False, 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class AITraceDetailView(APIView):
+    """
+    Analyst-facing explainability payload for the full AI pipeline.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, report_id):
+        try:
+            workspace = get_user_workspace(request.user)
+            if not workspace:
+                return Response(
+                    {'success': False, 'error': 'User must belong to a workspace'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            report = get_object_or_404(
+                VoiceReport,
+                id=report_id,
+                workspace=workspace
+            )
+            embed_url = get_report_embed_url(report)
+            ai_trace = build_report_ai_trace(report, embed_url=embed_url)
+
+            if report.ai_trace != ai_trace:
+                report.ai_trace = ai_trace
+                report.save(update_fields=['ai_trace', 'updated_at'])
+
+            return Response({
+                'success': True,
+                'report_id': report.id,
+                'ai_trace': ai_trace,
+            })
+        except Exception as e:
+            logger.error("Error in AITraceDetailView: %s", e, exc_info=True)
             return Response(
                 {'success': False, 'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

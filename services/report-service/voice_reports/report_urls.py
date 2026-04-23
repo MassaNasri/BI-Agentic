@@ -7,5 +7,6 @@ urlpatterns = [
     path('dashboard/stats/', views.DashboardStatsView.as_view(), name='dashboard-stats'),
     path('reports/', views.ReportListView.as_view(), name='report-list'),
     path('<int:report_id>/sql/', views.SQLEditView.as_view(), name='sql-edit'),
+    path('<int:report_id>/ai-trace/', views.AITraceDetailView.as_view(), name='report-ai-trace'),
     path('<int:report_id>/', views.ReportDetailView.as_view(), name='report-detail'),
 ]

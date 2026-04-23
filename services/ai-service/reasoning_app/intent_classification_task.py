@@ -12,6 +12,7 @@ from typing import Any, Literal, TypedDict
 from reasoning_app.llm_intent_client import classify_question
 from shared.input_classifier import classify_input
 from shared.pipeline_trace import make_attempt
+from shared.stage_contract import stage_allows_progress
 
 
 IntentErrorType = Literal["system", "model", "input", "logic", "unknown"]
@@ -49,12 +50,12 @@ class IntentTaskConfig:
     def from_env(cls) -> "IntentTaskConfig":
         raw = os.getenv("INTENT_CLASSIFICATION_MAX_RETRIES")
         if raw is None:
-            return cls(max_retries=1)
+            return cls(max_retries=2)
         try:
             parsed = int(raw)
         except ValueError:
-            parsed = 1
-        return cls(max_retries=max(0, min(parsed, 1)))
+            parsed = 2
+        return cls(max_retries=max(0, min(parsed, 3)))
 
 
 def _utc_now() -> str:
@@ -108,6 +109,8 @@ _STRONG_ANALYTICAL_PATTERNS = (
     r"\b(show|list|give|display|plot)\b.*\b(total|sum|average|avg|count|number\s+of|max|min|distribution|breakdown|population|revenue|profit|margin|sales|age)\b",
     r"\b(total|sum|average|avg|count|number\s+of|max|min)\b.*\b(by|per|across|for each|in each)\b",
     r"\b(distribution|breakdown)\b.*\b(by|per|across|for each|in each)\b",
+    r"\b(how|what)\b.*\b(distribution|distributed|spread|histogram|frequency)\b",
+    r"\b(how|what)\b.*\b(impact|relationship|correlation|effect|influence)\b",
     r"\b(top|bottom)\s+\d+\b.*\bby\b",
     r"\bhow many\b.*\b(by|per|across|for each|in each)\b",
 )
@@ -131,10 +134,43 @@ _ANALYTICAL_KEYWORDS = (
     "age",
     "trend",
     "distribution",
+    "distributed",
+    "spread",
+    "histogram",
+    "frequency",
+    "impact",
+    "relationship",
+    "correlation",
+    "effect",
+    "influence",
     "breakdown",
     "compare",
     "top",
     "bottom",
+)
+
+_PREDICTIVE_KEYWORDS = (
+    "forecast",
+    "predict",
+    "prediction",
+    "projected",
+    "projection",
+    "expected",
+    "future",
+    "next",
+    "upcoming",
+)
+
+_PREDICTIVE_PATTERNS = (
+    r"\bfor\s+the\s+next\b",
+    r"\bin\s+the\s+next\b",
+    r"\bover\s+the\s+next\b",
+    r"\bnext\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b",
+    r"\b(?:for|in|over)\s+the\s+next\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b",
+    r"\bnext\s+(day|week|month|year)\b",
+    r"\bwhat\s+will\s+be\b",
+    r"\btrend\b.*\b(next|future|upcoming|forecast|predict)\b",
+    r"\b(next|future|upcoming|forecast|predict)\b.*\btrend\b",
 )
 
 _GROUP_BY_KEYWORDS = (
@@ -164,6 +200,8 @@ _SKIP_LABELS = {
     "transcription_failure",
     "no_speech_detected",
 }
+
+_PREDICTIVE_LABELS = {"predictive", "forecast", "forecasting"}
 
 
 def _normalize_intent_text(text: Any) -> str:
@@ -219,6 +257,42 @@ def _detect_rule_based_analytical(text: str) -> dict[str, Any]:
     }
 
 
+def _detect_rule_based_predictive(text: str) -> dict[str, Any]:
+    normalized = _normalize_intent_text(text)
+    if not normalized:
+        return {"is_predictive": False, "matched_keywords": [], "matched_patterns": []}
+    matched_keywords = [
+        keyword
+        for keyword in _PREDICTIVE_KEYWORDS
+        if _contains_phrase(normalized, keyword)
+    ]
+    matched_patterns = [
+        pattern
+        for pattern in _PREDICTIVE_PATTERNS
+        if re.search(pattern, normalized)
+    ]
+    is_predictive = bool(matched_keywords or matched_patterns)
+    return {
+        "is_predictive": is_predictive,
+        "matched_keywords": matched_keywords,
+        "matched_patterns": matched_patterns,
+    }
+
+
+def _enforce_predictive_consistency(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_question_type = _normalize_intent_text(payload.get("question_type"))
+    normalized_classification = _normalize_intent_text(payload.get("classification"))
+    is_predictive = normalized_question_type in _PREDICTIVE_LABELS or normalized_classification in _PREDICTIVE_LABELS
+    if is_predictive:
+        payload["classification"] = "predictive"
+        payload["question_type"] = "predictive"
+        payload["requires_forecast"] = True
+        payload["route"] = "forecasting"
+        if isinstance(payload.get("debug_metadata"), dict):
+            payload["debug_metadata"]["route"] = "forecasting"
+    return payload
+
+
 def _is_strong_conversational_signal(text: str) -> bool:
     normalized = _normalize_intent_text(text)
     if not normalized:
@@ -242,11 +316,15 @@ def _extract_classifier_label(classifier_output: Any) -> tuple[str, bool]:
         normalized = _normalize_intent_text(candidate)
         if normalized == "analytical":
             return "analytical", bool(llm_explicit_flag or decision_source == "llm_explicit")
+        if normalized in _PREDICTIVE_LABELS:
+            return "predictive", bool(llm_explicit_flag or decision_source == "llm_explicit")
         if normalized in {"conversational", "informational", "information", "non_analytical", "non-analytical"}:
             return "conversational", bool(llm_explicit_flag or decision_source == "llm_explicit")
 
     needs_sql = classifier_output.get("needs_sql")
     if isinstance(needs_sql, bool):
+        if bool(classifier_output.get("requires_forecast", False)):
+            return "predictive", False
         return ("analytical" if needs_sql else "conversational"), False
 
     raise IntentModelOutputError("Classifier output is missing an interpretable label.")
@@ -335,6 +413,7 @@ def run_intent_classification(
             "is_analytical": False,
             "error_type": "none",
             "action_taken": "stop",
+            "route": "stop",
             "classification": pre_label or "invalid_input",
             "classification_reason": pre_classification.get("reason", ""),
             "confidence": float(pre_classification.get("confidence", 0.5) or 0.5),
@@ -355,7 +434,11 @@ def run_intent_classification(
 
     rule_detection = _detect_rule_based_analytical(normalized_cleaned_text)
     rule_based_detected = bool(rule_detection.get("is_analytical"))
-    if pre_label == "forecast":
+    predictive_rule_detection = _detect_rule_based_predictive(normalized_cleaned_text)
+    predictive_rule_detected = bool(predictive_rule_detection.get("is_predictive"))
+    if pre_label in _PREDICTIVE_LABELS:
+        predictive_rule_detected = True
+    if predictive_rule_detected:
         rule_based_detected = True
     _log_event(
         logger,
@@ -372,7 +455,9 @@ def run_intent_classification(
             input_payload={"cleaned_text": normalized_cleaned_text},
             output_payload={
                 "rule_based_detected": rule_based_detected,
+                "predictive_rule_detected": predictive_rule_detected,
                 "matched_keywords": rule_detection.get("matched_keywords", []),
+                "matched_predictive_keywords": predictive_rule_detection.get("matched_keywords", []),
                 "matched_grouping_keywords": rule_detection.get("matched_grouping_keywords", []),
                 "matched_patterns": rule_detection.get("matched_patterns", []),
                 "input_classifier_label": pre_label,
@@ -395,17 +480,26 @@ def run_intent_classification(
             final_label="analytical",
         )
         finished_at = _utc_now()
-        return {
+        classification_label = "predictive" if predictive_rule_detected else "analytical"
+        route = "forecasting" if predictive_rule_detected else "analytical"
+        return _enforce_predictive_consistency({
             "status": "success",
             "is_analytical": True,
             "error_type": "none",
             "action_taken": "stop",
-            "classification": "analytical",
-            "classification_reason": "rule_based_analytical_detection",
-            "confidence": 0.92,
-            "question_type": "analytical",
+            "route": route,
+            "classification": classification_label,
+            "classification_reason": (
+                "rule_based_predictive_detection"
+                if predictive_rule_detected
+                else "rule_based_analytical_detection"
+            ),
+            "confidence": 0.95 if predictive_rule_detected else 0.92,
+            "question_type": classification_label,
+            "requires_forecast": predictive_rule_detected,
             "raw_classifier_output": {
                 "rule_based": rule_detection,
+                "predictive_rule_based": predictive_rule_detection,
                 "input_classifier": pre_classification,
             },
             "attempts": attempts,
@@ -416,11 +510,12 @@ def run_intent_classification(
             "warnings": [],
             "errors": [],
             "debug_metadata": {
-                "route": "proceed",
+                "route": route,
                 "classification_source": "rule_based_intent_detector",
                 "rule_based": rule_detection,
+                "predictive_rule_based": predictive_rule_detection,
             },
-        }
+        })
 
     strong_conversational_signal = (
         pre_label == "conversational"
@@ -455,6 +550,7 @@ def run_intent_classification(
             "is_analytical": False,
             "error_type": "none",
             "action_taken": "stop",
+            "route": "stop",
             "classification": "conversational",
             "classification_reason": "rule_based_conversational_detection",
             "confidence": max(pre_confidence, 0.9),
@@ -486,13 +582,21 @@ def run_intent_classification(
                 final_label = "conversational"
                 final_reason = "llm_explicit_conversational"
                 confidence = 0.78
+            elif llm_is_explicit and llm_label == "predictive":
+                final_label = "predictive"
+                final_reason = "llm_explicit_predictive"
+                confidence = 0.9
             elif llm_is_explicit and llm_label == "analytical":
                 final_label = "analytical"
                 final_reason = "llm_explicit_analytical"
                 confidence = 0.86
             else:
                 # Guardrail: avoid routing non-analytical/noise-like inputs into SQL on weak signals.
-                if llm_label == "conversational" and pre_label in {"conversational", "noise_input", "invalid_input"}:
+                if llm_label == "predictive" or pre_label in _PREDICTIVE_LABELS:
+                    final_label = "predictive"
+                    final_reason = "heuristic_predictive_alignment"
+                    confidence = max(pre_confidence, 0.84)
+                elif llm_label == "conversational" and pre_label in {"conversational", "noise_input", "invalid_input"}:
                     final_label = "conversational"
                     final_reason = "heuristic_conversational_alignment"
                     confidence = max(pre_confidence, 0.72)
@@ -500,16 +604,12 @@ def run_intent_classification(
                     final_label = "analytical"
                     final_reason = "heuristic_analytical_alignment"
                     confidence = max(pre_confidence, 0.72)
-                elif pre_label == "forecast":
-                    final_label = "analytical"
-                    final_reason = "heuristic_forecast_alignment"
-                    confidence = max(pre_confidence, 0.74)
                 else:
                     final_label = "conversational"
                     final_reason = "safety_default_conversational"
                     confidence = max(pre_confidence, 0.68)
 
-            is_analytical = final_label == "analytical"
+            is_analytical = final_label in {"analytical", "predictive"}
             attempts.append(
                 make_attempt(
                     attempt_number=len(attempts) + 1,
@@ -539,15 +639,21 @@ def run_intent_classification(
             )
 
             finished_at = _utc_now()
-            return {
+            return _enforce_predictive_consistency({
                 "status": "success",
                 "is_analytical": is_analytical,
                 "error_type": "none",
                 "action_taken": "stop",
+                "route": (
+                    "forecasting"
+                    if final_label == "predictive"
+                    else ("analytical" if final_label == "analytical" else "stop")
+                ),
                 "classification": final_label,
                 "classification_reason": final_reason,
                 "confidence": confidence,
                 "question_type": final_label,
+                "requires_forecast": final_label == "predictive",
                 "raw_classifier_output": classifier_output,
                 "attempts": attempts,
                 "attempts_count": len(attempts),
@@ -557,12 +663,16 @@ def run_intent_classification(
                 "warnings": [],
                 "errors": [],
                 "debug_metadata": {
-                    "route": "proceed" if final_label == "analytical" else "stop",
+                    "route": (
+                        "forecasting"
+                        if final_label == "predictive"
+                        else ("analytical" if final_label == "analytical" else "stop")
+                    ),
                     "classification_source": "llm_intent_classifier",
                     "llm_label": llm_label,
                     "llm_explicit_decision": llm_is_explicit,
                 },
-            }
+            })
         except Exception as exc:  # noqa: BLE001
             error_type = classify_intent_task_error(exc)
             action_taken = _decide_intent_action(
@@ -609,21 +719,45 @@ def run_intent_classification(
                 rule_based_detected=False,
                 llm_label="ERROR",
                 llm_source="llm_intent_classifier",
-                final_label="analytical" if pre_label in {"analytical", "forecast"} else "conversational",
+                final_label=(
+                    "predictive"
+                    if pre_label in _PREDICTIVE_LABELS
+                    else ("analytical" if pre_label in {"analytical"} else "conversational")
+                ),
             )
-            return {
-                "status": "success",
-                "is_analytical": bool(pre_label in {"analytical", "forecast"}),
+            return _enforce_predictive_consistency({
+                "status": "degraded",
+                "degraded": True,
+                "degradation_reason": "intent_classification_llm_error_fallback",
+                "is_analytical": bool(pre_label in {"analytical"} or pre_label in _PREDICTIVE_LABELS),
                 "error_type": "none",
                 "action_taken": "stop",
-                "classification": "analytical" if pre_label in {"analytical", "forecast"} else "conversational",
+                "route": (
+                    "forecasting"
+                    if pre_label in _PREDICTIVE_LABELS
+                    else ("analytical" if pre_label in {"analytical"} else "stop")
+                ),
+                "classification": (
+                    "predictive"
+                    if pre_label in _PREDICTIVE_LABELS
+                    else ("analytical" if pre_label in {"analytical"} else "conversational")
+                ),
                 "classification_reason": (
-                    "safety_default_analytical_on_llm_error"
-                    if pre_label in {"analytical", "forecast"}
-                    else "safety_default_conversational_on_llm_error"
+                    "safety_default_predictive_on_llm_error"
+                    if pre_label in _PREDICTIVE_LABELS
+                    else (
+                        "safety_default_analytical_on_llm_error"
+                        if pre_label in {"analytical"}
+                        else "safety_default_conversational_on_llm_error"
+                    )
                 ),
                 "confidence": max(pre_confidence, 0.68),
-                "question_type": "analytical" if pre_label in {"analytical", "forecast"} else "conversational",
+                "question_type": (
+                    "predictive"
+                    if pre_label in _PREDICTIVE_LABELS
+                    else ("analytical" if pre_label in {"analytical"} else "conversational")
+                ),
+                "requires_forecast": pre_label in _PREDICTIVE_LABELS,
                 "raw_classifier_output": {},
                 "attempts": attempts,
                 "attempts_count": len(attempts),
@@ -633,11 +767,15 @@ def run_intent_classification(
                 "warnings": [{"type": error_type, "message": str(exc)}],
                 "errors": [],
                 "debug_metadata": {
-                    "route": "proceed" if pre_label in {"analytical", "forecast"} else "stop",
+                    "route": (
+                        "forecasting"
+                        if pre_label in _PREDICTIVE_LABELS
+                        else ("analytical" if pre_label in {"analytical"} else "stop")
+                    ),
                     "classification_source": "safety_default",
                     "llm_error": str(exc),
                 },
-            }
+            })
 
 
 def _attach_fn_compat(func):
@@ -661,7 +799,10 @@ def route_intent_classification(
     """
     Decision-based routing after intent classification.
     """
-    if classification_result.get("status") != "success":
+    if not stage_allows_progress(
+        classification_result.get("status"),
+        degraded=bool(classification_result.get("degraded")),
+    ):
         return {
             "status": "failed",
             "message": "Intent classification failed.",
@@ -694,13 +835,34 @@ def route_intent_classification(
             "classification": classification_result,
         }
 
+    normalized_question_type = str(classification_result.get("question_type", "")).strip().lower()
+    requires_forecast = bool(classification_result.get("requires_forecast", False))
+    predictive_state = classification_label in _PREDICTIVE_LABELS or normalized_question_type in _PREDICTIVE_LABELS
+    if predictive_state:
+        requires_forecast = True
+        classification_result["requires_forecast"] = True
+        classification_result["route"] = "forecasting"
+        classification_result["classification"] = "predictive"
+        classification_result["question_type"] = "predictive"
+
+    explicit_route = str(classification_result.get("route", "")).strip().lower()
+    if explicit_route in {"forecasting", "analytical"}:
+        route = explicit_route
+    else:
+        route = (
+            "forecasting" if predictive_state or requires_forecast else "analytical"
+        )
     return {
-        "status": "routed",
+        "status": "success",
+        "legacy_status": "routed",
         "next_stage": "preprocessing_high",
+        "route": route,
+        "next_step": "forecasting" if route == "forecasting" else "metabase",
         "module_path": "services/ai-service/preprocessing_high/",
         "classification": classification_result,
         "payload": {
             "cleaned_text": cleaned_text,
             "user_id": str(user_id or "").strip(),
+            "route": route,
         },
     }

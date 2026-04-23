@@ -1,10 +1,13 @@
-import requests
-import json
-import os
 import os
 
-print("ALL ENV KEYS:")
-for k in os.environ.keys():
-    if "OPEN" in k or "ROUTER" in k:
-        print(k, "=", os.environ.get(k))
+def debug_openrouter_env() -> None:
+    print("OPENROUTER ENV CHECK")
+    for key in sorted(os.environ.keys()):
+        upper = key.upper()
+        if "OPEN" in upper or "ROUTER" in upper:
+            print(f"{key}=<redacted>")
+
+
+if __name__ == "__main__":
+    debug_openrouter_env()
 

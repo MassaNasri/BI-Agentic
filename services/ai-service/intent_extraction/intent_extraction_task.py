@@ -12,6 +12,7 @@ from intent_extraction.error_handler import (
     decide_intent_extraction_action,
 )
 from intent_extraction.llm_extractor import extract_structured_intent, infer_intent_type
+from intent_extraction.predictive_parser import parse_predictive_intent
 from intent_extraction.routing import route_intent
 from intent_extraction.schemas import (
     IntentExtractionConfig,
@@ -22,7 +23,9 @@ from intent_extraction.schemas import (
 )
 from intent_extraction.validation import validate_structured_intent
 from shared.query_planner import normalize_analytical_intent
+from shared.confidence import stage_confidence
 from shared.pipeline_trace import make_attempt
+from shared.stage_contract import stage_allows_progress
 
 
 def _utc_now() -> str:
@@ -183,7 +186,7 @@ def _fallback_extract_and_validate(
     )
 
 
-def run_intent_extraction_stage(query: str, schema: dict) -> dict[str, Any]:
+def run_intent_extraction_stage(query: str, schema: dict, route: str = "analytical") -> dict[str, Any]:
     """
     Stage runtime for:
     1) extracting structured intent
@@ -198,10 +201,66 @@ def run_intent_extraction_stage(query: str, schema: dict) -> dict[str, Any]:
     stage_started_perf = time.perf_counter()
     llm_debug: dict[str, Any] = {}
 
+    normalized_route = str(route or "analytical").strip().lower() or "analytical"
+
     while True:
         try:
             attempt_started_perf = time.perf_counter()
             normalized_query, normalized_schema = _validate_inputs(query, schema)
+            inferred_predictive_type = infer_intent_type(query=normalized_query, hinted_intent_type=None)
+            predictive_route_required = (
+                normalized_route == "forecasting"
+                or inferred_predictive_type == "predictive"
+            )
+            if predictive_route_required:
+                predictive_intent = parse_predictive_intent(query=normalized_query, schema=normalized_schema)
+                attempts.append(
+                    make_attempt(
+                        attempt_number=len(attempts) + 1,
+                        input_payload={"query": normalized_query, "schema_tables": list(normalized_schema.keys())},
+                        output_payload={
+                            "extracted_intent": predictive_intent,
+                            "validated_intent": predictive_intent,
+                                "intent_type": "predictive",
+                                "predictive_route_required": predictive_route_required,
+                            },
+                            success=True,
+                        retry_triggered=False,
+                        model_or_method_used="predictive_intent_parser",
+                        duration_ms=int((time.perf_counter() - attempt_started_perf) * 1000),
+                        validation_result={"is_valid": True},
+                    )
+                )
+                finished_at = _utc_now()
+                return {
+                    "status": "success",
+                    "confidence": 0.9,
+                    "intent_type": "predictive",
+                    "next_step": "forecasting",
+                    "error_type": "none",
+                    "action_taken": "proceed",
+                    "query": normalized_query,
+                    "schema": normalized_schema,
+                    "extracted_intent": predictive_intent,
+                    "validated_intent": predictive_intent,
+                    "attempts": attempts,
+                    "attempts_count": len(attempts),
+                    "started_at": stage_started_at,
+                    "finished_at": finished_at,
+                    "duration_ms": int((time.perf_counter() - stage_started_perf) * 1000),
+                    "warnings": [],
+                    "errors": [],
+                    "debug_metadata": {
+                        "route": "forecasting",
+                        "route_source": (
+                            "explicit_route"
+                            if normalized_route == "forecasting"
+                            else "predictive_inference_guard"
+                        ),
+                        "predictive_parser": "deterministic_schema_aware",
+                    },
+                }
+
             extracted_intent, validated_intent, detected_type, llm_debug = _extract_and_validate(
                 query=normalized_query,
                 schema=normalized_schema,
@@ -227,6 +286,7 @@ def run_intent_extraction_stage(query: str, schema: dict) -> dict[str, Any]:
             finished_at = _utc_now()
             return {
                 "status": "success",
+                "confidence": 0.86,
                 "intent_type": detected_type,
                 "next_step": _next_step_for_intent_type(detected_type),
                 "error_type": "none",
@@ -244,6 +304,7 @@ def run_intent_extraction_stage(query: str, schema: dict) -> dict[str, Any]:
                 "errors": [],
                 "debug_metadata": {
                     "llm_provider": config.llm_provider,
+                    "route": normalized_route,
                     "llm_prompt": llm_debug.get("prompt"),
                     "llm_raw_output": llm_debug.get("raw_output"),
                     "llm_parsed_payload": llm_debug.get("parsed_payload"),
@@ -294,7 +355,10 @@ def run_intent_extraction_stage(query: str, schema: dict) -> dict[str, Any]:
                     )
                     finished_at = _utc_now()
                     return {
-                        "status": "success",
+                        "status": "degraded",
+                        "degraded": True,
+                        "degradation_reason": "intent_extraction_llm_fallback",
+                        "confidence": 0.58,
                         "intent_type": detected_type,
                         "next_step": _next_step_for_intent_type(detected_type),
                         "error_type": "none",
@@ -320,6 +384,7 @@ def run_intent_extraction_stage(query: str, schema: dict) -> dict[str, Any]:
                         "errors": [],
                         "debug_metadata": {
                             "llm_provider": config.llm_provider,
+                            "route": normalized_route,
                             "llm_prompt": llm_debug.get("prompt"),
                             "llm_raw_output": llm_debug.get("raw_output"),
                             "llm_parsed_payload": llm_debug.get("parsed_payload"),
@@ -388,9 +453,11 @@ def run_intent_extraction_stage(query: str, schema: dict) -> dict[str, Any]:
             failed_result["errors"] = [{"type": error_type, "message": str(exc)}]
             failed_result["debug_metadata"] = {
                 "llm_provider": config.llm_provider,
+                "route": normalized_route,
                 "llm_prompt": llm_debug.get("prompt"),
                 "llm_raw_output": llm_debug.get("raw_output"),
             }
+            failed_result["confidence"] = stage_confidence(failed_result, base_success=0.86, base_degraded=0.58)
             return failed_result
 
 
@@ -400,7 +467,7 @@ def run_intent_extraction(query: str, schema: dict) -> dict:
     extraction -> validation -> SQL build -> ClickHouse execution -> downstream routing.
     """
     stage_result = run_intent_extraction_stage(query=query, schema=schema)
-    if stage_result.get("status") != "success":
+    if not stage_allows_progress(stage_result.get("status"), degraded=bool(stage_result.get("degraded"))):
         return stage_result
 
     logger = _get_logger()
@@ -467,6 +534,7 @@ def run_intent_extraction(query: str, schema: dict) -> dict:
             result["duration_ms"] = int((time.perf_counter() - stage_started_perf) * 1000)
             result["warnings"] = []
             result["errors"] = []
+            result["confidence"] = stage_confidence(stage_result, base_success=0.86, base_degraded=0.58)
             return result
         except Exception as exc:  # noqa: BLE001
             error_type = classify_intent_extraction_error(exc)
@@ -519,6 +587,7 @@ def run_intent_extraction(query: str, schema: dict) -> dict:
             failed_payload["duration_ms"] = int((time.perf_counter() - stage_started_perf) * 1000)
             failed_payload["warnings"] = []
             failed_payload["errors"] = [{"type": error_type, "message": str(exc)}]
+            failed_payload["confidence"] = stage_confidence(failed_payload, base_success=0.86, base_degraded=0.58)
             return failed_payload
 
 

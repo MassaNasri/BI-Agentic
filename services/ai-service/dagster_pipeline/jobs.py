@@ -28,6 +28,12 @@ def _build_request_config(
     language: Optional[str] = None,
     initial_prompt: Optional[str] = None,
     user_id: Optional[str] = None,
+    manager_id: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    source_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    report_id: Optional[str] = None,
+    table_name: Optional[str] = None,
 ) -> dict[str, Any]:
     return {
         "ops": {
@@ -39,6 +45,12 @@ def _build_request_config(
                     "language": language,
                     "initial_prompt": initial_prompt,
                     "user_id": user_id,
+                    "manager_id": manager_id,
+                    "dataset_id": dataset_id,
+                    "source_id": source_id,
+                    "workspace_id": workspace_id,
+                    "report_id": report_id,
+                    "table_name": table_name,
                 }
             }
         }
@@ -89,7 +101,7 @@ def _extract_dagster_runtime(result: Any, *, job_name: str) -> dict[str, Any]:
                     "step_key": step_key,
                     "status": "pending",
                     "retry_attempts": 0,
-                    "retry_policy": {"max_retries": 1, "delay_seconds": 1.0},
+                    "retry_policy": {"max_retries": 2, "delay_seconds": 1.0},
                     "started_at": None,
                     "finished_at": None,
                 },
@@ -274,6 +286,12 @@ def run_full_ai_pipeline(
     language: Optional[str] = None,
     initial_prompt: Optional[str] = None,
     user_id: Optional[str] = None,
+    manager_id: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    source_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    report_id: Optional[str] = None,
+    table_name: Optional[str] = None,
 ) -> dict[str, Any]:
     run_config = _build_request_config(
         audio_path=audio_path,
@@ -282,6 +300,12 @@ def run_full_ai_pipeline(
         language=language,
         initial_prompt=initial_prompt,
         user_id=user_id,
+        manager_id=manager_id,
+        dataset_id=dataset_id,
+        source_id=source_id,
+        workspace_id=workspace_id,
+        report_id=report_id,
+        table_name=table_name,
     )
     result = _execute_job("ai_service_pipeline_job", run_config=run_config)
     runtime = _extract_dagster_runtime(result, job_name="ai_service_pipeline_job")
@@ -297,6 +321,12 @@ def run_full_ai_pipeline(
                 "language": language,
                 "initial_prompt": initial_prompt,
                 "user_id": user_id,
+                "manager_id": manager_id,
+                "dataset_id": dataset_id,
+                "source_id": source_id,
+                "workspace_id": workspace_id,
+                "report_id": report_id,
+                "table_name": table_name,
             },
         )
     try:
@@ -316,5 +346,11 @@ def run_full_ai_pipeline(
                 "language": language,
                 "initial_prompt": initial_prompt,
                 "user_id": user_id,
+                "manager_id": manager_id,
+                "dataset_id": dataset_id,
+                "source_id": source_id,
+                "workspace_id": workspace_id,
+                "report_id": report_id,
+                "table_name": table_name,
             },
         )

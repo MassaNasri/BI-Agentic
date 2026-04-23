@@ -9,6 +9,7 @@ from shared.schema_utils import is_numeric_type, unqualify_table_name
 
 _VALID_AGGREGATIONS = {"SUM", "AVG", "COUNT", "MIN", "MAX"}
 _VALID_FILTER_OPERATORS = {"=", "!=", ">", "<", ">=", "<=", "IN", "LIKE", "BETWEEN"}
+_NON_AGGREGATED_COMPARISON_INTENTS = {"comparison", "correlation", "relationship"}
 
 
 def _resolve_table_name(
@@ -123,6 +124,11 @@ def _derive_primary_intent(operations: list[str]) -> str:
     if "filtering" in operations:
         return "filtering"
     return "projection"
+
+
+def _supports_hour_column_type(col_type: str) -> bool:
+    normalized = str(col_type or "").strip().lower()
+    return ("datetime" in normalized) or ("timestamp" in normalized) or ("time" in normalized and "date" in normalized)
 
 
 def validate_structured_intent(
@@ -269,7 +275,27 @@ def validate_structured_intent(
         ]
         if len(set(inferred_aggregations)) == 1 and inferred_aggregations:
             aggregation = inferred_aggregations[0]
-    if not aggregation:
+
+    requested_intent = str(intent.get("intent", "")).strip().lower()
+    requested_operations = {
+        str(op).strip().lower()
+        for op in (intent.get("operations", []) or [])
+        if str(op).strip()
+    }
+    has_metric_aggregation_hints = bool(
+        aggregation
+        or any(
+            str(spec.get("aggregation", "")).strip().upper() in _VALID_AGGREGATIONS
+            for spec in normalized_metric_specs
+            if isinstance(spec, dict)
+        )
+    )
+    comparison_without_aggregation = (
+        requested_intent in _NON_AGGREGATED_COMPARISON_INTENTS
+        or "comparison" in requested_operations
+    ) and len(metrics) >= 2 and not has_metric_aggregation_hints
+
+    if not aggregation and not comparison_without_aggregation:
         aggregation = "SUM"
     if primary_metric == "*":
         aggregation = "COUNT"
@@ -293,6 +319,23 @@ def validate_structured_intent(
     normalized_limit = limit
 
     normalized_target = target_column or primary_metric
+    time_granularity = str(intent.get("time_granularity", "")).strip().lower()
+    time_column = str(intent.get("time_column", "")).strip()
+    if time_granularity == "hour":
+        candidate_time_column = time_column
+        if not candidate_time_column:
+            for col in table_columns:
+                candidate_name = str(col.get("name", "")).strip()
+                if not candidate_name:
+                    continue
+                if _supports_hour_column_type(str(col.get("type", ""))):
+                    candidate_time_column = candidate_name
+                    break
+        if not candidate_time_column:
+            raise IntentExtractionSchemaMismatchError("Granularity not supported: hour-level data not available")
+        candidate_type = str(column_map.get(candidate_time_column, {}).get("type", ""))
+        if not _supports_hour_column_type(candidate_type):
+            raise IntentExtractionSchemaMismatchError("Granularity not supported: hour-level data not available")
 
     ranking_payload = intent.get("ranking") if isinstance(intent.get("ranking"), dict) else {}
     ranking_direction = str(ranking_payload.get("direction", "")).strip().upper()
@@ -343,6 +386,9 @@ def validate_structured_intent(
         "table": resolved_table,
         "order_by": normalized_order_by,
         "limit": normalized_limit,
+        "time_granularity": time_granularity,
+        "time_column": time_column,
+        "time_grouping_detected": bool(time_granularity in {"hour", "day", "week", "month", "year"}),
         "ranking": normalized_ranking,
         "operations": operations,
         "ambiguities": intent.get("ambiguities") if isinstance(intent.get("ambiguities"), list) else [],

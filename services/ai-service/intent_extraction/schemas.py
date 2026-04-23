@@ -30,12 +30,13 @@ class StructuredIntent(TypedDict):
 
 
 class IntentExtractionTaskResult(TypedDict, total=False):
-    status: Literal["success", "failed"]
+    status: Literal["success", "failed", "degraded", "skipped", "rejected"]
     intent_type: IntentType
     sql_query: str
     next_step: NextStepType
     error_type: IntentExtractionErrorType
     action_taken: IntentExtractionActionType
+    confidence: float
     extracted_intent: StructuredIntent
     normalized_intent: dict[str, Any]
     execution_result: Any
@@ -83,16 +84,19 @@ class IntentExtractionConfig:
 
     @classmethod
     def from_env(cls) -> "IntentExtractionConfig":
-        retries = _env_int("INTENT_EXTRACTION_MAX_RETRIES", 1)
+        retries = _env_int("INTENT_EXTRACTION_MAX_RETRIES", 2)
         return cls(
             llm_provider=os.getenv("INTENT_EXTRACTION_LLM_PROVIDER", "openrouter").strip().lower(),
             ollama_url=os.getenv("INTENT_EXTRACTION_OLLAMA_URL", "http://localhost:11434/api/generate"),
             ollama_model=os.getenv("INTENT_EXTRACTION_OLLAMA_MODEL", "gemma3:1b"),
             request_timeout_seconds=_env_float("INTENT_EXTRACTION_TIMEOUT_SECONDS", 20.0),
-            max_retries=max(0, min(retries, 1)),
+            max_retries=max(0, min(retries, 3)),
             clickhouse_executor_path=os.getenv("INTENT_EXTRACTION_CLICKHOUSE_EXECUTOR_PATH", "").strip(),
             metabase_handler_path=os.getenv("INTENT_EXTRACTION_METABASE_HANDLER_PATH", "").strip(),
-            forecasting_handler_path=os.getenv("INTENT_EXTRACTION_FORECASTING_HANDLER_PATH", "").strip(),
+            forecasting_handler_path=os.getenv(
+                "INTENT_EXTRACTION_FORECASTING_HANDLER_PATH",
+                "forecasting.dagster_handler:run_forecasting_handler",
+            ).strip(),
         )
 
 
@@ -113,6 +117,7 @@ def build_intent_extraction_success_result(
         "next_step": next_step,
         "error_type": "none",
         "action_taken": "proceed",
+        "confidence": 0.0,
         "extracted_intent": extracted_intent,
         "normalized_intent": normalized_intent,
         "execution_result": execution_result,
@@ -134,4 +139,5 @@ def build_intent_extraction_failed_result(
         "next_step": next_step,
         "error_type": error_type,
         "action_taken": action_taken,
+        "confidence": 0.0,
     }

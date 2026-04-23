@@ -25,7 +25,7 @@ _EXPLICIT_NON_ANALYTICAL_TYPES = {
     "transcription_failure",
     "no_speech_detected",
 }
-_ANALYTICAL_TYPES = {"analytical", "forecast"}
+_ANALYTICAL_TYPES = {"analytical", "predictive", "forecast", "forecasting"}
 _ANALYTICAL_FALLBACK_PATTERNS = (
     r"\b(show|list|give|display)\b.*\b(total|sum|average|avg|count|max|min|distribution|breakdown|population|revenue|profit|margin)\b",
     r"\b(total|sum|average|avg|count|max|min|distribution|breakdown)\b.*\b(by|per|across|for each|in each)\b",
@@ -147,6 +147,7 @@ class SmallWhisperClient:
             0,
             int(getattr(settings, "SMALL_WHISPER_MAX_RETRIES", 1)),
         )
+        self.internal_api_key = str(getattr(settings, "AI_SERVICE_INTERNAL_API_KEY", "") or "").strip()
 
         logger.info(
             "Small Whisper Client initialized base_url=%s timeout=(%ss connect, %ss read) retries=%s",
@@ -155,6 +156,12 @@ class SmallWhisperClient:
             self.read_timeout_seconds,
             self.max_retries,
         )
+
+    def _headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.internal_api_key:
+            headers["X-Internal-Api-Key"] = self.internal_api_key
+        return headers
 
     def check_health(self) -> bool:
         try:
@@ -177,7 +184,18 @@ class SmallWhisperClient:
         filename = os.path.basename(audio_file)
         return {"audio": (filename, file_handle, "audio/wav")}, file_handle
 
-    def process_audio(self, audio_file, user_id: str | None = None) -> Dict:
+    def process_audio(
+        self,
+        audio_file,
+        user_id: str | None = None,
+        *,
+        workspace_id: str | None = None,
+        manager_id: str | None = None,
+        dataset_id: str | None = None,
+        source_id: str | None = None,
+        table_name: str | None = None,
+        report_id: str | None = None,
+    ) -> Dict:
         logger.info("Starting Small Whisper request endpoint=%s", self.transcribe_endpoint)
 
         if not self.check_health():
@@ -196,11 +214,24 @@ class SmallWhisperClient:
                 form_data = {}
                 if user_id is not None and str(user_id).strip():
                     form_data["user_id"] = str(user_id).strip()
+                if manager_id is not None and str(manager_id).strip():
+                    form_data["manager_id"] = str(manager_id).strip()
+                if workspace_id is not None and str(workspace_id).strip():
+                    form_data["workspace_id"] = str(workspace_id).strip()
+                if dataset_id is not None and str(dataset_id).strip():
+                    form_data["dataset_id"] = str(dataset_id).strip()
+                if source_id is not None and str(source_id).strip():
+                    form_data["source_id"] = str(source_id).strip()
+                if table_name is not None and str(table_name).strip():
+                    form_data["table_name"] = str(table_name).strip()
+                if report_id is not None and str(report_id).strip():
+                    form_data["report_id"] = str(report_id).strip()
 
                 response = requests.post(
                     self.transcribe_endpoint,
                     files=files,
                     data=form_data or None,
+                    headers=self._headers(),
                     timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
                 )
 
@@ -279,6 +310,9 @@ class SmallWhisperClient:
                         "dagster_runtime": dagster_runtime,
                         "final_route": final_route,
                         "final_user_message": final_user_message,
+                        "confidence": result.get("confidence"),
+                        "confidence_breakdown": result.get("confidence_breakdown"),
+                        "degraded": result.get("degraded"),
                         "raw_response": result,
                     }
 
@@ -304,6 +338,9 @@ class SmallWhisperClient:
                         "dagster_runtime": dagster_runtime,
                         "final_route": final_route,
                         "final_user_message": final_user_message,
+                        "confidence": result.get("confidence"),
+                        "confidence_breakdown": result.get("confidence_breakdown"),
+                        "degraded": result.get("degraded"),
                         "raw_response": result,
                     }
 
@@ -327,6 +364,9 @@ class SmallWhisperClient:
                         "dagster_runtime": dagster_runtime,
                         "final_route": final_route,
                         "final_user_message": final_user_message,
+                        "confidence": result.get("confidence"),
+                        "confidence_breakdown": result.get("confidence_breakdown"),
+                        "degraded": result.get("degraded"),
                         "raw_response": result,
                     }
 
@@ -341,7 +381,9 @@ class SmallWhisperClient:
                     "reviewed_sql": llm_data.get("reviewed_sql"),
                     "sql_review": llm_data.get("sql_review"),
                     "chart": llm_data.get("chart"),
-                    "confidence": llm_data.get("confidence", 0.5),
+                    "confidence": result.get("confidence", llm_data.get("confidence", 0.5)),
+                    "confidence_breakdown": result.get("confidence_breakdown") or llm_data.get("confidence_breakdown"),
+                    "degraded": result.get("degraded"),
                     "preprocessing_low": preprocessing_low,
                     "preprocessing_high": preprocessing_high,
                     "pipeline_trace": pipeline_trace,
@@ -386,7 +428,18 @@ class SmallWhisperClient:
         logger.error(timeout_error)
         return {"success": False, "error": timeout_error}
 
-    def process_text(self, text: str, user_id: str | None = None) -> Dict:
+    def process_text(
+        self,
+        text: str,
+        user_id: str | None = None,
+        *,
+        workspace_id: str | None = None,
+        manager_id: str | None = None,
+        dataset_id: str | None = None,
+        source_id: str | None = None,
+        table_name: str | None = None,
+        report_id: str | None = None,
+    ) -> Dict:
         """
         Process text directly through the full AI pipeline endpoint.
         This ensures analyst-visible traceability for all classes, including
@@ -410,10 +463,23 @@ class SmallWhisperClient:
             llm_payload = {"question": question}
             if user_id is not None and str(user_id).strip():
                 llm_payload["user_id"] = str(user_id).strip()
+            if manager_id is not None and str(manager_id).strip():
+                llm_payload["manager_id"] = str(manager_id).strip()
+            if workspace_id is not None and str(workspace_id).strip():
+                llm_payload["workspace_id"] = str(workspace_id).strip()
+            if dataset_id is not None and str(dataset_id).strip():
+                llm_payload["dataset_id"] = str(dataset_id).strip()
+            if source_id is not None and str(source_id).strip():
+                llm_payload["source_id"] = str(source_id).strip()
+            if table_name is not None and str(table_name).strip():
+                llm_payload["table_name"] = str(table_name).strip()
+            if report_id is not None and str(report_id).strip():
+                llm_payload["report_id"] = str(report_id).strip()
 
             llm_response = requests.post(
                 self.intent_endpoint,
                 json=llm_payload,
+                headers=self._headers(),
                 timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
             )
 
@@ -460,14 +526,27 @@ class SmallWhisperClient:
                     "dagster_runtime": llm_payload.get("dagster_runtime"),
                     "final_route": llm_payload.get("final_route"),
                     "final_user_message": llm_payload.get("final_user_message"),
+                    "confidence": llm_payload.get("confidence"),
+                    "confidence_breakdown": llm_payload.get("confidence_breakdown"),
+                    "degraded": llm_payload.get("degraded"),
                     "raw_response": {"llm": llm_payload},
                 }
 
-            question_type = "analytical" if llm_payload.get("sql") else _normalize_question_type(
+            question_type = _normalize_question_type(
                 llm_payload.get("question_type")
+                or (
+                    llm_payload.get("intent", {}).get("question_type")
+                    if isinstance(llm_payload.get("intent"), dict)
+                    else None
+                )
             )
             if question_type == "unknown":
-                question_type = "analytical" if _looks_analytical_question(question) else "conversational"
+                if str(llm_payload.get("final_route", "")).strip().lower() == "forecasting":
+                    question_type = "predictive"
+                elif llm_payload.get("sql"):
+                    question_type = "analytical"
+                else:
+                    question_type = "analytical" if _looks_analytical_question(question) else "conversational"
             reasoning = {
                 "question_type": question_type,
                 "needs_sql": bool(question_type in _ANALYTICAL_TYPES),
@@ -486,6 +565,8 @@ class SmallWhisperClient:
                 "sql_review": llm_payload.get("sql_review"),
                 "chart": llm_payload.get("chart"),
                 "confidence": llm_payload.get("confidence", 0.5),
+                "confidence_breakdown": llm_payload.get("confidence_breakdown"),
+                "degraded": llm_payload.get("degraded"),
                 "preprocessing_low": llm_payload.get("preprocessing_low"),
                 "preprocessing_high": llm_payload.get("preprocessing_high"),
                 "pipeline_trace": llm_payload.get("pipeline_trace"),

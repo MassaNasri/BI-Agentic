@@ -3,9 +3,11 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 
 from reasoning_app.runner import run_reasoning
+from shared.internal_api_auth import require_internal_api_key
 
 
 @csrf_exempt
+@require_internal_api_key
 def reasoning_test_view(request):
     """
     Test endpoint for reasoning layer

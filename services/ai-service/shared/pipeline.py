@@ -1,4 +1,5 @@
 import logging
+import os
 
 from llm_app.intent_service import extract_intent
 from llm_app.schema_provider import get_schema, is_question_matching_schema
@@ -36,6 +37,21 @@ def _build_fallback_extraction(question: str, extraction_result: dict) -> dict:
 
 
 def process_question(question: str) -> dict:
+    legacy_enabled = str(os.getenv("AI_SERVICE_ENABLE_LEGACY_PIPELINE", "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not legacy_enabled:
+        return make_error(
+            "legacy_pipeline_disabled",
+            "Legacy non-Dagster pipeline is disabled. Use Dagster orchestration endpoints.",
+            stage="legacy_pipeline",
+            details={},
+            retryable=False,
+        )
+
     extraction_result = extract_intent(question)
     if extraction_result.get("error"):
         if not _supports_heuristic_fallback(extraction_result):

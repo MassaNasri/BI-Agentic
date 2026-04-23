@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from visualization_api.constants import to_metabase_display
+from visualization_api.constants import normalize_chart_type, to_metabase_display
 from visualization_api.services import get_metabase_service
 
 
@@ -30,6 +30,10 @@ class CreateQuestionView(APIView):
         name = request.data.get('name', '')
         sql = request.data.get('sql', '')
         chart_type = request.data.get('chart_type')
+        incoming_settings = request.data.get('visualization_settings')
+        visualization_settings = incoming_settings if isinstance(incoming_settings, dict) else {}
+        requested_chart_type = chart_type or visualization_settings.get('display') or visualization_settings.get('chart_type')
+        normalized_chart_type = normalize_chart_type(requested_chart_type, default='')
 
         if not name or not sql:
             return Response(
@@ -44,10 +48,19 @@ class CreateQuestionView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        outbound_settings = dict(visualization_settings)
+        if normalized_chart_type:
+            outbound_settings.update(
+                {
+                    'chart_type': normalized_chart_type,
+                    'display': to_metabase_display(normalized_chart_type),
+                }
+            )
+
         question_id = metabase.create_question(
             name=name,
             sql=sql,
-            visualization_settings={'display': to_metabase_display(chart_type)},
+            visualization_settings=outbound_settings,
         )
 
         if not question_id:
@@ -59,7 +72,17 @@ class CreateQuestionView(APIView):
         metabase.enable_question_embedding(question_id)
 
         return Response(
-            {'success': True, 'question_id': question_id},
+            {
+                'success': True,
+                'question_id': question_id,
+                'chart_type': normalized_chart_type or normalize_chart_type(
+                    metabase.last_display if hasattr(metabase, 'last_display') else '',
+                    default='table',
+                ),
+                'display': metabase.last_display if hasattr(metabase, 'last_display') else None,
+                'fallback_applied': metabase.last_fallback_applied if hasattr(metabase, 'last_fallback_applied') else False,
+                'fallback_reason': metabase.last_fallback_reason if hasattr(metabase, 'last_fallback_reason') else '',
+            },
             status=status.HTTP_200_OK,
         )
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'react-hot-toast'
 import { useSearchParams } from 'react-router-dom'
@@ -15,10 +15,11 @@ import {
 } from 'lucide-react'
 
 import { voiceReportsAPI } from '../../api/endpoints'
+import { useAuthStore } from '../../store/auth'
 import AnimatedPage from '../../components/AnimatedPage'
 import Card from '../../components/Card'
 import Button from '../../components/Button'
-import PreprocessingDetailsPanel from '../../components/preprocessing/PreprocessingDetailsPanel'
+import AITracePanel from '../../components/ai-trace/AITracePanel'
 import { fadeIn, slideInBottom } from '../../animations/variants'
 import {
   isReportCompleted,
@@ -28,14 +29,24 @@ import {
 } from '../../utils/reportStatus'
 
 function SQLEditor() {
+  const { user, workspace } = useAuthStore()
   const [searchParams] = useSearchParams()
   const selectedReportIdParam = searchParams.get('reportId')
   const [reports, setReports] = useState([])
   const [selectedReport, setSelectedReport] = useState(null)
   const [editedSQL, setEditedSQL] = useState('')
+  const [editedQuestion, setEditedQuestion] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
+  const [isRerunningQuestion, setIsRerunningQuestion] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
+  const [aiTrace, setAiTrace] = useState(null)
+  const workspaceId = useMemo(() => {
+    if (workspace?.id) return workspace.id
+    if (user?.workspace?.id) return user.workspace.id
+    if (Array.isArray(workspace) && workspace.length > 0) return workspace[0]?.id || null
+    return null
+  }, [workspace, user])
 
   useEffect(() => {
     loadReports()
@@ -44,9 +55,17 @@ function SQLEditor() {
   useEffect(() => {
     if (selectedReport) {
       setEditedSQL(selectedReport.final_sql || selectedReport.generated_sql)
+      setEditedQuestion(selectedReport.transcription || '')
       setHasChanges(false)
     }
   }, [selectedReport])
+
+  useEffect(() => {
+    const questionFromTrace = String((aiTrace?.original_question || {}).text || '').trim()
+    if (questionFromTrace) {
+      setEditedQuestion(questionFromTrace)
+    }
+  }, [aiTrace])
 
   const loadReports = async () => {
     try {
@@ -62,10 +81,18 @@ function SQLEditor() {
 
   const handleLoadReport = async (reportId) => {
     try {
-      const response = await voiceReportsAPI.getReport(reportId)
-      
-      if (response.data.success) {
-        setSelectedReport(response.data.report)
+      const [reportResponse, traceResponse] = await Promise.all([
+        voiceReportsAPI.getReport(reportId),
+        voiceReportsAPI.getAITrace(reportId).catch(() => null),
+      ])
+
+      if (reportResponse.data.success) {
+        setSelectedReport(reportResponse.data.report)
+      }
+      if (traceResponse?.data?.success) {
+        setAiTrace(traceResponse.data.ai_trace || null)
+      } else {
+        setAiTrace(reportResponse?.data?.report?.ai_trace || null)
       }
     } catch (error) {
       console.error('Failed to load report:', error)
@@ -147,6 +174,49 @@ function SQLEditor() {
       toast.error(errorMessage)
     } finally {
       setIsExecuting(false)
+    }
+  }
+
+  const handleRerunQuestion = async () => {
+    const question = String(editedQuestion || '').trim()
+    if (!question) {
+      toast.error('Please provide a question to re-run')
+      return
+    }
+    if (!workspaceId) {
+      toast.error('Workspace is required to re-run this question')
+      return
+    }
+
+    setIsRerunningQuestion(true)
+    try {
+      const response = await voiceReportsAPI.submitTextQuery(question, workspaceId)
+      if (!response.data?.success) {
+        toast.error(response.data?.error || 'Failed to re-run question')
+        return
+      }
+
+      const reportId = Number(response.data.report_id || response.data.id)
+      if (!Number.isFinite(reportId) || reportId <= 0) {
+        toast.error('Re-run completed but report ID is missing')
+        return
+      }
+
+      const questionType = String(response.data.question_type || '').trim().toLowerCase()
+      const shouldExecute = Boolean(response.data.sql && !['conversational', 'informational', 'invalid_input', 'noise_input', 'empty_input'].includes(questionType))
+      if (shouldExecute) {
+        await voiceReportsAPI.executeQuery(reportId)
+      }
+
+      await handleLoadReport(reportId)
+      await loadReports()
+      toast.success('Question re-run completed')
+    } catch (error) {
+      console.error('Re-run error:', error)
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to re-run question'
+      toast.error(errorMessage)
+    } finally {
+      setIsRerunningQuestion(false)
     }
   }
 
@@ -316,9 +386,19 @@ function SQLEditor() {
                 </Card>
 
                 <Card>
-                  <PreprocessingDetailsPanel
-                    preprocessingLow={selectedReport.preprocessing_low}
-                    preprocessingHigh={selectedReport.preprocessing_high}
+                  <AITracePanel
+                    trace={aiTrace || selectedReport.ai_trace}
+                    editableQuestion={editedQuestion}
+                    onQuestionChange={setEditedQuestion}
+                    onRerunQuestion={handleRerunQuestion}
+                    isRerunningQuestion={isRerunningQuestion}
+                    editableSQL={editedSQL}
+                    onSQLChange={handleSQLChange}
+                    onRunQuery={handleExecute}
+                    onSaveQuery={handleSaveSQL}
+                    isSavingSQL={isSaving}
+                    isRunningQuery={isExecuting}
+                    hasSQLChanges={hasChanges}
                   />
                 </Card>
 

@@ -1,0 +1,32 @@
+# Core
+numpy
+pandas
+
+# Deep Learning
+torch
+torchvision
+
+# Time Series (TimesFM dependencies)
+einops
+scipy
+
+# Transformers (لو تستخدم NLP أو HuggingFace)
+transformers
+
+# API / Backend (Django)
+Django
+djangorestframework
+
+# Database
+psycopg2-binary
+
+# Utils
+tqdm
+requests
+
+# Environment
+python-dotenv
+
+# Optional (مفيد جداً)
+matplotlib
+scikit-learn

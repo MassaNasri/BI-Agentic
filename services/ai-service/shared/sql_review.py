@@ -18,6 +18,23 @@ _LIMIT_PATTERN = re.compile(r"\bLIMIT\s+(\d+)\b", flags=re.IGNORECASE)
 _ORDER_PATTERN = re.compile(r"\bORDER\s+BY\b", flags=re.IGNORECASE)
 _GROUP_BY_PATTERN = re.compile(r"\bGROUP\s+BY\b", flags=re.IGNORECASE)
 _FROM_PATTERN = re.compile(r"\bFROM\s+([a-zA-Z0-9_.]+)\b", flags=re.IGNORECASE)
+_BUSINESS_METRIC_COLUMNS = ("customers", "orders", "sales", "total_sales", "revenue", "quantity", "amount")
+_ROW_COUNT_PATTERNS = (
+    r"\bnumber of rows\b",
+    r"\bnumber of records\b",
+    r"\bcount of (?:rows|records|entries|transactions|days|weeks|items)\b",
+    r"\bhow many (?:rows|records|entries|transactions|days|weeks|items)\b",
+)
+_PREDICTIVE_PATTERNS = (
+    r"\bforecast\b",
+    r"\bpredict\b",
+    r"\bfuture\b",
+    r"\bupcoming\b",
+    r"\bexpected\b",
+    r"\bwhat will be\b",
+    r"\btrend\b.*\bnext\b",
+    r"\bnext\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b",
+)
 
 
 @dataclass(frozen=True)
@@ -230,6 +247,87 @@ def _validate_sql_against_intent(sql: str, validated_intent: dict[str, Any] | No
     return notes
 
 
+def _is_row_count_request(question: str) -> bool:
+    normalized = str(question or "").strip().lower()
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in _ROW_COUNT_PATTERNS)
+
+
+def _is_predictive_question(question: str) -> bool:
+    normalized = str(question or "").strip().lower()
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in _PREDICTIVE_PATTERNS)
+
+
+def _normalize_clickhouse_date_casts(sql: str) -> str:
+    normalized = str(sql or "").strip()
+    if not normalized:
+        return normalized
+    previous = ""
+    while normalized != previous:
+        previous = normalized
+        normalized = re.sub(
+            r"toDate\(\s*toDate\(\s*([^)]+?)\s*\)\s*\)",
+            r"toDate(\1)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    normalized = re.sub(
+        r"toStartOfWeek\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)",
+        r"toStartOfWeek(toDate(\1))",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"toStartOfMonth\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)",
+        r"toStartOfMonth(toDate(\1))",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"toYear\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)",
+        r"toYear(toDate(\1))",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    return normalized
+
+
+def _apply_output_sanity_checks(
+    *,
+    question: str,
+    sql: str,
+    validated_intent: dict[str, Any] | None,
+) -> tuple[str, list[str]]:
+    corrected_sql = _normalize_clickhouse_date_casts(sql)
+    notes: list[str] = []
+
+    row_count_requested = _is_row_count_request(question) or bool(
+        isinstance(validated_intent, dict) and validated_intent.get("row_count_requested")
+    )
+    if not row_count_requested:
+        for metric_column in _BUSINESS_METRIC_COLUMNS:
+            corrected_candidate = re.sub(
+                rf"COUNT\(\s*{re.escape(metric_column)}\s*\)",
+                f"SUM({metric_column})",
+                corrected_sql,
+                flags=re.IGNORECASE,
+            )
+            if corrected_candidate != corrected_sql:
+                notes.append(f"Auto-corrected COUNT({metric_column}) to SUM({metric_column}).")
+                corrected_sql = corrected_candidate
+
+    if _is_predictive_question(question) and isinstance(validated_intent, dict):
+        intent_type = str(validated_intent.get("intent_type", "")).strip().lower()
+        requires_forecast = bool(validated_intent.get("requires_forecast"))
+        if intent_type != "predictive" and not requires_forecast:
+            notes.append("Predictive query detected; ensure forecasting route is used.")
+
+    return corrected_sql, notes
+
+
 def review_and_correct_sql(
     *,
     question: str,
@@ -243,10 +341,15 @@ def review_and_correct_sql(
 
     if not config.enabled:
         final_sql = str(deterministic_result.get("sql", generated_sql)).strip()
+        final_sql, sanity_notes = _apply_output_sanity_checks(
+            question=question,
+            sql=final_sql,
+            validated_intent=validated_intent,
+        )
         validate_sql(final_sql)
         alignment_notes = _validate_sql_against_intent(final_sql, validated_intent)
         status = deterministic_result.get("status", "approved")
-        notes = list(deterministic_result.get("notes", []))
+        notes = list(deterministic_result.get("notes", [])) + sanity_notes
         if alignment_notes:
             final_sql = str(generated_sql or "").strip()
             validate_sql(final_sql)
@@ -284,11 +387,22 @@ def review_and_correct_sql(
 
     if llm_payload is None:
         final_sql = str(deterministic_result.get("sql", generated_sql)).strip()
+        final_sql, sanity_notes = _apply_output_sanity_checks(
+            question=question,
+            sql=final_sql,
+            validated_intent=validated_intent,
+        )
         validate_sql(final_sql)
         alignment_notes = _validate_sql_against_intent(final_sql, validated_intent)
         if alignment_notes:
             final_sql = str(generated_sql or "").strip()
+            final_sql, fallback_sanity_notes = _apply_output_sanity_checks(
+                question=question,
+                sql=final_sql,
+                validated_intent=validated_intent,
+            )
             validate_sql(final_sql)
+            sanity_notes.extend(fallback_sanity_notes)
         return {
             "status": deterministic_result.get("status", "approved"),
             "generated_sql": generated_sql,
@@ -296,6 +410,7 @@ def review_and_correct_sql(
             "reason_category": deterministic_result.get("reason_category", "alignment"),
             "notes": (
                 list(deterministic_result.get("notes", []))
+                + sanity_notes
                 + alignment_notes
                 + (["Review SQL reset to compiler output to preserve IR semantics."] if alignment_notes else [])
                 + [f"LLM review fallback: {llm_error}"]
@@ -313,28 +428,46 @@ def review_and_correct_sql(
     llm_reason = str(llm_payload.get("reason_category", "other")).strip().lower()
 
     if llm_status == "rejected":
-        validate_sql(str(generated_sql or "").strip())
+        fallback_sql, sanity_notes = _apply_output_sanity_checks(
+            question=question,
+            sql=str(generated_sql or "").strip(),
+            validated_intent=validated_intent,
+        )
+        validate_sql(fallback_sql)
         fallback_notes = [str(note) for note in llm_notes if str(note).strip()]
+        fallback_notes.extend(sanity_notes)
         fallback_notes.append("Review rejection fallback: preserved compiler SQL to keep validated IR semantics.")
         return {
             "status": "approved",
             "generated_sql": generated_sql,
-            "reviewed_sql": str(generated_sql or "").strip(),
+            "reviewed_sql": fallback_sql,
             "reason_category": llm_reason or "alignment",
             "notes": fallback_notes,
             "model_provider": config.provider,
             "llm_used": True,
         }
 
+    llm_sql, sanity_notes = _apply_output_sanity_checks(
+        question=question,
+        sql=llm_sql,
+        validated_intent=validated_intent,
+    )
     validate_sql(llm_sql)
     alignment_notes = _validate_sql_against_intent(llm_sql, validated_intent)
     if alignment_notes:
         llm_sql = str(generated_sql or "").strip()
+        llm_sql, fallback_sanity_notes = _apply_output_sanity_checks(
+            question=question,
+            sql=llm_sql,
+            validated_intent=validated_intent,
+        )
         validate_sql(llm_sql)
-        llm_notes = [str(note) for note in llm_notes if str(note).strip()] + alignment_notes + [
+        llm_notes = [str(note) for note in llm_notes if str(note).strip()] + sanity_notes + alignment_notes + fallback_sanity_notes + [
             "LLM correction was overridden to preserve IR semantics."
         ]
         llm_status = "approved"
+    else:
+        llm_notes = [str(note) for note in llm_notes if str(note).strip()] + sanity_notes
     return {
         "status": llm_status if llm_status in {"approved", "corrected", "rejected"} else "rejected",
         "generated_sql": generated_sql,

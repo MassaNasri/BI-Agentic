@@ -119,6 +119,8 @@ services:
       - "8004:8004"
     env_file:
       - ./.env.microservices
+    volumes:
+      - "C:/Users/massa/.cache/huggingface/hub/models--google--timesfm-2.5-200m-pytorch/snapshots/1d952420fba87f3c6dee4f240de0f1a0fbc790e3:/models/timesfm"
     environment:
       SMALL_WHISPER_URL: http://ai-service:8005
       SMALL_WHISPER_HEALTH_TIMEOUT_SECONDS: ${SMALL_WHISPER_HEALTH_TIMEOUT_SECONDS:-5}
@@ -163,10 +165,12 @@ services:
       - "8005:8005"
     volumes:
       - whisper_cache:/root/.cache/whisper
+      - "C:/Users/massa/.cache/huggingface/hub/models--google--timesfm-2.5-200m-pytorch/snapshots/1d952420fba87f3c6dee4f240de0f1a0fbc790e3:/models/timesfm"
     env_file:
       - ./.env.microservices
     environment:
       DJANGO_SETTINGS_MODULE: backend.settings
+      PYTHONPATH: /app
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       WHISPER_MODEL_NAME: ${WHISPER_MODEL_NAME:-tiny}

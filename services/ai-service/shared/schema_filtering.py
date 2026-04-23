@@ -34,9 +34,11 @@ _TECHNICAL_TABLE_PATTERNS = (
 )
 
 _TECHNICAL_COLUMN_HINTS = {
+    "_cleaned_at",
     "_processed_at",
     "_ingested_at",
     "_loaded_at",
+    "_batch_id",
     "_updated_at",
     "_created_at",
     "_source_file",
@@ -151,4 +153,3 @@ def rank_tables_for_question(
 
     # If question did not match anything, keep deterministic top N by name.
     return sorted(schema.keys())[: max(1, int(limit))]
-

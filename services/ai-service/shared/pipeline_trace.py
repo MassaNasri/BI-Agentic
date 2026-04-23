@@ -3,21 +3,27 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
+from shared.stage_contract import normalize_stage_status
 
 
 PIPELINE_TRACE_SECTIONS = [
     "request_metadata",
-    "input_validation",
     "transcription",
     "preprocessing_low",
-    "preprocessing_high",
+    "classification",
     "routing",
-    "analytical_intent",
+    "preprocessing_high",
+    "predictive_intent",
+    "intent_extraction",
     "sql_generation",
     "sql_review",
     "sql_validation",
     "query_execution",
+    "forecasting",
     "visualization",
+    # Legacy keys kept for backwards compatibility with previously stored traces.
+    "input_validation",
+    "analytical_intent",
     "final_response",
     "dagster_runtime",
 ]
@@ -120,7 +126,7 @@ def set_stage_from_values(
     normalized_finished = finished_at or utc_now_iso()
     normalized_attempts = list(attempts or [])
 
-    section["status"] = str(status or "unknown")
+    section["status"] = normalize_stage_status(status)
     section["started_at"] = normalized_started
     section["finished_at"] = normalized_finished
     section["duration_ms"] = _duration_ms(normalized_started, normalized_finished)
@@ -212,7 +218,7 @@ def finalize_trace(
     now_iso = utc_now_iso()
     started = trace.get("overall_status", {}).get("started_at")
     trace["overall_status"] = {
-        "status": str(overall_status or "unknown"),
+        "status": normalize_stage_status(overall_status),
         "final_route": str(final_route or ""),
         "final_user_message": str(final_user_message or ""),
         "started_at": started or now_iso,

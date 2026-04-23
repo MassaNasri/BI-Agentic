@@ -26,6 +26,7 @@ _PREDICTIVE_KEYWORDS = (
     "expected",
     "expectation",
     "future",
+    "next",
     "upcoming",
     "what will",
     # Arabic
@@ -71,9 +72,21 @@ _FUTURE_TIME_PATTERNS = (
     r"\bupcoming\s+(week|month|quarter|year)\b",
     r"\bcoming\s+(week|month|quarter|year)\b",
     r"\bin\s+\d+\s+(day|days|week|weeks|month|months|quarter|quarters|year|years)\b",
+    r"\bwhat\s+will\s+be\b",
+    r"\btrend\b.*\bnext\b",
 )
 
 _VALID_INTENT_TYPES = {"analytical", "predictive"}
+_RELATIONSHIP_KEYWORDS = (
+    "relationship",
+    "correlation",
+    "associated",
+    "association",
+    "related",
+    "relation",
+    "vs",
+    "versus",
+)
 
 
 def _schema_to_prompt(schema: dict[str, list[dict[str, Any]]]) -> str:
@@ -291,6 +304,47 @@ def _as_metric_specs_from_columns(metrics: list[str], aggregation: str | None) -
     return specs
 
 
+def _is_relationship_query(query: str) -> bool:
+    lowered = str(query or "").strip().lower()
+    if not lowered:
+        return False
+    if any(keyword in lowered for keyword in _RELATIONSHIP_KEYWORDS):
+        return True
+    return bool(re.search(r"\bbetween\b.+\band\b", lowered))
+
+
+def _relationship_ready_metrics(
+    *,
+    candidates: list[str],
+    schema: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    numeric_columns: set[str] = set()
+    for columns in schema.values():
+        for col in columns:
+            name = str(col.get("name", "")).strip()
+            col_type = str(col.get("type", "")).strip().lower()
+            if not name:
+                continue
+            if any(token in col_type for token in ("int", "float", "double", "decimal", "numeric", "real")):
+                numeric_columns.add(name)
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        metric = str(candidate or "").strip()
+        if not metric:
+            continue
+        metric_lower = metric.lower()
+        if metric_lower in seen:
+            continue
+        if metric in numeric_columns:
+            resolved.append(metric)
+            seen.add(metric_lower)
+        if len(resolved) >= 2:
+            break
+    return resolved
+
+
 def _enrich_with_semantic_ir(
     *,
     query: str,
@@ -349,6 +403,34 @@ def _enrich_with_semantic_ir(
     target_column = str(intent_payload.get("target_column", "")).strip()
     if not target_column:
         target_column = enriched_metrics[0] if enriched_metrics else "*"
+
+    relationship_query = _is_relationship_query(query)
+    if relationship_query:
+        candidate_metrics: list[str] = []
+        candidate_metrics.extend([str(item).strip() for item in enriched_metrics if str(item).strip()])
+        candidate_metrics.extend([str(item).strip() for item in (intent_payload.get("metrics", []) or []) if str(item).strip()])
+        relationship_metrics = _relationship_ready_metrics(candidates=candidate_metrics, schema=schema)
+        if len(relationship_metrics) >= 2:
+            return {
+                "intent_type": intent_payload["intent_type"],
+                "intent": "comparison",
+                "metrics": relationship_metrics,
+                "metric_specs": [
+                    {"column": metric, "aggregation": None, "alias": None}
+                    for metric in relationship_metrics
+                ],
+                "dimensions": [],
+                "filters": normalized.get("filters", []) or [],
+                "time_range": str(intent_payload.get("time_range", "all_time")).strip() or "all_time",
+                "aggregation": "",
+                "target_column": relationship_metrics[0],
+                "table": str(normalized.get("table", intent_payload.get("table", ""))).strip(),
+                "order_by": [],
+                "limit": None,
+                "ranking": {"direction": None, "requested": False, "source": "relationship_override"},
+                "operations": ["projection", "comparison"],
+                "ambiguities": normalized.get("ambiguities", []) if isinstance(normalized.get("ambiguities"), list) else [],
+            }
 
     return {
         "intent_type": intent_payload["intent_type"],
