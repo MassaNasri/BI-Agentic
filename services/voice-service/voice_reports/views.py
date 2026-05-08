@@ -35,8 +35,20 @@ from .services import (
 from .services.clickhouse_executor import sanitize_query_results
 from .services.forecasting_bridge import build_forecast_payload, detect_forecast_metadata
 from .services.ai_trace_service import build_ai_trace_payload
+<<<<<<< HEAD
 from .utils import extract_upstream_chart_type, infer_chart_type
 from users.permissions import IsManager, IsAnalyst, IsExecutive
+=======
+from .services.ai_service_client import get_ai_service_client
+from .services.subscription_client import get_subscription_client
+from .utils.trace_extraction import extract_pipeline_trace, is_valid_trace
+from .application.orchestration_service import enqueue_audio_job, enqueue_text_job
+from .infrastructure.auth_context import extract_identity_context
+from .infrastructure.query_client import get_query_client, validate_sql_via_query_service
+from .infrastructure.visualization_client import get_visualization_client
+from .infrastructure.workspace_client import get_workspace_client
+from bi_platform_shared.permissions.roles import IsManager, IsAnalyst, IsManagerOrAnalyst
+>>>>>>> c791036 (final update)
 
 logger = logging.getLogger(__name__)
 LOW_CHANGE_TYPES = {"removed_noise", "normalized", "reduced_repetition", "removed_filler_words", "removed_noise_tags", "removed_noise_tokens", "normalized_repeated_characters", "normalized_punctuation", "normalized_whitespace", "removed_control_chars", "removed_malformed_symbols", "normalized_control_chars"}
@@ -138,23 +150,17 @@ def normalize_chart_payload(chart_payload):
     return normalized_payload
 
 
-def get_user_workspace(user):
+def get_user_workspace_id(request) -> str:
     """
-    Get the user's workspace based on their role.
-    
-    - Manager: Returns their owned workspace
-    - Analyst/Executive: Returns workspace they're a member of
+    Resolve workspace through workspace-service over HTTP.
     """
-    if user.role == 'manager':
-        # Manager owns workspace
-        workspace = user.owned_workspaces.first()
-        return workspace
-    else:
-        # Analyst or Executive is a member
-        membership = user.workspace_memberships.filter(status='active').first()
-        if membership:
-            return membership.workspace
-        return None
+    identity = extract_identity_context(request)
+    context = get_workspace_client().resolve(
+        request=request,
+        workspace_hint=identity.workspace_hint,
+        user_id=identity.user_id,
+    )
+    return str(context.workspace_id or "").strip()
 
 
 def get_report_embed_url(report, metabase_service=None):
@@ -176,6 +182,40 @@ def get_report_embed_url(report, metabase_service=None):
         metabase.last_error
     )
     return ""
+
+
+def _voice_report_safe_queryset():
+    # Transitional shared-schema compatibility:
+    # some environments have not applied the migration that adds
+    # created_by_email/edited_by_email yet.
+    return VoiceReport.objects.only(
+        "id",
+        "workspace_id",
+        "created_by_id",
+        "edited_by_id",
+        "transcription",
+        "intent_json",
+        "generated_sql",
+        "final_sql",
+        "status",
+        "sql_validated",
+        "sql_edited",
+        "query_result",
+        "row_count",
+        "execution_time_ms",
+        "chart_type",
+        "chart_config",
+        "metabase_question_id",
+        "metabase_dashboard_id",
+        "embed_url",
+        "error_message",
+        "preprocessing_low",
+        "preprocessing_high",
+        "pipeline_trace",
+        "ai_trace",
+        "created_at",
+        "updated_at",
+    )
 
 
 def _service_headers_with_auth(request):
@@ -675,10 +715,18 @@ class VoiceUploadView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+<<<<<<< HEAD
             # Enforce subscription/free-tier limits before processing any voice request.
+=======
+            identity = extract_identity_context(request)
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
+                return Response({'success': False, 'error': 'User must belong to a workspace'}, status=status.HTTP_400_BAD_REQUEST)
+
+>>>>>>> c791036 (final update)
             subscription_client = get_subscription_client()
             access_result = subscription_client.check_access(
-                workspace_id=workspace.id,
+                workspace_id=workspace_id,
                 authorization_header=request.META.get('HTTP_AUTHORIZATION'),
                 consume=True,
             )
@@ -709,9 +757,15 @@ class VoiceUploadView(APIView):
                     },
                     status=status.HTTP_403_FORBIDDEN,
                 )
+<<<<<<< HEAD
             
             # Save audio file
             audio_dir = f'media/workspaces/{workspace.id}/audio'
+=======
+
+            audio_relative_dir = os.path.join("workspaces", str(workspace_id), "audio")
+            audio_dir = os.path.join(str(settings.MEDIA_ROOT), audio_relative_dir)
+>>>>>>> c791036 (final update)
             os.makedirs(audio_dir, exist_ok=True)
             
             # Generate unique filename
@@ -728,6 +782,7 @@ class VoiceUploadView(APIView):
             whisper_client = get_small_whisper_client()
             binding_context = _resolve_dataset_binding_context(
                 request=request,
+<<<<<<< HEAD
                 workspace_id=str(workspace.id),
                 manager_id=str(request.user.id),
                 explicit_dataset_id=str(request.data.get("dataset_id") or "").strip(),
@@ -797,6 +852,25 @@ class VoiceUploadView(APIView):
                     if (is_analytical_question and sql)
                     else VoiceReport.STATUS_UPLOADED
                 ),
+=======
+                workspace_hint=identity.workspace_hint or str(workspace_id),
+                user_id=identity.user_id,
+            )
+            report, job = enqueue_audio_job(
+                request=request,
+                workspace_id=workspace_id,
+                audio_path=audio_path,
+                audio_file_name=stored_name,
+                payload={
+                    'workspace_id': ctx.workspace_id,
+                    'manager_id': ctx.manager_id,
+                    'dataset_id': str(request.data.get('dataset_id') or ctx.dataset_id).strip(),
+                    'source_id': str(request.data.get('source_id') or ctx.source_id).strip(),
+                    'table_name': str(request.data.get('table_name') or ctx.table_name).strip(),
+                    'input_filename': original_name,
+                    'input_content_type': audio_validation.content_type,
+                },
+>>>>>>> c791036 (final update)
             )
             report.ai_trace = build_report_ai_trace(report)
             report.save(update_fields=['ai_trace', 'updated_at'])
@@ -1017,6 +1091,7 @@ class TextQueryView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+<<<<<<< HEAD
             workspace = get_user_workspace(request.user)
             if not workspace:
                 return Response(
@@ -1034,11 +1109,21 @@ class TextQueryView(APIView):
                     {'success': False, 'error': 'workspace_id does not match current user workspace'},
                     status=status.HTTP_403_FORBIDDEN
                 )
+=======
+            identity = extract_identity_context(request)
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
+                return Response({'success': False, 'error': 'User must belong to a workspace'}, status=status.HTTP_400_BAD_REQUEST)
+
+            requested_workspace_id = request.data.get('workspace_id')
+            if requested_workspace_id is not None and str(requested_workspace_id).strip() and str(requested_workspace_id) != str(workspace_id):
+                return Response({'success': False, 'error': 'workspace_id does not match current user workspace'}, status=status.HTTP_403_FORBIDDEN)
+>>>>>>> c791036 (final update)
 
             # Keep subscription consumption behavior aligned with voice uploads.
             subscription_client = get_subscription_client()
             access_result = subscription_client.check_access(
-                workspace_id=workspace.id,
+                workspace_id=workspace_id,
                 authorization_header=request.META.get('HTTP_AUTHORIZATION'),
                 consume=True,
             )
@@ -1073,6 +1158,7 @@ class TextQueryView(APIView):
             whisper_client = get_small_whisper_client()
             binding_context = _resolve_dataset_binding_context(
                 request=request,
+<<<<<<< HEAD
                 workspace_id=str(workspace.id),
                 manager_id=str(request.user.id),
                 explicit_dataset_id=str(request.data.get("dataset_id") or "").strip(),
@@ -1080,6 +1166,14 @@ class TextQueryView(APIView):
                 explicit_table_name=str(request.data.get("table_name") or "").strip(),
             )
             text_result = whisper_client.process_text(
+=======
+                workspace_hint=identity.workspace_hint or str(workspace_id),
+                user_id=identity.user_id,
+            )
+            report, job = enqueue_text_job(
+                request=request,
+                workspace_id=workspace_id,
+>>>>>>> c791036 (final update)
                 text=text,
                 user_id=str(request.user.id),
                 workspace_id=binding_context.get("workspace_id"),
@@ -1098,6 +1192,7 @@ class TextQueryView(APIView):
                     status=status.HTTP_503_SERVICE_UNAVAILABLE
                 )
 
+<<<<<<< HEAD
             transcription_text = text_result.get('text') or text
             question_type = normalize_question_type(text_result.get('question_type', 'unknown'))
             sql = text_result.get('sql')
@@ -1121,6 +1216,50 @@ class TextQueryView(APIView):
                 confidence=text_result.get("confidence"),
                 confidence_breakdown=text_result.get("confidence_breakdown"),
                 degraded=text_result.get("degraded"),
+=======
+    This endpoint exists for edited SQL/report reruns; it does not use the legacy
+    shared execution engine and never talks to ClickHouse or Metabase directly.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, report_id):
+        try:
+            if report_id is None:
+                return Response({'success': False, 'error': 'Invalid report_id: report_id cannot be null or undefined'}, status=status.HTTP_400_BAD_REQUEST)
+            identity = extract_identity_context(request)
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
+                return Response({'success': False, 'error': 'User must belong to a workspace'}, status=status.HTTP_400_BAD_REQUEST)
+            if identity.role not in ['manager', 'analyst']:
+                return Response({'success': False, 'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+            report = get_object_or_404(_voice_report_safe_queryset(), id=report_id, workspace_id=workspace_id)
+            sql = str(request.data.get('sql') or report.final_sql or '').strip()
+            if not sql:
+                return Response({'success': False, 'error': 'This report does not contain a SQL query.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            authorization_header = str(request.META.get('HTTP_AUTHORIZATION') or '')
+            token = authorization_header.replace('Bearer ', '', 1).strip() if authorization_header else None
+            is_valid, validation_error, clean_sql = validate_sql_via_query_service(
+                sql=sql,
+                token=token,
+                workspace_id=workspace_id,
+            )
+            if not is_valid:
+                report.status = VoiceReport.STATUS_FAILED
+                report.error_message = validation_error
+                report.ai_trace = build_report_ai_trace(report)
+                report.save(update_fields=['status', 'error_message', 'ai_trace', 'updated_at'])
+                return Response({'success': False, 'error': validation_error, 'status': 'failed'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Phase 7 / CRIT-05: query-service resolves the ClickHouse
+            # database from ``workspace_id``; we no longer pass a hardcoded
+            # ``etl`` fallback through the request payload.
+            query_result = get_query_client().execute(
+                sql=clean_sql,
+                authorization_header=str(request.META.get('HTTP_AUTHORIZATION') or ''),
+                workspace_id=workspace_id,
+>>>>>>> c791036 (final update)
             )
 
             report = VoiceReport(
@@ -2163,18 +2302,15 @@ class SQLEditView(APIView):
     
     def put(self, request, report_id):
         try:
-            workspace = get_user_workspace(request.user)
-            if not workspace:
+            identity = extract_identity_context(request)
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
                 return Response(
                     {'success': False, 'error': 'User must belong to a workspace'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            report = get_object_or_404(
-                VoiceReport,
-                id=report_id,
-                workspace=workspace
-            )
+            report = get_object_or_404(_voice_report_safe_queryset(), id=report_id, workspace_id=workspace_id)
             
             new_sql = request.data.get('sql')
             
@@ -2184,9 +2320,20 @@ class SQLEditView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
+<<<<<<< HEAD
             # Validate new SQL
             guard = SQLGuard(
                 workspace_database=os.getenv('CLICKHOUSE_DATABASE', 'default')
+=======
+            # Validate new SQL via query-service (CRIT-04: voice-service no longer
+            # owns SQL safety; query-service is the single SQL authority).
+            authorization_header = str(request.META.get('HTTP_AUTHORIZATION') or '')
+            token = authorization_header.replace('Bearer ', '', 1).strip() if authorization_header else None
+            is_valid, error_msg, clean_sql = validate_sql_via_query_service(
+                sql=str(new_sql),
+                token=token,
+                workspace_id=workspace_id,
+>>>>>>> c791036 (final update)
             )
             
             is_valid, error_msg, clean_sql = guard.validate_and_sanitize(new_sql)
@@ -2203,11 +2350,21 @@ class SQLEditView(APIView):
             # Update report
             report.final_sql = clean_sql
             report.sql_edited = True
-            report.edited_by = request.user
+            report.edited_by_id = str(identity.user_id or "").strip() or None
             report.sql_validated = True
             report.status = VoiceReport.STATUS_PENDING  # Needs re-execution
             report.ai_trace = build_report_ai_trace(report)
-            report.save()
+            report.save(
+                update_fields=[
+                    "final_sql",
+                    "sql_edited",
+                    "edited_by_id",
+                    "sql_validated",
+                    "status",
+                    "ai_trace",
+                    "updated_at",
+                ]
+            )
             
             # TODO: Create history entry when ReportHistory model is added
             # ReportHistory.objects.create(
@@ -2220,7 +2377,11 @@ class SQLEditView(APIView):
             #     }
             # )
             
-            logger.info(f"Report {report.id} SQL edited by analyst {request.user.email}")
+            logger.info(
+                "Report %s SQL edited by analyst %s",
+                report.id,
+                identity.email or identity.user_id or "unknown",
+            )
             
             return Response({
                 'success': True,
@@ -2245,12 +2406,14 @@ class ReportListView(APIView):
     
     def get(self, request):
         try:
-            workspace = get_user_workspace(request.user)
-            if not workspace:
+            identity = extract_identity_context(request)
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
                 return Response(
                     {'success': False, 'error': 'User must belong to a workspace'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+<<<<<<< HEAD
             
             reports = VoiceReport.objects.filter(
                 workspace=workspace
@@ -2283,11 +2446,55 @@ class ReportListView(APIView):
                     'confidence_breakdown': ai_contract.get('confidence_breakdown'),
                     'degraded': ai_contract.get('degraded'),
                     'can_edit': request.user.role == 'analyst'
+=======
+
+            # Compatibility read path: select only stable columns so this list
+            # endpoint remains available even when optional newer columns are
+            # not yet present in a shared transitional schema.
+            reports = VoiceReport.objects.filter(workspace_id=workspace_id)
+            if identity.role == 'manager' and identity.user_id:
+                reports = reports.filter(created_by_id=identity.user_id)
+            report_rows = reports.values(
+                "id",
+                "transcription",
+                "status",
+                "created_at",
+                "created_by_id",
+                "chart_type",
+                "row_count",
+                "execution_time_ms",
+                "final_sql",
+                "metabase_question_id",
+                "chart_config",
+            ).order_by("-created_at")
+
+            data = []
+            for report in report_rows:
+                chart_config = report.get("chart_config") if isinstance(report.get("chart_config"), dict) else {}
+                data.append({
+                    'id': report.get("id"),
+                    'transcription': report.get("transcription"),
+                    'status': report.get("status"),
+                    'created_at': report.get("created_at"),
+                    'created_by': report.get("created_by_id"),
+                    'chart_type': report.get("chart_type"),
+                    'final_chart_type': report.get("chart_type"),
+                    'row_count': report.get("row_count"),
+                    'execution_time_ms': report.get("execution_time_ms"),
+                    'sql': report.get("final_sql"),
+                    'embed_url': '',
+                    'metabase_question_id': report.get("metabase_question_id"),
+                    'metabase_display': chart_config.get('metabase_display'),
+                    'confidence': None,
+                    'confidence_breakdown': None,
+                    'degraded': False,
+                    'can_edit': identity.role == 'analyst'
+>>>>>>> c791036 (final update)
                 })
             logger.info(
                 "Report list loaded for user=%s workspace=%s count=%s",
-                request.user.id,
-                workspace.id,
+                identity.user_id,
+                workspace_id,
                 len(data)
             )
             
@@ -2313,18 +2520,14 @@ class ReportDetailView(APIView):
     
     def get(self, request, report_id):
         try:
-            workspace = get_user_workspace(request.user)
-            if not workspace:
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
                 return Response(
                     {'success': False, 'error': 'User must belong to a workspace'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            report = get_object_or_404(
-                VoiceReport,
-                id=report_id,
-                workspace=workspace
-            )
+            report = get_object_or_404(_voice_report_safe_queryset(), id=report_id, workspace_id=workspace_id)
             
             # TODO: Get history when ReportHistory model is added
             # history = ReportHistory.objects.filter(report=report).order_by('-timestamp')
@@ -2380,8 +2583,8 @@ class ReportDetailView(APIView):
                     'root_cause': pipeline_trace.get('root_cause'),
                     'error_message': report.error_message,
                     'created_at': report.created_at,
-                    'created_by': report.created_by.email,
-                    'edited_by': report.edited_by.email if report.edited_by else None,
+                    'created_by': report.created_by_id,
+                    'edited_by': report.edited_by_id,
                     'history': history_data
                 }
             })
@@ -2395,30 +2598,31 @@ class ReportDetailView(APIView):
     
     def delete(self, request, report_id):
         """Delete report (Manager only)."""
-        if request.user.role != 'manager':
+        identity = extract_identity_context(request)
+        if identity.role != 'manager':
             return Response(
                 {'success': False, 'error': 'Only managers can delete reports'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
         try:
-            workspace = get_user_workspace(request.user)
-            if not workspace:
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
                 return Response(
                     {'success': False, 'error': 'User must belong to a workspace'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
             report = get_object_or_404(
-                VoiceReport,
+                _voice_report_safe_queryset(),
                 id=report_id,
-                workspace=workspace,
-                created_by=request.user  # Can only delete own reports
+                workspace_id=workspace_id,
+                created_by_id=identity.user_id,  # Can only delete own reports
             )
             
             report.delete()
             
-            logger.info(f"Report {report_id} deleted by {request.user.email}")
+            logger.info("Report %s deleted by %s", report_id, identity.email or identity.user_id or "unknown")
             
             return Response({
                 'success': True,
@@ -2438,6 +2642,44 @@ class ReportDetailView(APIView):
             )
 
 
+<<<<<<< HEAD
+=======
+class AITraceDetailView(APIView):
+    """
+    Analyst-facing explainability payload for the full AI pipeline.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, report_id):
+        try:
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
+                return Response(
+                    {'success': False, 'error': 'User must belong to a workspace'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            report = get_object_or_404(_voice_report_safe_queryset(), id=report_id, workspace_id=workspace_id)
+            ai_trace = build_report_ai_trace(report, embed_url='')
+
+            if report.ai_trace != ai_trace:
+                report.ai_trace = ai_trace
+                report.save(update_fields=['ai_trace', 'updated_at'])
+
+            return Response({
+                'success': True,
+                'report_id': report.id,
+                'ai_trace': ai_trace,
+            })
+        except Exception as e:
+            logger.error("Error in AITraceDetailView: %s", e, exc_info=True)
+            return Response(
+                {'success': False, 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+>>>>>>> c791036 (final update)
 class WorkspaceDashboardView(APIView):
     """
     Get workspace dashboard for embedded viewing (Executive).
@@ -2446,8 +2688,8 @@ class WorkspaceDashboardView(APIView):
     
     def get(self, request):
         try:
-            workspace = get_user_workspace(request.user)
-            if not workspace:
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
                 return Response(
                     {'success': False, 'error': 'User must belong to a workspace'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -2455,7 +2697,7 @@ class WorkspaceDashboardView(APIView):
             
             # Get dashboard ID from any report
             report = VoiceReport.objects.filter(
-                workspace=workspace,
+                workspace_id=workspace_id,
                 metabase_dashboard_id__isnull=False
             ).first()
             
@@ -2511,19 +2753,20 @@ class DashboardStatsView(APIView):
 
     def get(self, request):
         try:
-            workspace = get_user_workspace(request.user)
-            if not workspace:
+            identity = extract_identity_context(request)
+            workspace_id = get_user_workspace_id(request)
+            if not workspace_id:
                 return Response(
                     {'success': False, 'error': 'User must belong to a workspace'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            reports = VoiceReport.objects.filter(workspace=workspace)
+            reports = VoiceReport.objects.filter(workspace_id=workspace_id)
 
             # Preserve list visibility semantics:
             # managers only see their own reports; others see workspace reports.
-            if request.user.role == 'manager':
-                reports = reports.filter(created_by=request.user)
+            if identity.role == 'manager' and identity.user_id:
+                reports = reports.filter(created_by_id=identity.user_id)
 
             total_reports = reports.count()
             completed_reports = reports.filter(status__in=self.SUCCESS_STATUSES).count()
@@ -2543,8 +2786,8 @@ class DashboardStatsView(APIView):
             }
             logger.info(
                 "Dashboard stats loaded for user=%s workspace=%s payload=%s",
-                request.user.id,
-                workspace.id,
+                identity.user_id,
+                workspace_id,
                 payload
             )
             return Response(payload)
@@ -2556,6 +2799,55 @@ class DashboardStatsView(APIView):
             )
 
 
+<<<<<<< HEAD
+=======
+class JobStatusView(APIView):
+    """Canonical async job status endpoint (CRIT-02).
+
+    Returns the contract documented in the audit roadmap:
+
+        {
+            "job_id": str,
+            "status": str,            # PENDING|QUEUED|...|COMPLETED|FAILED
+            "stage": str,             # current pipeline stage
+            "progress_pct": int,      # 0..100
+            "error": {                # null when there is no error
+                "code": str,
+                "message": str,
+            } | null,
+        }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, job_id):
+        workspace_id = get_user_workspace_id(request)
+        if not workspace_id:
+            return Response(
+                {'success': False, 'error': 'User must belong to a workspace'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        job = get_object_or_404(VoicePipelineJob, job_id=job_id, workspace_id=workspace_id)
+        error_payload = None
+        if job.error_code or job.error_message:
+            error_payload = {
+                'code': job.error_code or 'UNKNOWN',
+                'message': job.error_message or '',
+            }
+        return Response(
+            {
+                'success': True,
+                'job_id': str(job.job_id),
+                'report_id': job.report_id,
+                'status': job.status,
+                'stage': job.current_stage or job.status,
+                'progress_pct': int(job.progress or 0),
+                'error': error_payload,
+            }
+        )
+
+
+>>>>>>> c791036 (final update)
 class HealthCheckView(APIView):
     """
     Health check for all services.

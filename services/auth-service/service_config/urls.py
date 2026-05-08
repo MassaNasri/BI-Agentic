@@ -11,6 +11,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('auth/', include('users.auth_urls')),
     path('user/', include('users.user_urls')),
+    path('internal/', include('users.internal_urls')),
 ]
 
 if settings.DEBUG:

@@ -5,13 +5,30 @@ Executes validated SQL queries on ClickHouse.
 Returns results for visualization.
 """
 
+<<<<<<< HEAD
 import clickhouse_connect
 import os
+=======
+import hashlib
+>>>>>>> c791036 (final update)
 import logging
 import math
 from typing import Dict, List, Optional, Any
 
+<<<<<<< HEAD
 from query_api.utils import normalize_sql_table_references
+=======
+try:
+    import clickhouse_connect
+except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
+    clickhouse_connect = None
+
+from bi_platform_shared.sql import sanitize_sql_for_metabase
+from query_api.utils import (
+    CrossDatabaseViolationError,
+    normalize_sql_table_references,
+)
+>>>>>>> c791036 (final update)
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +220,12 @@ class ClickHouseExecutor:
     
     def __init__(self):
         """Initialize ClickHouse executor with environment configuration."""
+        if clickhouse_connect is None:
+            raise RuntimeError(
+                "clickhouse_connect dependency is not installed. "
+                "Install query-service requirements or rebuild the query-service container image."
+            )
+
         host = os.getenv('CLICKHOUSE_HOST', 'localhost')
         port_raw = os.getenv('CLICKHOUSE_PORT', '8123')
         username = os.getenv('CLICKHOUSE_USER', 'user_etl')

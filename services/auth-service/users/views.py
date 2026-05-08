@@ -12,7 +12,9 @@ from .serializers import (
 from .utils import generate_verification_token, send_verification_email, verify_email_token
 from .models import User
 from .notification_client import get_notification_client
+from .internal_authentication import ServiceInternalTokenAuthentication
 from .permissions import IsAdmin
+from .services.workspace_client import WorkspaceServiceError, get_workspace_service_client
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,17 @@ def _system_admin_profile_payload(user):
         'created_at': getattr(user, 'created_at', None),
         'workspace': None,
         'is_system_admin': True,
+    }
+
+
+def _serialize_user_identity(user):
+    return {
+        'id': user.id,
+        'email': user.email,
+        'name': user.name,
+        'role': user.role,
+        'is_active': bool(user.is_active),
+        'is_verified': bool(user.is_verified),
     }
 
 
@@ -147,10 +160,21 @@ class SignUpView(APIView):
             }
             
             if workspace:
+                workspace_id = workspace.get('id') if isinstance(workspace, dict) else getattr(workspace, 'id', None)
+                workspace_name = workspace.get('name') if isinstance(workspace, dict) else getattr(workspace, 'name', '')
+                workspace_created_at = (
+                    workspace.get('created_at')
+                    if isinstance(workspace, dict)
+                    else getattr(workspace, 'created_at', None)
+                )
                 response_data['data']['workspace'] = {
-                    'id': workspace.id,
-                    'name': workspace.name,
-                    'created_at': workspace.created_at.isoformat()
+                    'id': workspace_id,
+                    'name': workspace_name,
+                    'created_at': (
+                        workspace_created_at.isoformat()
+                        if hasattr(workspace_created_at, 'isoformat')
+                        else workspace_created_at
+                    ),
                 }
             
             return Response(response_data, status=status.HTTP_201_CREATED)
@@ -253,55 +277,45 @@ class EmailVerificationView(APIView):
         # Verify the user
         try:
             user.is_verified = True
-            user.save()
-            
-            # Update WorkspaceMember status if user is a workspace member
-            # Change from 'pending_acceptance' to 'active' when verified
-            from workspace.models import WorkspaceMember
-            from django.utils import timezone
-            
-            workspace_members = WorkspaceMember.objects.filter(
-                user=user,
-                status='pending_acceptance'
-            ).select_related('workspace__owner')
+            user.save(update_fields=['is_verified'])
 
+            activation_payload = get_workspace_service_client().activate_user_memberships(
+                user_id=user.id,
+                user_email=user.email,
+                user_name=user.name,
+                user_role=user.role,
+                is_active=bool(user.is_active),
+                is_verified=bool(user.is_verified),
+            )
+            notifications = activation_payload.get('notifications') if isinstance(activation_payload, dict) else []
             notification_client = get_notification_client()
-            
-            for member in workspace_members:
-                member.status = 'active'
-                if not member.joined_at:
-                    member.joined_at = timezone.now()
-                member.save()
-                logger.info(f"WorkspaceMember {member.id} activated for verified user {user.email}")
-
-                owner_email = None
-                owner_name = None
-                if member.workspace and member.workspace.owner:
-                    owner_email = member.workspace.owner.email
-                    owner_name = member.workspace.owner.name
-
-                notification_result = notification_client.send_event(
-                    event_type='workspace_member_joined',
-                    event_key=f"workspace-join:{member.workspace_id}:{user.id}",
-                    payload={
-                        'workspace_id': member.workspace_id,
-                        'workspace_name': member.workspace.name if member.workspace else None,
-                        'owner_email': owner_email,
-                        'owner_name': owner_name,
-                        'recipient_emails': [owner_email] if owner_email else [],
-                        'joined_user_id': user.id,
-                        'joined_user_name': user.name,
-                        'joined_user_email': user.email,
-                        'joined_role': member.role,
-                    },
-                )
-                if not notification_result.get('success'):
-                    logger.warning(
-                        "workspace_member_joined notification dispatch failed workspace=%s user=%s error=%s",
-                        member.workspace_id,
-                        user.id,
-                        notification_result.get('error'),
+            if isinstance(notifications, list):
+                for event in notifications:
+                    if not isinstance(event, dict):
+                        continue
+                    workspace_id = event.get('workspace_id')
+                    notification_result = notification_client.send_event(
+                        event_type='workspace_member_joined',
+                        event_key=f"workspace-join:{workspace_id}:{user.id}",
+                        payload={
+                            'workspace_id': workspace_id,
+                            'workspace_name': event.get('workspace_name'),
+                            'owner_email': event.get('owner_email'),
+                            'owner_name': event.get('owner_name'),
+                            'recipient_emails': [event.get('owner_email')] if event.get('owner_email') else [],
+                            'joined_user_id': user.id,
+                            'joined_user_name': user.name,
+                            'joined_user_email': user.email,
+                            'joined_role': event.get('joined_role') or user.role,
+                        },
                     )
+                    if not notification_result.get('success'):
+                        logger.warning(
+                            "workspace_member_joined notification dispatch failed workspace=%s user=%s error=%s",
+                            workspace_id,
+                            user.id,
+                            notification_result.get('error'),
+                        )
             
             logger.info(f"User {user.email} (ID: {user.id}) successfully verified")
             
@@ -313,6 +327,15 @@ class EmailVerificationView(APIView):
                 status=status.HTTP_200_OK
             )
             
+        except WorkspaceServiceError as exc:
+            logger.error("Workspace activation sync failed for user=%s error=%s", user.id, exc)
+            return Response(
+                {
+                    'success': False,
+                    'message': 'Account verified but workspace activation could not be synchronized.',
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         except Exception as e:
             logger.error(f"Error verifying user {user_id}: {str(e)}")
             return Response(
@@ -891,6 +914,82 @@ class AdminUserDetailView(APIView):
             {
                 'success': True,
                 'user': payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InternalUserByEmailView(APIView):
+    authentication_classes = [ServiceInternalTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        email = str(request.query_params.get('email') or '').strip().lower()
+        if not email:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'email query param is required.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'User not found.',
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(
+            {
+                'success': True,
+                'user': _serialize_user_identity(user),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InternalUserDetailView(APIView):
+    authentication_classes = [ServiceInternalTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, user_id):
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'User not found.',
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(
+            {
+                'success': True,
+                'user': _serialize_user_identity(user),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request, user_id):
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'User not found.',
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = AdminUserUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated_user = serializer.update(user, serializer.validated_data)
+        return Response(
+            {
+                'success': True,
+                'user': _serialize_user_identity(updated_user),
             },
             status=status.HTTP_200_OK,
         )

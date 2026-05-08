@@ -14,8 +14,8 @@ class VoiceReportAdmin(admin.ModelAdmin):
     
     list_display = [
         'id',
-        'workspace',
-        'created_by',
+        'workspace_id',
+        'created_by_id',
         'title',
         'status',
         'chart_type',
@@ -32,8 +32,8 @@ class VoiceReportAdmin(admin.ModelAdmin):
         'title',
         'transcription',
         'generated_sql',
-        'created_by__email',
-        'workspace__name'
+        'created_by_email',
+        'workspace_id'
     ]
     
     readonly_fields = [
@@ -44,8 +44,9 @@ class VoiceReportAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Basic Information', {
             'fields': (
-                'workspace',
-                'created_by',
+                'workspace_id',
+                'created_by_id',
+                'created_by_email',
                 'title',
                 'description',
                 'status',
@@ -96,7 +97,7 @@ class SQLEditHistoryAdmin(admin.ModelAdmin):
     list_display = [
         'id',
         'report',
-        'edited_by',
+        'edited_by_id',
         'validation_passed',
         'edited_at'
     ]
@@ -108,14 +109,15 @@ class SQLEditHistoryAdmin(admin.ModelAdmin):
     
     search_fields = [
         'report__title',
-        'edited_by__email',
+        'edited_by_email',
         'previous_sql',
         'new_sql'
     ]
     
     readonly_fields = [
         'report',
-        'edited_by',
+        'edited_by_id',
+        'edited_by_email',
         'previous_sql',
         'new_sql',
         'validation_passed',
@@ -133,19 +135,19 @@ class DashboardPageAdmin(admin.ModelAdmin):
     
     list_display = [
         'id',
-        'workspace',
+        'workspace_id',
         'name',
         'order',
         'created_at'
     ]
     
     list_filter = [
-        'workspace',
+        'workspace_id',
         'created_at'
     ]
     
     search_fields = [
-        'workspace__name',
+        'workspace_id',
         'name',
         'description'
     ]
@@ -174,7 +176,9 @@ class ReportPageAssignmentAdmin(admin.ModelAdmin):
     
     search_fields = [
         'report__title',
-        'page__name'
+        'page__name',
+        'added_by_id',
+        'added_by_email',
     ]
     
     readonly_fields = [

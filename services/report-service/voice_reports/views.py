@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ﻿"""
 Voice Reports Views
 
@@ -1230,9 +1231,91 @@ class ReportListView(APIView):
     """
     List all reports for workspace.
     """
+=======
+"""Read-only report projection endpoints backed by voice-service.
+
+report-service does not own ``voice_reports`` write models. It exposes
+read-oriented endpoints and delegates data retrieval to voice-service HTTP
+APIs while forwarding caller authorization context.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any
+
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+try:  # pragma: no cover
+    from bi_platform_shared.http import HttpClientError, get_default_client
+except Exception:  # pragma: no cover
+    HttpClientError = Exception  # type: ignore[assignment,misc]
+
+    def get_default_client():  # type: ignore[no-redef]
+        raise RuntimeError("bi_platform_shared.http unavailable")
+
+logger = logging.getLogger(__name__)
+VOICE_SERVICE_URL = os.getenv("VOICE_SERVICE_URL", "http://voice-service:8004").rstrip("/")
+
+
+def _forward_headers(request) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    auth_header = str(request.META.get("HTTP_AUTHORIZATION", "") or "").strip()
+    if auth_header:
+        headers["Authorization"] = auth_header
+    return headers
+
+
+def _proxy_request(
+    *,
+    request,
+    method: str,
+    path: str,
+    params: dict[str, Any] | None = None,
+    json_payload: dict[str, Any] | None = None,
+) -> Response:
+    url = f"{VOICE_SERVICE_URL}{path}"
+    try:
+        response = get_default_client().request(
+            method=method,
+            url=url,
+            params=params,
+            json=json_payload,
+            headers=_forward_headers(request),
+            timeout=(5.0, 20.0),
+            attach_internal_api_key=False,
+        )
+    except HttpClientError as exc:  # type: ignore[misc]
+        logger.warning("report_proxy_http_error method=%s path=%s error=%s", method, path, exc)
+        return Response(
+            {"success": False, "error": "voice_service_unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning("report_proxy_unexpected_error method=%s path=%s error=%s", method, path, exc)
+        return Response(
+            {"success": False, "error": "voice_service_unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    body: Any
+    try:
+        body = response.json() if response.content else {}
+    except ValueError:
+        body = {"success": False, "error": "invalid_voice_service_response"}
+    return Response(body, status=response.status_code)
+
+
+class ReportListView(APIView):
+>>>>>>> c791036 (final update)
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+<<<<<<< HEAD
         try:
             workspace = get_user_workspace(request.user)
             if not workspace:
@@ -1298,9 +1381,21 @@ class ReportDetailView(APIView):
     """
     Get detailed report information.
     """
+=======
+        return _proxy_request(
+            request=request,
+            method="GET",
+            path="/voice-reports/reports/",
+            params=request.query_params,
+        )
+
+
+class ReportDetailView(APIView):
+>>>>>>> c791036 (final update)
     permission_classes = [IsAuthenticated]
     
     def get(self, request, report_id):
+<<<<<<< HEAD
         try:
             workspace = get_user_workspace(request.user)
             if not workspace:
@@ -1629,3 +1724,45 @@ class HealthCheckView(APIView):
             'message': 'All services healthy' if all_healthy else 'Some services unavailable'
         }, status=status.HTTP_200_OK if all_healthy else status.HTTP_503_SERVICE_UNAVAILABLE)
 
+=======
+        return _proxy_request(
+            request=request,
+            method="GET",
+            path=f"/voice-reports/{report_id}/",
+            params=request.query_params,
+        )
+
+    def delete(self, request, report_id):
+        return _proxy_request(
+            request=request,
+            method="DELETE",
+            path=f"/voice-reports/{report_id}/",
+        )
+
+
+class DashboardStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return _proxy_request(
+            request=request,
+            method="GET",
+            path="/voice-reports/dashboard/stats/",
+            params=request.query_params,
+        )
+
+
+class HealthCheckView(APIView):
+    permission_classes = []
+
+    def get(self, request):
+        return Response(
+            {
+                "success": True,
+                "service": "report-service",
+                "status": "healthy",
+                "mode": "read-proxy",
+            },
+            status=status.HTTP_200_OK,
+        )
+>>>>>>> c791036 (final update)

@@ -12,5 +12,9 @@ COPY . /app
 
 EXPOSE 8006
 
+<<<<<<< HEAD
 CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:8006"]
 
+=======
+CMD ["sh", "-c", "python manage.py runserver 0.0.0.0:8006"]
+>>>>>>> c791036 (final update)

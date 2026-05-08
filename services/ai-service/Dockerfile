@@ -24,5 +24,5 @@ COPY . /app
 
 EXPOSE 8005
 
-CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:8005"]
+CMD ["sh", "-c", "python manage.py runserver 0.0.0.0:8005"]
 

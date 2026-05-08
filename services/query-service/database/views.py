@@ -20,6 +20,38 @@ from .utils import ClickHouseClient, cleanup_database, format_file_size
 logger = logging.getLogger(__name__)
 
 
+def _principal_attr(user, *names: str) -> str:
+    for name in names:
+        value = getattr(user, name, None)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def _principal_user_id(user) -> int | None:
+    raw_value = _principal_attr(user, "id", "pk")
+    if not raw_value:
+        return None
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _principal_workspace_id(request) -> int | None:
+    for candidate in (
+        request.data.get("workspace_id") if hasattr(request, "data") else None,
+        _principal_attr(request.user, "workspace_id"),
+    ):
+        if candidate in (None, "", b""):
+            continue
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 class DatabaseHealthCheckView(APIView):
     """
     Health check endpoint to verify database module is loaded.
@@ -58,15 +90,30 @@ class DatabaseUploadView(APIView):
     
     def post(self, request):
         """Upload database file with defensive error handling."""
-        
+        user_role = _principal_attr(request.user, "role").lower()
+        user_email = _principal_attr(request.user, "email")
+        user_name = _principal_attr(request.user, "name")
+        manager_id = _principal_user_id(request.user)
+        workspace_id = _principal_workspace_id(request)
+
         # ============================================================
         # 1. VALIDATION: Check user role
         # ============================================================
-        if request.user.role != 'manager':
-            logger.warning(f"Non-manager user {request.user.email} attempted database upload")
+        if user_role != 'manager':
+            logger.warning("Non-manager user %s attempted database upload", user_email or "unknown")
             return Response(
                 {'success': False, 'message': 'Only managers can upload databases'},
                 status=status.HTTP_403_FORBIDDEN
+            )
+        if manager_id is None:
+            return Response(
+                {'success': False, 'message': 'Invalid authenticated principal: missing user id.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        if workspace_id is None:
+            return Response(
+                {'success': False, 'message': 'workspace_id is required to bind uploaded database.'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         
         # ============================================================
@@ -80,12 +127,12 @@ class DatabaseUploadView(APIView):
             )
         
         uploaded_file = request.FILES['file']
-        logger.info(f"Upload started: {uploaded_file.name} ({uploaded_file.size} bytes) by {request.user.email}")
+        logger.info("Upload started: %s (%s bytes) by manager=%s", uploaded_file.name, uploaded_file.size, manager_id)
         
         # ============================================================
         # 3. CHECK: Existing database (replace mode)
         # ============================================================
-        existing_db = Database.objects.filter(manager=request.user).first()
+        existing_db = Database.objects.filter(manager=manager_id).first()
         replace_mode = existing_db is not None
         
         if replace_mode:
@@ -209,7 +256,10 @@ class DatabaseUploadView(APIView):
             try:
                 configured_clickhouse_database = getattr(settings, 'CLICKHOUSE_DATABASE', 'etl')
                 database = Database.objects.create(
-                    manager=request.user,
+                    manager=manager_id,
+                    manager_email=user_email,
+                    manager_name=user_name,
+                    workspace_id=workspace_id,
                     filename=uploaded_file.name,
                     file_size=uploaded_file.size,
                     file_path=file_path,
@@ -305,14 +355,21 @@ class DatabaseDetailView(APIView):
         Get manager's database information.
         Automatically checks ClickHouse and updates status if processing.
         """
-        if request.user.role != 'manager':
+        user_role = _principal_attr(request.user, "role").lower()
+        manager_id = _principal_user_id(request.user)
+        if user_role != 'manager':
             return Response(
                 {'success': False, 'message': 'Only managers can access databases'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        if manager_id is None:
+            return Response(
+                {'success': False, 'message': 'Invalid authenticated principal: missing user id.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
         
         try:
-            database = Database.objects.get(manager=request.user)
+            database = Database.objects.get(manager=manager_id)
             
             # ============================================================
             # SMART STATUS CHECK: Auto-update if processing
@@ -509,14 +566,22 @@ class DatabaseDetailView(APIView):
     
     def delete(self, request):
         """Delete manager's database."""
-        if request.user.role != 'manager':
+        user_role = _principal_attr(request.user, "role").lower()
+        user_email = _principal_attr(request.user, "email")
+        manager_id = _principal_user_id(request.user)
+        if user_role != 'manager':
             return Response(
                 {'success': False, 'message': 'Only managers can delete databases'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        if manager_id is None:
+            return Response(
+                {'success': False, 'message': 'Invalid authenticated principal: missing user id.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
         
         try:
-            database = Database.objects.get(manager=request.user)
+            database = Database.objects.get(manager=manager_id)
             
             # Cleanup ClickHouse and other resources
             cleanup_results = cleanup_database(database)
@@ -524,7 +589,7 @@ class DatabaseDetailView(APIView):
             # Delete database record
             database.delete()
             
-            logger.info(f"Database deleted for manager {request.user.email}")
+            logger.info("Database deleted for manager %s", user_email or manager_id)
             
             return Response({
                 'success': True,
@@ -554,14 +619,21 @@ class DatabasePreviewView(APIView):
     
     def get(self, request):
         """Get database preview."""
-        if request.user.role != 'manager':
+        user_role = _principal_attr(request.user, "role").lower()
+        manager_id = _principal_user_id(request.user)
+        if user_role != 'manager':
             return Response(
                 {'success': False, 'message': 'Only managers can preview databases'},
                 status=status.HTTP_403_FORBIDDEN
             )
+        if manager_id is None:
+            return Response(
+                {'success': False, 'message': 'Invalid authenticated principal: missing user id.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
         
         try:
-            database = Database.objects.get(manager=request.user)
+            database = Database.objects.get(manager=manager_id)
             
             # Check if ETL processing is complete
             if database.etl_status != 'completed':

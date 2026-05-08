@@ -129,7 +129,7 @@ def transcribe_view(request):
             report_id=(report_id or None),
             table_name=(table_name or None),
         )
-        transcription_payload = (
+        transcription_payload = (  
             pipeline_result.get("transcription", {})
             if isinstance(pipeline_result.get("transcription"), dict)
             else {}

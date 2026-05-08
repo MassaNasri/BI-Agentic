@@ -1,6 +1,16 @@
 from django.urls import path
 from .views import (
+<<<<<<< HEAD
     WorkspaceUpdateView, 
+=======
+    InternalActivateUserMembershipsView,
+    InternalAttachUserToInvitationView,
+    InternalCreateManagerWorkspaceView,
+    InternalInvitationResolveView,
+    InternalUserWorkspacesView,
+    WorkspaceUpdateView,
+    WorkspaceDetailByIdView,
+>>>>>>> c791036 (final update)
     WorkspaceMembersView,
     InvitationView,
     RoleAssignmentView,
@@ -23,5 +33,10 @@ urlpatterns = [
     path('member/<int:id>/role/', RoleAssignmentView.as_view(), name='assign-role'),
     path('member/<int:id>/suspend/', MemberSuspendView.as_view(), name='suspend-member'),
     path('member/<int:id>/unsuspend/', MemberUnsuspendView.as_view(), name='unsuspend-member'),
+    path('internal/invitations/resolve/', InternalInvitationResolveView.as_view(), name='internal-invitation-resolve'),
+    path('internal/invitations/attach-user/', InternalAttachUserToInvitationView.as_view(), name='internal-invitation-attach-user'),
+    path('internal/workspaces/create-manager/', InternalCreateManagerWorkspaceView.as_view(), name='internal-create-manager-workspace'),
+    path('internal/users/<int:user_id>/workspaces/', InternalUserWorkspacesView.as_view(), name='internal-user-workspaces'),
+    path('internal/users/activate-memberships/', InternalActivateUserMembershipsView.as_view(), name='internal-activate-user-memberships'),
 ]
 

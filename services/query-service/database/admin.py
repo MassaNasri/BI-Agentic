@@ -6,7 +6,7 @@ from .models import Database
 class DatabaseAdmin(admin.ModelAdmin):
     list_display = ('filename', 'manager', 'upload_date', 'file_size', 'row_count', 'column_count')
     list_filter = ('upload_date', 'manager')
-    search_fields = ('filename', 'manager__email', 'manager__name')
+    search_fields = ('filename', 'manager_email', 'manager_name')
     readonly_fields = ('upload_date',)
     ordering = ('-upload_date',)
 

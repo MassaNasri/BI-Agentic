@@ -13,6 +13,7 @@ DEBUG = os.getenv('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 INSTALLED_APPS = [
+<<<<<<< HEAD
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -27,6 +28,20 @@ INSTALLED_APPS = [
     'workspace',
     'database',
     'query_api',
+=======
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
+    "corsheaders",
+    "database",
+    "query_api",
+>>>>>>> c791036 (final update)
 ]
 
 MIDDLEWARE = [
@@ -72,10 +87,15 @@ DATABASES = {
     }
 }
 
+<<<<<<< HEAD
 AUTH_USER_MODEL = 'users.User'
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
+=======
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "UTC"
+>>>>>>> c791036 (final update)
 USE_I18N = True
 USE_TZ = True
 
@@ -86,10 +106,17 @@ MEDIA_ROOT = BASE_DIR / 'media'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
+<<<<<<< HEAD
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
+=======
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "query_api.jwt_authentication.QueryJWTAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+>>>>>>> c791036 (final update)
     ],
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],

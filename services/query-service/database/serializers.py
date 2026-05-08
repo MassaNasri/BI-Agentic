@@ -1,13 +1,9 @@
 from rest_framework import serializers
 from .models import Database
-from users.models import User
 
 
 class DatabaseSerializer(serializers.ModelSerializer):
     """Serializer for Database model."""
-    
-    manager_name = serializers.CharField(source='manager.name', read_only=True)
-    manager_email = serializers.CharField(source='manager.email', read_only=True)
     
     class Meta:
         model = Database
@@ -22,6 +18,7 @@ class DatabaseSerializer(serializers.ModelSerializer):
             'row_count',
             'column_count',
             'columns_schema',
+            'workspace_id',
             'clickhouse_table_name',
             'clickhouse_database',
             'upload_date',
@@ -31,6 +28,8 @@ class DatabaseSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id',
             'manager',
+            'manager_name',
+            'manager_email',
             'upload_date',
             'etl_status',
             'etl_message'

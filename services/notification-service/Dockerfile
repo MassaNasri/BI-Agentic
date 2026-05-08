@@ -12,4 +12,4 @@ COPY . /app
 
 EXPOSE 8010
 
-CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:8010"]
+CMD ["sh", "-c", "python manage.py runserver 0.0.0.0:8010"]

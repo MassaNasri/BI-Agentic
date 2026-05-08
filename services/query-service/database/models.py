@@ -1,5 +1,4 @@
 from django.db import models
-from django.conf import settings
 from django.utils import timezone
 
 
@@ -9,11 +8,19 @@ class Database(models.Model):
     Each manager can have only ONE database at a time.
     """
     
-    manager = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='database',
-        limit_choices_to={'role': 'manager'}
+    manager = models.PositiveBigIntegerField(
+        db_column='manager_id',
+        unique=True,
+        db_index=True,
+        help_text="Manager user identifier from auth-service.",
+    )
+    manager_email = models.EmailField(blank=True, default="")
+    manager_name = models.CharField(max_length=255, blank=True, default="")
+    workspace_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Workspace identifier from workspace-service.",
     )
     
     # File metadata
@@ -63,7 +70,8 @@ class Database(models.Model):
         ordering = ['-upload_date']
     
     def __str__(self):
-        return f"{self.filename} - {self.manager.email}"
+        manager_label = self.manager_email or f"manager:{self.manager}"
+        return f"{self.filename} - {manager_label}"
     
     def get_preview_data(self):
         """

@@ -12,7 +12,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from .models import PasswordResetCode, User
 from .notification_client import get_notification_client
-from workspace.models import Workspace, WorkspaceMember
+from .services.workspace_client import WorkspaceServiceError, get_workspace_service_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,57 @@ def split_full_name(full_name):
     if len(tokens) == 1:
         return tokens[0], ''
     return tokens[0], ' '.join(tokens[1:])
+
+
+def _workspace_context_for_user(*, user_id: int, role: str):
+    try:
+        return get_workspace_service_client().get_user_workspaces(user_id=int(user_id), role=role)
+    except WorkspaceServiceError as exc:
+        logger.warning("workspace_lookup_failed user_id=%s role=%s error=%s", user_id, role, exc)
+        return None
+
+
+def _normalize_workspace_payload(*, workspace_payload, role: str, user_id: int):
+    role_lower = str(role or "").strip().lower()
+    workspace_id_claim = ""
+    manager_id_claim = ""
+
+    if role_lower == "manager":
+        if isinstance(workspace_payload, dict):
+            workspace_id_claim = str(workspace_payload.get("id") or "").strip()
+            manager_id_claim = str(workspace_payload.get("manager_id") or user_id or "").strip()
+            if workspace_id_claim:
+                return (
+                    {
+                        "id": int(workspace_id_claim),
+                        "name": str(workspace_payload.get("name") or ""),
+                    },
+                    workspace_id_claim,
+                    manager_id_claim,
+                )
+        return (None, "", str(user_id))
+
+    if role_lower in {"analyst", "executive"}:
+        if isinstance(workspace_payload, list):
+            normalized = []
+            for row in workspace_payload:
+                if not isinstance(row, dict):
+                    continue
+                ws_id = str(row.get("id") or "").strip()
+                if not ws_id:
+                    continue
+                normalized.append(
+                    {
+                        "id": int(ws_id),
+                        "name": str(row.get("name") or ""),
+                    }
+                )
+                if not workspace_id_claim:
+                    workspace_id_claim = ws_id
+                if not manager_id_claim:
+                    manager_id_claim = str(row.get("manager_id") or "").strip()
+            return (normalized, workspace_id_claim, manager_id_claim)
+    return (None, "", "")
 
 
 class SignUpSerializer(serializers.Serializer):
@@ -75,13 +126,18 @@ class SignUpSerializer(serializers.Serializer):
         
         if invitation_token:
             # === INVITATION SIGNUP FLOW ===
-            # Validate invitation token using workspace.utils
-            from workspace.utils import validate_invitation_token
-            
             try:
-                workspace, invited_role, invited_email, invitation = validate_invitation_token(invitation_token)
-            except serializers.ValidationError as e:
-                raise serializers.ValidationError({"invitation_token": str(e.detail[0])})
+                invitation = get_workspace_service_client().resolve_invitation(invitation_token)
+            except WorkspaceServiceError as exc:
+                raise serializers.ValidationError({"invitation_token": str(exc)})
+
+            invited_email = str(invitation.get("invited_email") or "").strip().lower()
+            invited_role = str(invitation.get("role") or "").strip().lower()
+            workspace_id = invitation.get("workspace_id")
+            workspace_name = str(invitation.get("workspace_name") or "").strip()
+
+            if not invited_email or invited_role not in {"analyst", "executive"} or not workspace_id:
+                raise serializers.ValidationError({"invitation_token": "Invalid invitation payload from workspace-service."})
             
             # Override email and role with values from invitation
             # User CANNOT modify these - they come from the invitation
@@ -90,10 +146,11 @@ class SignUpSerializer(serializers.Serializer):
             
             # Store invitation data for use in create()
             attrs['invitation_data'] = {
-                'workspace': workspace,
-                'invitation': invitation,
+                'token': invitation_token,
                 'invited_email': invited_email,
                 'role': invited_role,
+                'workspace_id': int(workspace_id),
+                'workspace_name': workspace_name,
             }
         else:
             # === NORMAL SIGNUP FLOW ===
@@ -139,13 +196,16 @@ class SignUpSerializer(serializers.Serializer):
         
         if invitation_data:
             # === INVITATION SIGNUP ===
-            from django.utils import timezone
-            
-            workspace = invitation_data['workspace']
-            invitation = invitation_data['invitation']
+            invitation_token = invitation_data['token']
+            invited_email = invitation_data['invited_email']
+            role = invitation_data['role']
+            workspace = {
+                'id': invitation_data['workspace_id'],
+                'name': invitation_data.get('workspace_name', ''),
+            }
             
             # Check if user already exists with this email
-            existing_user = User.objects.filter(email=email).first()
+            existing_user = User.objects.filter(email=invited_email).first()
             
             if existing_user:
                 # User already exists - update password and info
@@ -165,7 +225,7 @@ class SignUpSerializer(serializers.Serializer):
             else:
                 # User doesn't exist - create new user with verified=False (needs email verification)
                 user = User.objects.create_user(
-                    email=email,
+                    email=invited_email,
                     password=password,
                     name=name,
                     first_name=first_name,
@@ -174,34 +234,23 @@ class SignUpSerializer(serializers.Serializer):
                     is_verified=False  # Invited users must verify email
                 )
                 is_invited = False  # Send verification email
-            
-            # Determine WorkspaceMember status based on verification
-            # If user is not verified, status should be 'pending_acceptance'
-            member_status = 'active' if user.is_verified else 'pending_acceptance'
-            
-            # Get or create WorkspaceMember entry
-            workspace_member, created = WorkspaceMember.objects.get_or_create(
-                workspace=workspace,
-                invited_email=email,
-                defaults={
-                    'user': user,
-                    'role': role,
-                    'status': member_status,
-                    'joined_at': timezone.now() if user.is_verified else None
+
+            try:
+                attached = get_workspace_service_client().attach_user_to_invitation(
+                    token=invitation_token,
+                    user_id=user.id,
+                    user_email=user.email,
+                    user_name=user.name,
+                    user_role=user.role,
+                    is_verified=bool(user.is_verified),
+                    is_active=bool(user.is_active),
+                )
+                workspace = {
+                    'id': int(attached.get('workspace_id') or workspace.get('id')),
+                    'name': str(attached.get('workspace_name') or workspace.get('name') or ''),
                 }
-            )
-            
-            # If already exists (from invitation creation), update it
-            if not created:
-                workspace_member.user = user
-                workspace_member.status = member_status
-                if user.is_verified:
-                    workspace_member.joined_at = timezone.now()
-                workspace_member.save()
-            
-            # Mark invitation as accepted
-            invitation.status = 'accepted'
-            invitation.save()
+            except WorkspaceServiceError as exc:
+                raise serializers.ValidationError({'invitation_token': str(exc)})
             
         else:
             # === NORMAL SIGNUP ===
@@ -219,10 +268,15 @@ class SignUpSerializer(serializers.Serializer):
             # Auto-create workspace if role is manager
             if role == 'manager':
                 workspace_name = f"{name}'s Workspace"
-                workspace = Workspace.objects.create(
-                    name=workspace_name,
-                    owner=user
-                )
+                try:
+                    workspace = get_workspace_service_client().create_manager_workspace(
+                        user_id=user.id,
+                        user_email=user.email,
+                        user_name=user.name,
+                        workspace_name=workspace_name,
+                    )
+                except WorkspaceServiceError as exc:
+                    raise serializers.ValidationError({'detail': str(exc)})
         
         return {
             'user': user,
@@ -275,6 +329,8 @@ class LoginSerializer(serializers.Serializer):
         refresh['email'] = email
         refresh['name'] = getattr(settings, 'ADMIN_NAME', 'System Admin')
         refresh['role'] = 'admin'
+        refresh['is_verified'] = True
+        refresh['is_active'] = True
         refresh['is_system_admin'] = True
         return str(refresh.access_token), str(refresh)
     
@@ -338,11 +394,6 @@ class LoginSerializer(serializers.Serializer):
                 code='account_suspended'
             )
         
-        # Generate JWT tokens
-        refresh = RefreshToken.for_user(user)
-        access_token = str(refresh.access_token)
-        refresh_token = str(refresh)
-        
         # Prepare user info
         user_info = {
             'id': user.id,
@@ -350,33 +401,30 @@ class LoginSerializer(serializers.Serializer):
             'email': user.email,
             'role': user.role,
         }
-        
-        # Get workspace info based on role
-        workspace_info = None
-        
-        if user.role == 'manager':
-            # Manager: return owned workspace
-            try:
-                workspace = Workspace.objects.get(owner=user)
-                workspace_info = {
-                    'id': workspace.id,
-                    'name': workspace.name,
-                }
-            except Workspace.DoesNotExist:
-                workspace_info = None
-        elif user.role in ['analyst', 'executive']:
-            # Analyst or Executive: return list of joined workspaces
-            memberships = WorkspaceMember.objects.filter(user=user).select_related('workspace')
-            workspace_info = [
-                {
-                    'id': membership.workspace.id,
-                    'name': membership.workspace.name,
-                }
-                for membership in memberships
-            ]
-        else:
-            # Admin is system-level and not tied to a workspace.
-            workspace_info = None
+
+        workspace_payload = _workspace_context_for_user(user_id=user.id, role=user.role)
+        workspace_info, workspace_id_claim, manager_id_claim = _normalize_workspace_payload(
+            workspace_payload=workspace_payload,
+            role=user.role,
+            user_id=user.id,
+        )
+
+        # Generate JWT tokens with service-wide identity claims.
+        refresh = RefreshToken.for_user(user)
+        refresh['email'] = user.email
+        refresh['name'] = user.name
+        refresh['role'] = user.role
+        refresh['is_verified'] = bool(user.is_verified)
+        refresh['is_active'] = bool(user.is_active)
+        if workspace_id_claim:
+            refresh['workspace_id'] = int(workspace_id_claim)
+        if manager_id_claim:
+            refresh['manager_id'] = int(manager_id_claim)
+        elif user.role == 'manager':
+            refresh['manager_id'] = int(user.id)
+
+        access_token = str(refresh.access_token)
+        refresh_token = str(refresh)
         
         return {
             'access': access_token,
@@ -477,25 +525,15 @@ class ProfileSerializer(serializers.ModelSerializer):
     
     def get_workspace(self, obj):
         """Get workspace info based on user role."""
-        if obj.role == 'manager':
-            # Manager: return owned workspace
-            workspace = obj.owned_workspaces.first()
-            if workspace:
-                return {
-                    'id': workspace.id,
-                    'name': workspace.name,
-                }
-            return None
-        elif obj.role in ['analyst', 'executive']:
-            # Analyst or Executive: return first active workspace
-            membership = obj.workspace_memberships.filter(status='active').first()
-            if membership:
-                return {
-                    'id': membership.workspace.id,
-                    'name': membership.workspace.name,
-                }
-            return None
-        return None
+        workspace_payload = _workspace_context_for_user(user_id=obj.id, role=obj.role)
+        workspace_info, _, _ = _normalize_workspace_payload(
+            workspace_payload=workspace_payload,
+            role=obj.role,
+            user_id=obj.id,
+        )
+        if obj.role in ['analyst', 'executive'] and isinstance(workspace_info, list):
+            return workspace_info[0] if workspace_info else None
+        return workspace_info
 
 
 class UpdateProfileSerializer(serializers.Serializer):

@@ -17,7 +17,12 @@ django-cors-headers==4.3.1
 requests==2.31.0
 
 # ClickHouse HTTP Client (for query execution)
+<<<<<<< HEAD
 clickhouse-connect
+=======
+clickhouse-connect==0.15.1
+sqlglot>=25.17.0
+>>>>>>> c791036 (final update)
 
 # Python dotenv for environment variables
 python-dotenv==1.0.0
