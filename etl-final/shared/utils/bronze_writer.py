@@ -25,13 +25,9 @@ from uuid import uuid4
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
-from utils.idempotency_manager import IdempotencyManager, IdempotencyKey, PipelineStage
-from utils.ch_identifiers import quote_table_name
+from shared.models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
+from shared.utils.idempotency_manager import IdempotencyClaim, IdempotencyManager, IdempotencyKey, PipelineStage
+from shared.utils.ch_identifiers import quote_table_name
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +157,10 @@ class BronzeWriter:
         # Filter out duplicates if deduplication is enabled
         rows_to_write = batch.rows
         rows_skipped = 0
+        pending_claims: List[IdempotencyClaim] = []
         
         if self.enable_deduplication:
-            rows_to_write, rows_skipped = self._filter_duplicates(batch.rows, batch.source_id)
+            rows_to_write, rows_skipped, pending_claims = self._claim_new_rows(batch.rows, batch.source_id)
             
             if not rows_to_write:
                 logger.info(
@@ -182,6 +179,8 @@ class BronzeWriter:
         try:
             self._ensure_table_exists(batch.schema)
         except Exception as e:
+            if pending_claims:
+                self.idempotency_manager.rollback_claims(pending_claims, PipelineStage.EXTRACT)
             error_msg = f"Failed to ensure table exists: {str(e)}"
             logger.error(f"[BronzeWriter] {error_msg}")
             return {
@@ -199,10 +198,6 @@ class BronzeWriter:
                 table_name=batch.schema.table_name,
                 rows=rows_to_write
             )
-            
-            # Mark rows as processed for idempotency
-            if self.enable_deduplication:
-                self._mark_rows_processed(rows_to_write, batch.source_id)
             
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             throughput = rows_written / duration if duration > 0 else 0
@@ -223,6 +218,8 @@ class BronzeWriter:
             }
             
         except BronzeWriteError as e:
+            if pending_claims:
+                self.idempotency_manager.rollback_claims(pending_claims, PipelineStage.EXTRACT)
             error_msg = str(e)
             logger.error(f"[BronzeWriter] {error_msg}")
             return {
@@ -234,6 +231,30 @@ class BronzeWriter:
                 "error": error_msg
             }
     
+    def _build_idempotency_key(self, row: BronzeRow, source_id: str) -> IdempotencyKey:
+        return IdempotencyKey(
+            source_id=source_id,
+            batch_id=f"extract:{source_id}",
+            row_hash=row.dedup_key,
+        )
+
+    def _claim_new_rows(
+        self,
+        rows: List[BronzeRow],
+        source_id: str,
+    ) -> Tuple[List[BronzeRow], int, List[IdempotencyClaim]]:
+        keys = [self._build_idempotency_key(row, source_id) for row in rows]
+        claims = self.idempotency_manager.claim_new_keys(keys, PipelineStage.EXTRACT)
+        claim_by_key = {claim.key.to_dedup_key(): claim for claim in claims}
+        filtered_rows: List[BronzeRow] = []
+        filtered_claims: List[IdempotencyClaim] = []
+        for row, key in zip(rows, keys):
+            claim = claim_by_key.pop(key.to_dedup_key(), None)
+            if claim is not None:
+                filtered_rows.append(row)
+                filtered_claims.append(claim)
+        return filtered_rows, len(rows) - len(filtered_rows), filtered_claims
+
     def _filter_duplicates(
         self,
         rows: List[BronzeRow],
@@ -254,11 +275,7 @@ class BronzeWriter:
         
         for row in rows:
             # Create idempotency key
-            key = IdempotencyKey(
-                source_id=source_id,
-                batch_id=row.batch_id,
-                row_hash=row.dedup_key
-            )
+            key = self._build_idempotency_key(row, source_id)
             
             # Check if already processed
             if self.idempotency_manager.is_duplicate(key, PipelineStage.EXTRACT):
@@ -287,11 +304,7 @@ class BronzeWriter:
             source_id: Source identifier
         """
         for row in rows:
-            key = IdempotencyKey(
-                source_id=source_id,
-                batch_id=row.batch_id,
-                row_hash=row.dedup_key
-            )
+            key = self._build_idempotency_key(row, source_id)
             self.idempotency_manager.mark_processed(
                 key=key,
                 stage=PipelineStage.EXTRACT,

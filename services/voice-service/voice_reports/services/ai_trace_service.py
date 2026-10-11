@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 MAX_TRACE_SAMPLE_ROWS = 10
@@ -236,6 +237,172 @@ def _extract_preprocessing_corrections(preprocess_high: dict[str, Any]) -> list[
     return normalized
 
 
+def _is_numeric_like(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        token = value.strip()
+        if not token:
+            return False
+        if token.startswith("-"):
+            token = token[1:]
+        return token.replace(".", "", 1).isdigit()
+    return False
+
+
+def _is_datetime_like(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    token = value.strip()
+    if not token:
+        return False
+    return bool(
+        token[:4].isdigit()
+        and (
+            len(token) >= 10 and token[4] in {"-", "/"} and token[7] in {"-", "/"}
+            or len(token) == 7 and token[4] in {"-", "/"}
+            or len(token) == 4
+        )
+    )
+
+
+def _extract_result_columns(result_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_columns = _safe_list(result_payload.get("columns"))
+    normalized: list[dict[str, Any]] = []
+    for column in raw_columns:
+        if isinstance(column, dict):
+            name = str(column.get("name") or "").strip()
+            if not name:
+                continue
+            normalized.append({"name": name, "type": str(column.get("type") or "").strip()})
+        else:
+            name = str(column or "").strip()
+            if name:
+                normalized.append({"name": name, "type": ""})
+    return normalized
+
+
+def _infer_column_semantic_type(
+    *,
+    column_name: str,
+    column_type: str,
+    rows: list[dict[str, Any]],
+) -> str:
+    lowered_name = str(column_name or "").strip().lower()
+    lowered_type = str(column_type or "").strip().lower()
+    if any(token in lowered_type for token in ("date", "time", "timestamp")):
+        return "datetime"
+    if any(token in lowered_name for token in ("date", "time", "timestamp", "period", "day", "week", "month", "quarter", "year", "ds")):
+        return "datetime"
+    if "bool" in lowered_type:
+        return "boolean"
+    if any(token in lowered_type for token in ("int", "float", "double", "decimal", "numeric")):
+        return "numeric"
+
+    observed = [row.get(column_name) for row in rows[:50] if isinstance(row, dict) and row.get(column_name) is not None]
+    if observed:
+        if all(_is_numeric_like(value) for value in observed):
+            return "numeric"
+        if all(isinstance(value, bool) for value in observed):
+            return "boolean"
+        if all(_is_datetime_like(value) for value in observed):
+            return "datetime"
+    return "categorical"
+
+
+def _extract_result_shape(
+    *,
+    result_payload: dict[str, Any],
+    validated_intent: dict[str, Any],
+    sql_text: str,
+    row_count: int,
+) -> dict[str, Any]:
+    rows = [row for row in _safe_list(result_payload.get("rows")) if isinstance(row, dict)]
+    columns = _extract_result_columns(result_payload)
+    semantic_columns: list[dict[str, Any]] = []
+    numeric_columns: list[str] = []
+    datetime_columns: list[str] = []
+    categorical_columns: list[str] = []
+
+    for column in columns:
+        name = str(column.get("name") or "").strip()
+        if not name:
+            continue
+        semantic_type = _infer_column_semantic_type(
+            column_name=name,
+            column_type=str(column.get("type") or ""),
+            rows=rows,
+        )
+        semantic_columns.append({"name": name, "semantic_type": semantic_type})
+        if semantic_type == "numeric":
+            numeric_columns.append(name)
+        elif semantic_type == "datetime":
+            datetime_columns.append(name)
+        elif semantic_type == "categorical":
+            categorical_columns.append(name)
+
+    operations = {
+        str(operation).strip().lower()
+        for operation in _safe_list(validated_intent.get("operations"))
+        if str(operation).strip()
+    }
+    sql_lower = str(sql_text or "").strip().lower()
+    has_grouping = bool(
+        "grouping" in operations
+        or "time_grouping" in operations
+        or "group by" in sql_lower
+    )
+    has_aggregation = bool(
+        "aggregation" in operations
+        or any(token in sql_lower for token in ("sum(", "avg(", "count(", "min(", "max("))
+    )
+
+    return {
+        "row_count": int(row_count),
+        "columns": semantic_columns,
+        "numeric_columns": numeric_columns,
+        "datetime_columns": datetime_columns,
+        "categorical_columns": categorical_columns,
+        "has_time_column": bool(datetime_columns),
+        "has_grouping": has_grouping,
+        "has_aggregation": has_aggregation,
+    }
+
+
+def _extract_generated_sql_shape(sql_text: str) -> dict[str, Any]:
+    sql = str(sql_text or "").strip()
+    lowered = sql.lower()
+    return {
+        "has_where": " where " in f" {lowered} ",
+        "has_group_by": " group by " in f" {lowered} ",
+        "has_order_by": " order by " in f" {lowered} ",
+        "has_limit": " limit " in f" {lowered} ",
+        "has_aggregation": any(token in lowered for token in ("sum(", "avg(", "count(", "min(", "max(")),
+        "is_binned_distribution": bool(" as bin_start" in lowered and (" count() as frequency" in lowered or "count(*) as frequency" in lowered)),
+    }
+
+
+def _infer_time_grain_from_sql(sql_text: str) -> str:
+    lowered = str(sql_text or "").strip().lower()
+    if not lowered:
+        return ""
+    if "tostartofhour(" in lowered:
+        return "hour"
+    if "tostartofweek(" in lowered:
+        return "week"
+    if "tostartofmonth(" in lowered:
+        return "month"
+    if "tostartofquarter(" in lowered:
+        return "quarter"
+    if "tostartofyear(" in lowered:
+        return "year"
+    if "todate(" in lowered:
+        return "day"
+    return ""
+
+
 def build_ai_trace_payload(
     *,
     report_id: int | None,
@@ -321,6 +488,111 @@ def build_ai_trace_payload(
     if preprocessing_high_status in {"success", "degraded"}:
         classification_error = False
 
+    selected_columns_preprocessing_high = [
+        str(column).strip()
+        for column in _safe_list(normalized_pre_high.get("selected_columns"))
+        if str(column).strip()
+    ]
+    selected_columns_in_scope = [
+        str(column).strip()
+        for column in _safe_list(normalized_pre_high.get("selected_columns_in_scope"))
+        if str(column).strip()
+    ]
+
+    selected_columns_intent_extraction: list[str] = []
+    for container in (validated_intent, extracted_intent):
+        for dimension in _safe_list(container.get("dimensions")):
+            dim_name = str(dimension).strip()
+            if dim_name and dim_name not in selected_columns_intent_extraction:
+                selected_columns_intent_extraction.append(dim_name)
+        for metric in _safe_list(container.get("metrics")):
+            if isinstance(metric, dict):
+                metric_name = str(metric.get("column") or metric.get("name") or metric.get("alias") or "").strip()
+            else:
+                metric_name = str(metric or "").strip()
+            if metric_name and metric_name not in selected_columns_intent_extraction:
+                selected_columns_intent_extraction.append(metric_name)
+
+    filters_detected = [
+        filter_item
+        for filter_item in _safe_list(validated_intent.get("filters") or extracted_intent.get("filters"))
+        if isinstance(filter_item, dict)
+    ]
+    filter_sources = sorted(
+        {
+            str(filter_item.get("source") or filter_item.get("filter_source") or "").strip()
+            for filter_item in filters_detected
+            if str(filter_item.get("source") or filter_item.get("filter_source") or "").strip()
+        }
+    )
+    filter_source = ",".join(filter_sources) if filter_sources else ("intent_filters" if filters_detected else "none")
+    time_grain = str(
+        validated_intent.get("time_granularity")
+        or extracted_intent.get("time_granularity")
+        or validated_intent.get("time_grain")
+        or extracted_intent.get("time_grain")
+        or validated_intent.get("granularity")
+        or extracted_intent.get("granularity")
+        or ""
+    ).strip().lower()
+    time_grain_source = str(
+        validated_intent.get("time_grain_source")
+        or extracted_intent.get("time_grain_source")
+        or ("default" if time_grain else "none")
+    ).strip().lower()
+    detected_time_phrase = str(
+        validated_intent.get("detected_time_phrase")
+        or extracted_intent.get("detected_time_phrase")
+        or ""
+    ).strip()
+    if not time_grain:
+        inferred_time_grain = _infer_time_grain_from_sql(str(reviewed_sql or generated_sql))
+        if inferred_time_grain:
+            time_grain = inferred_time_grain
+            if time_grain_source in {"", "none"}:
+                time_grain_source = "inferred"
+    ranking_payload = _safe_dict(validated_intent.get("ranking") or extracted_intent.get("ranking"))
+    ranking_detected = bool(
+        str(ranking_payload.get("direction") or "").strip().upper() in {"ASC", "DESC"}
+        or bool(validated_intent.get("explicit_top_n_requested") or extracted_intent.get("explicit_top_n_requested"))
+        or "ranking" in {str(op).strip().lower() for op in _safe_list(validated_intent.get("operations") or extracted_intent.get("operations"))}
+    )
+    generated_sql_shape = _extract_generated_sql_shape(str(reviewed_sql or generated_sql))
+    result_shape = _extract_result_shape(
+        result_payload=normalized_result,
+        validated_intent=validated_intent or extracted_intent,
+        sql_text=str(reviewed_sql or generated_sql),
+        row_count=normalized_row_count,
+    )
+    metabase_payload = _safe_dict(normalized_chart_config.get("metabase"))
+    chart_selection_reason = str(
+        normalized_chart_config.get("chart_selection_reason")
+        or normalized_chart_config.get("reason_chart_selected")
+        or ""
+    ).strip()
+    metabase_display = str(
+        metabase_payload.get("display")
+        or normalized_chart_config.get("metabase_display")
+        or ""
+    ).strip()
+    metabase_visualization_settings = _safe_dict(
+        normalized_chart_config.get("metabase_visualization_settings")
+    )
+    fallback_reason = str(
+        metabase_payload.get("fallback_reason")
+        or normalized_chart_config.get("fallback_reason")
+        or ""
+    ).strip()
+    chart_hint_from_ai = str(normalized_chart_config.get("chart_hint_from_ai") or "").strip()
+    final_chart_type = str(
+        normalized_chart_config.get("chart_type_selected_by_visualization_service")
+        or normalized_chart_config.get("selected_chart_type")
+        or normalized_chart_config.get("chart_type")
+        or chart_type
+        or _safe_dict(visualization_stage.get("final_output")).get("selected_chart_type")
+        or ""
+    ).strip()
+
     trace = {
         "report_id": report_id,
         "stage_order": [
@@ -345,6 +617,11 @@ def build_ai_trace_payload(
             "original_text": str(normalized_pre_low.get("original_text") or transcription or ""),
             "cleaned_text": str(normalized_pre_low.get("cleaned_text") or transcription or ""),
             "detected_changes": _safe_list(normalized_pre_low.get("changes") or normalized_pre_low.get("detected_changes")),
+            "preserved_terms": _safe_list(normalized_pre_low.get("preserved_terms")),
+            "semantic_terms": _safe_list(normalized_pre_low.get("semantic_terms")),
+            "semantic_preservation": _safe_dict(normalized_pre_low.get("semantic_preservation")),
+            "filter_operators": _safe_list(normalized_pre_low.get("filter_operators")),
+            "rejected_changes": _safe_list(normalized_pre_low.get("rejected_changes")),
         },
         "classification": {
             "status": classification_status,
@@ -393,6 +670,8 @@ def build_ai_trace_payload(
                 for column in _safe_list(normalized_pre_high.get("selected_columns"))
                 if str(column).strip()
             ],
+            "selected_columns_in_scope": selected_columns_in_scope,
+            "selected_columns_preprocessing_high": selected_columns_preprocessing_high,
             "routing_decision": _safe_dict(normalized_pre_high.get("routing_decision")),
             "skipped_reason": (
                 "predictive_route_selected"
@@ -442,6 +721,13 @@ def build_ai_trace_payload(
             "intent_type": str(routing_final.get("intent_type") or intent_final.get("intent_type") or normalized_intent.get("intent_type") or ""),
             "extracted_intent": extracted_intent,
             "validated_intent": validated_intent,
+            "selected_columns_intent_extraction": selected_columns_intent_extraction,
+            "filters_detected": filters_detected,
+            "filter_source": filter_source,
+            "time_grain": time_grain,
+            "time_grain_source": time_grain_source,
+            "detected_time_phrase": detected_time_phrase,
+            "ranking_detected": ranking_detected,
             "routing_decision": {
                 "next_step": str(routing_final.get("next_step") or ""),
                 "reason": str(routing_final.get("route_reason") or routing_final.get("reason") or ""),
@@ -455,6 +741,7 @@ def build_ai_trace_payload(
             "reviewed_sql": str(reviewed_sql or sql_review_final.get("reviewed_sql") or ""),
             "sql_review_notes": sql_review_notes,
             "historical_sql_only": bool(_safe_dict(sql_generation_final).get("historical_sql_only")),
+            "generated_sql_shape": generated_sql_shape,
         },
         "execution": {
             "status": _normalize_status(query_execution_stage.get("status") or "unknown"),
@@ -462,15 +749,45 @@ def build_ai_trace_payload(
             "row_count": normalized_row_count,
             "columns": columns,
             "sample_rows": sampled_rows,
+            "result_shape": result_shape,
         },
         "visualization": {
             "status": _normalize_status(visualization_stage.get("status") or "unknown"),
-            "chart_type": str(chart_type or _safe_dict(visualization_stage.get("final_output")).get("selected_chart_type") or ""),
+            "chart_type": final_chart_type,
+            "final_chart_type": final_chart_type,
+            "chart_hint_from_ai": chart_hint_from_ai,
+            "chart_type_selected_by_visualization_service": str(
+                normalized_chart_config.get("chart_type_selected_by_visualization_service")
+                or normalized_chart_config.get("selected_chart_type")
+                or final_chart_type
+                or ""
+            ),
+            "chart_selection_reason": chart_selection_reason,
             "metabase_question_id": metabase_question_id,
             "metabase_dashboard_id": metabase_dashboard_id,
+            "metabase_display": metabase_display,
+            "metabase_visualization_settings": metabase_visualization_settings,
+            "fallback_reason": fallback_reason,
             "embed_url": str(embed_url or ""),
         },
         "errors": [],
+        "diagnostics": {
+            "selected_columns_preprocessing_high": selected_columns_preprocessing_high,
+            "selected_columns_intent_extraction": selected_columns_intent_extraction,
+            "filters_detected": filters_detected,
+            "filter_source": filter_source,
+            "time_grain": time_grain,
+            "time_grain_source": time_grain_source,
+            "detected_time_phrase": detected_time_phrase,
+            "ranking_detected": ranking_detected,
+            "generated_sql_shape": generated_sql_shape,
+            "result_shape": result_shape,
+            "chart_selection_reason": chart_selection_reason,
+            "final_chart_type": final_chart_type,
+            "metabase_display": metabase_display,
+            "metabase_visualization_settings": metabase_visualization_settings,
+            "fallback_reason": fallback_reason,
+        },
         "meta": {
             "sample_limit": MAX_TRACE_SAMPLE_ROWS,
             "generated_at": _now_iso(),

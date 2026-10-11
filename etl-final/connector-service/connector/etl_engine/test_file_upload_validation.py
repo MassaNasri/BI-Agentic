@@ -5,6 +5,7 @@ Tests the complete file upload flow including validation.
 """
 
 from django.test import TestCase, Client
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch, Mock
 import json
@@ -14,8 +15,15 @@ class TestFileUploadValidation(TestCase):
     """Integration tests for file upload with validation."""
     
     def setUp(self):
-        self.client = Client()
-        self.upload_url = '/upload/'
+        settings.ETL_INTERNAL_API_KEY = "p0c-test-only-internal-key"
+        self.client = Client(
+            HTTP_X_INTERNAL_SERVICE="query-service",
+            HTTP_X_INTERNAL_API_KEY="p0c-test-only-internal-key",
+            HTTP_X_WORKSPACE_ID="23",
+            HTTP_X_DATASET_ID="dataset-91",
+            HTTP_X_INGESTION_JOB_ID="7d429d28-e064-4d0f-b0bb-c6667a911b8f",
+        )
+        self.upload_url = '/api/upload/'
     
     @patch('etl_engine.views.KafkaMessageProducer')
     @patch('etl_engine.views.SurrealClient')
@@ -250,8 +258,15 @@ class TestFileSizeValidation(TestCase):
     """Integration tests for file size validation."""
     
     def setUp(self):
-        self.client = Client()
-        self.upload_url = '/upload/'
+        settings.ETL_INTERNAL_API_KEY = "p0c-test-only-internal-key"
+        self.client = Client(
+            HTTP_X_INTERNAL_SERVICE="query-service",
+            HTTP_X_INTERNAL_API_KEY="p0c-test-only-internal-key",
+            HTTP_X_WORKSPACE_ID="23",
+            HTTP_X_DATASET_ID="dataset-91",
+            HTTP_X_INGESTION_JOB_ID="7d429d28-e064-4d0f-b0bb-c6667a911b8f",
+        )
+        self.upload_url = '/api/upload/'
     
     @patch('etl_engine.file_validator.get_max_file_size')
     @patch('etl_engine.views.KafkaMessageProducer')
@@ -282,7 +297,7 @@ class TestFileSizeValidation(TestCase):
         mock_get_max.return_value = 1000  # 1KB limit for testing
         
         # Create a file larger than 1KB
-        csv_content = b'name,age\n' + b'John,30\n' * 100
+        csv_content = b'name,age\n' + b'John,30\n' * 200
         uploaded_file = SimpleUploadedFile(
             'large.csv',
             csv_content,

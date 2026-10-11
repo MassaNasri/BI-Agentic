@@ -18,12 +18,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class CredentialConfigurationError(RuntimeError):
+    """Raised when credential encryption cannot be initialized safely."""
+
+
 class CredentialEncryption:
     """
     Handles encryption and decryption of credentials using Fernet symmetric encryption.
     
-    The encryption key is derived from a secret key stored in environment variable.
-    If no key is provided, a default key is used (NOT RECOMMENDED for production).
+    The encryption key is derived from a secret key stored in an environment variable.
     """
     
     def __init__(self, secret_key: Optional[str] = None):
@@ -37,12 +40,7 @@ class CredentialEncryption:
             secret_key = os.environ.get("CREDENTIAL_SECRET_KEY")
         
         if not secret_key:
-            # Default key for development (NOT SECURE - should be overridden in production)
-            logger.warning(
-                "No CREDENTIAL_SECRET_KEY environment variable found. "
-                "Using default key. THIS IS NOT SECURE FOR PRODUCTION!"
-            )
-            secret_key = "etl-pipeline-default-secret-key-change-in-production"
+            raise CredentialConfigurationError("CREDENTIAL_SECRET_KEY is required.")
         
         # Derive a proper encryption key from the secret using PBKDF2
         kdf = PBKDF2HMAC(

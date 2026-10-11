@@ -1,6 +1,6 @@
 Django
 djangorestframework
-kafka-python
+kafka-python==2.3.0
 requests
 python-dotenv
 psycopg2-binary
@@ -11,3 +11,5 @@ opentelemetry-sdk
 opentelemetry-exporter-otlp
 cryptography
 clickhouse-driver
+python-tds==1.17.1
+oracledb==3.4.2

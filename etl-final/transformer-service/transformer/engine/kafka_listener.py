@@ -80,6 +80,7 @@ class RawRowListener:
         self.max_source_stats = int(os.getenv("TRANSFORMER_MAX_SOURCE_STATS", "1000"))
         self.warnings = deque(maxlen=self.max_warning_entries)
         self.source_stats: "OrderedDict[str, Dict[str, int]]" = OrderedDict()
+        self.source_scopes: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         
         # Metadata emission interval
         self.metadata_interval = 1000  # Emit metadata every 1000 rows
@@ -118,7 +119,8 @@ class RawRowListener:
         """Update statistics for a source."""
         if source not in self.source_stats:
             if len(self.source_stats) >= self.max_source_stats:
-                self.source_stats.popitem(last=False)
+                evicted_source, _ = self.source_stats.popitem(last=False)
+                self.source_scopes.pop(evicted_source, None)
             self.source_stats[source] = {"processed": 0, "success": 0, "failed": 0}
         else:
             # Track recency to keep most active sources.
@@ -155,6 +157,7 @@ class RawRowListener:
             cleaning_rules_applied=applied_rules,
             validation_warnings=list(self.warnings)[-10:] if self.warnings else []  # Last 10 warnings
         )
+        metadata.update(self.source_scopes.get(source, {}))
         try:
             self.producer.send("metadata_topic", metadata)
             logger.info(f"[TRANSFORMER] Emitted cleaning metadata for {source}")
@@ -234,6 +237,13 @@ class RawRowListener:
             return True
 
         try:
+            for message in messages:
+                source = message.get("source") or message.get("source_id") or "unknown"
+                scope = MetadataSchema.scope_fields(message)
+                if scope:
+                    self.source_scopes[source] = scope
+                    self.source_scopes.move_to_end(source)
+
             start_time = datetime.utcnow()
             row_results, stats = self.transformer_service.process_batch(messages)
             self.processed_count += stats["processed"]
@@ -243,6 +253,7 @@ class RawRowListener:
             batch_sources = set()
             quality_groups: Dict[tuple, Dict[str, Any]] = {}
             output_batches: Dict[tuple, List[Dict[str, Any]]] = {}
+            lineage_records: List[LineageRecord] = []
 
             for result in row_results:
                 source = result.get("source", "unknown")
@@ -267,20 +278,16 @@ class RawRowListener:
                 )
                 clean_message["_lineage_row_id"] = str(lineage_row_id)
                 clean_message["_parent_lineage_row_id"] = clean_message.get("_parent_lineage_row_id")
-                if self.lineage_tracker:
-                    try:
-                        self.lineage_tracker.record_transformation(
-                            LineageRecord(
-                                row_id=lineage_row_id,
-                                source_id=clean_message.get("source", "unknown"),
-                                batch_id=clean_message.get("_batch_id", "") or clean_message.get("batch_id", ""),
-                                stage="transform",
-                                applied_rules=clean_message.get("_applied_rules", []),
-                                parent_row_ids=[parent_lineage_id] if parent_lineage_id else [],
-                            )
-                        )
-                    except Exception as exc:
-                        logger.warning("[TRANSFORMER] Lineage side-effect failed and was skipped: %s", exc)
+                lineage_records.append(
+                    LineageRecord(
+                        row_id=lineage_row_id,
+                        source_id=clean_message.get("source", "unknown"),
+                        batch_id=clean_message.get("_batch_id", "") or clean_message.get("batch_id", ""),
+                        stage="transform",
+                        applied_rules=clean_message.get("_applied_rules", []),
+                        parent_row_ids=[parent_lineage_id] if parent_lineage_id else [],
+                    )
+                )
 
                 batch_key = (
                     clean_message.get("source") or clean_message.get("source_id"),
@@ -352,6 +359,12 @@ class RawRowListener:
                         ERRORS_TOTAL.labels(service="transformer", stage="transform").inc(len(rows))
 
             # Persist quality metrics per batch
+            if self.lineage_tracker and lineage_records:
+                try:
+                    self.lineage_tracker.record_transformations(lineage_records)
+                except Exception as exc:
+                    logger.warning("[TRANSFORMER] Batch lineage side-effect failed and was skipped: %s", exc)
+
             if self.quality_metrics_manager:
                 for (source_id, batch_id), payload in quality_groups.items():
                     if not source_id or not batch_id:
@@ -372,9 +385,10 @@ class RawRowListener:
                 duration = (datetime.utcnow() - start_time).total_seconds()
                 PROCESS_LATENCY.labels(service="transformer", stage="transform").observe(duration)
 
+            for source in batch_sources:
+                self._emit_cleaning_metadata(source)
+
             while self.processed_count >= self._next_metadata_emit:
-                for source in batch_sources:
-                    self._emit_cleaning_metadata(source)
                 logger.info(
                     "[TRANSFORMER] Processed %s rows (success: %s, failed: %s)",
                     self.processed_count,
@@ -400,6 +414,17 @@ class RawRowListener:
         try:
             pending_records = []
             for message, record in self.consumer.listen_committable():
+                if isinstance(message, dict) and message.get("schema_only") is True:
+                    forwarded = self._send_with_retry(
+                        "clean_rows_topic", message, "empty database table schema"
+                    )
+                    if forwarded:
+                        self.consumer.commit(record)
+                    else:
+                        logger.warning("[TRANSFORMER] Empty-table schema forwarding failed")
+                        self.consumer.rewind(record)
+                        time.sleep(max(0.0, float(os.getenv("KAFKA_PROCESSING_RETRY_SECONDS", "2"))))
+                    continue
                 message_has_rows = isinstance(message, dict) and "rows" in message
                 if isinstance(message, dict) and "rows" in message:
                     parent = {k: v for k, v in message.items() if k != "rows"}
@@ -424,6 +449,11 @@ class RawRowListener:
                         pending_records = []
                     else:
                         logger.warning("[TRANSFORMER] Batch processing failed, offsets not committed")
+                        if pending_records:
+                            self.consumer.rewind(pending_records[0])
+                        self._pending_messages = []
+                        pending_records = []
+                        time.sleep(max(0.0, float(os.getenv("KAFKA_PROCESSING_RETRY_SECONDS", "2"))))
         except KeyboardInterrupt:
             logger.info("[TRANSFORMER] Shutting down...")
         except Exception as e:

@@ -21,15 +21,15 @@ from uuid import uuid4
 from unittest.mock import Mock, patch, MagicMock
 from clickhouse_driver import Client
 
-import sys
-# Add paths for imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-shared_dir = os.path.join(current_dir, '../../../shared')
-sys.path.insert(0, shared_dir)
+from shared.utils.idempotency_manager import IdempotencyManager, IdempotencyKey, PipelineStage
+from shared.utils.bronze_writer import BronzeWriter
+from shared.models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
 
-from utils.idempotency_manager import IdempotencyManager, IdempotencyKey, PipelineStage
-from utils.bronze_writer import BronzeWriter
-from models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
+
+def _string_data(values):
+    """Bronze schemas intentionally store source values as immutable strings."""
+
+    return {key: "" if value is None else str(value) for key, value in values.items()}
 
 
 class TestIdempotencyIntegration(unittest.TestCase):
@@ -51,6 +51,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 password=os.getenv('CLICKHOUSE_PASSWORD', ''),
                 database=os.getenv('CLICKHOUSE_DATABASE', 'etl_test')
             )
+            cls.clickhouse_client.execute("SELECT 1")
             cls.use_real_clickhouse = True
             print("[TEST] Using real ClickHouse connection")
         except Exception as e:
@@ -120,8 +121,18 @@ class TestIdempotencyIntegration(unittest.TestCase):
                         dedup_key = row.get('_dedup_key', '')
                         stage = row.get('_stage', '')
                         key = f"{dedup_key}:{stage}"
-                        self.mock_dedup_store[key] = row
+                        self.mock_dedup_store.setdefault(key, row)
                 return None
+
+            elif 'argMin(_row_id' in query and 'deduplication_log' in query:
+                stage = params.get('stage', '') if params else ''
+                dedup_keys = params.get('dedup_keys', ()) if params else ()
+                winners = []
+                for dedup_key in dedup_keys:
+                    row = self.mock_dedup_store.get(f"{dedup_key}:{stage}")
+                    if row:
+                        winners.append((dedup_key, row.get('_row_id', '')))
+                return winners
             
             elif 'EXISTS TABLE' in query:
                 # Table exists check
@@ -177,7 +188,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id_1,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data=row.to_dict(),
+                data=_string_data(row.to_dict()),
                 row_number=idx
             )
             rows_batch_1.append(bronze_row)
@@ -216,7 +227,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id_2,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data=row.to_dict(),
+                data=_string_data(row.to_dict()),
                 row_number=idx
             )
             rows_batch_2.append(bronze_row)
@@ -265,7 +276,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data=row.to_dict(),
+                data=_string_data(row.to_dict()),
                 row_number=idx
             )
             rows_partial.append(bronze_row)
@@ -293,7 +304,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data=row.to_dict(),
+                data=_string_data(row.to_dict()),
                 row_number=idx
             )
             rows_full.append(bronze_row)
@@ -331,7 +342,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
             batch_id=batch_id_1,
             source_id=source_id,
             extracted_at=datetime.now(timezone.utc),
-            data=row_data,
+            data=_string_data(row_data),
             row_number=0
         )
         
@@ -357,7 +368,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
             batch_id=batch_id_2,
             source_id=source_id,
             extracted_at=datetime.now(timezone.utc),
-            data=row_data,  # Same data
+            data=_string_data(row_data),  # Same data
             row_number=0
         )
         
@@ -394,7 +405,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
             batch_id=batch_id,
             source_id=source_id,
             extracted_at=datetime.now(timezone.utc),
-            data=row_1_data,
+            data=_string_data(row_1_data),
             row_number=0
         )
         
@@ -402,7 +413,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
             batch_id=batch_id,
             source_id=source_id,
             extracted_at=datetime.now(timezone.utc),
-            data=row_2_data,
+            data=_string_data(row_2_data),
             row_number=1
         )
         
@@ -446,7 +457,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id_1,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data={'id': i+1, 'name': name},
+                data=_string_data({'id': i+1, 'name': name}),
                 row_number=i
             )
             rows_1.append(row)
@@ -475,7 +486,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id_2,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data={'id': i+2, 'name': name},  # IDs 2, 3, 4
+                data=_string_data({'id': i+2, 'name': name}),  # IDs 2, 3, 4
                 row_number=i
             )
             rows_2.append(row)
@@ -519,7 +530,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data=row_data,
+                data=_string_data(row_data),
                 row_number=0
             )
             
@@ -605,7 +616,7 @@ class TestIdempotencyIntegration(unittest.TestCase):
                 batch_id=batch_id,
                 source_id=source_id,
                 extracted_at=datetime.now(timezone.utc),
-                data={'id': i, 'value': f'value_{i}'},
+                data=_string_data({'id': i, 'value': f'value_{i}'}),
                 row_number=i
             )
             rows.append(row)

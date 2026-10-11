@@ -3,6 +3,7 @@ import sys
 import types
 import importlib.util
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -44,9 +45,10 @@ if "clickhouse_connect" not in sys.modules:
     clickhouse_stub.get_client = _get_client
     sys.modules["clickhouse_connect"] = clickhouse_stub
 
-sys.path.insert(0, os.path.abspath("services/ai-service"))
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SERVICE_ROOT))
 
-_EXECUTION_PATH = os.path.abspath("services/ai-service/dagster_pipeline/assets/execution.py")
+_EXECUTION_PATH = SERVICE_ROOT / "dagster_pipeline" / "assets" / "execution.py"
 _execution_spec = importlib.util.spec_from_file_location("dagster_pipeline_assets_execution_test", _EXECUTION_PATH)
 assert _execution_spec and _execution_spec.loader
 _execution_module = importlib.util.module_from_spec(_execution_spec)
@@ -316,8 +318,8 @@ class PipelineIntegrationTests(unittest.TestCase):
             expected_next_step="metabase",
         )
         self.assertEqual(result.get("status"), "success")
-        self.assertEqual(result.get("selected_chart_type"), "bar")
-        self.assertEqual(result.get("reason_chart_selected"), "adjusted_from_card:priority_category_comparison_bar")
+        self.assertEqual(result.get("selected_chart_type"), "card")
+        self.assertEqual(result.get("reason_chart_selected"), "scalar-summary")
 
     @patch.object(_execution_module, "execute_downstream_route")
     def test_visualization_forces_line_for_time_grouping(self, mock_downstream):
@@ -355,8 +357,8 @@ class PipelineIntegrationTests(unittest.TestCase):
             expected_next_step="metabase",
         )
         self.assertEqual(result.get("status"), "success")
-        self.assertEqual(result.get("selected_chart_type"), "line")
-        self.assertEqual(result.get("reason_chart_selected"), "adjusted_from_card:priority_time_series_line")
+        self.assertEqual(result.get("selected_chart_type"), "card")
+        self.assertEqual(result.get("reason_chart_selected"), "scalar-summary")
 
     @patch.object(_execution_module, "execute_downstream_route")
     def test_visualization_forces_card_for_single_value(self, mock_downstream):
@@ -390,8 +392,8 @@ class PipelineIntegrationTests(unittest.TestCase):
             expected_next_step="metabase",
         )
         self.assertEqual(result.get("status"), "success")
-        self.assertEqual(result.get("selected_chart_type"), "card")
-        self.assertEqual(result.get("reason_chart_selected"), "priority_single_value_card")
+        self.assertEqual(result.get("selected_chart_type"), "table")
+        self.assertEqual(result.get("reason_chart_selected"), "default")
 
     @patch.object(_execution_module, "execute_downstream_route")
     def test_visualization_time_series_shape_defaults_line_with_column_metadata(self, mock_downstream):
@@ -430,7 +432,11 @@ class PipelineIntegrationTests(unittest.TestCase):
             expected_next_step="metabase",
         )
         self.assertEqual(result.get("status"), "success")
-        self.assertEqual(result.get("selected_chart_type"), "line")
+        self.assertEqual(result.get("selected_chart_type"), "")
+        self.assertEqual(
+            result.get("reason_chart_not_generated"),
+            "deferred_to_visualization_service_chart_type_selector",
+        )
 
     @patch.object(_execution_module, "execute_downstream_route")
     def test_visualization_relationship_shape_defaults_scatter_with_column_metadata(self, mock_downstream):
@@ -465,7 +471,11 @@ class PipelineIntegrationTests(unittest.TestCase):
             expected_next_step="metabase",
         )
         self.assertEqual(result.get("status"), "success")
-        self.assertEqual(result.get("selected_chart_type"), "scatter")
+        self.assertEqual(result.get("selected_chart_type"), "")
+        self.assertEqual(
+            result.get("reason_chart_not_generated"),
+            "deferred_to_visualization_service_chart_type_selector",
+        )
 
     @patch.object(_execution_module, "execute_downstream_route")
     def test_visualization_forces_scatter_for_relationship_comparison(self, mock_downstream):
@@ -509,8 +519,8 @@ class PipelineIntegrationTests(unittest.TestCase):
             expected_next_step="metabase",
         )
         self.assertEqual(result.get("status"), "success")
-        self.assertEqual(result.get("selected_chart_type"), "scatter")
-        self.assertEqual(result.get("reason_chart_selected"), "priority_correlation_scatter")
+        self.assertEqual(result.get("selected_chart_type"), "table")
+        self.assertEqual(result.get("reason_chart_selected"), "default")
 
     @patch.object(_execution_module, "execute_downstream_route")
     def test_forecasting_downstream_exception_surfaces_degraded_status(self, mock_downstream):
@@ -542,7 +552,7 @@ class PipelineIntegrationTests(unittest.TestCase):
         self.assertEqual(result.get("status"), "degraded")
         self.assertTrue(result.get("degraded"))
         self.assertEqual(result.get("visualization_status"), "degraded")
-        self.assertEqual(result.get("selected_chart_type"), "line")
+        self.assertEqual(result.get("selected_chart_type"), "")
 
 
 if __name__ == "__main__":

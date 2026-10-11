@@ -24,15 +24,15 @@ class ErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-          <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
+        <div className="min-h-screen flex items-center justify-center bg-[rgba(255,255,255,0.04)] px-4">
+          <div className="max-w-md w-full bg-[var(--c-card-bg)] rounded-lg shadow-lg p-8 text-center">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
               <AlertCircle className="w-8 h-8 text-red-600" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            <h1 className="text-2xl font-bold text-white mb-2">
               Something went wrong
             </h1>
-            <p className="text-gray-600 mb-6">
+            <p className="text-[var(--c-muted)] mb-6">
               We're sorry for the inconvenience. The application encountered an unexpected error.
             </p>
             {process.env.NODE_ENV === 'development' && this.state.error && (

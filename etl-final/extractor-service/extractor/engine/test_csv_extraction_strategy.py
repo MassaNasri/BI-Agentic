@@ -15,8 +15,8 @@ import pytest
 import pandas as pd
 import os
 import tempfile
-from csv_extraction_strategy import CSVExtractionStrategy
-from extraction_strategy import (
+from .csv_extraction_strategy import CSVExtractionStrategy
+from .extraction_strategy import (
     ExtractionConfig,
     Batch,
     ExtractionError,

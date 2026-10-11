@@ -328,6 +328,11 @@ def build_ai_trace_payload(
             "original_text": str(normalized_pre_low.get("original_text") or transcription or ""),
             "cleaned_text": str(normalized_pre_low.get("cleaned_text") or transcription or ""),
             "detected_changes": _safe_list(normalized_pre_low.get("changes") or normalized_pre_low.get("detected_changes")),
+            "preserved_terms": _safe_list(normalized_pre_low.get("preserved_terms")),
+            "semantic_terms": _safe_list(normalized_pre_low.get("semantic_terms")),
+            "semantic_preservation": _safe_dict(normalized_pre_low.get("semantic_preservation")),
+            "filter_operators": _safe_list(normalized_pre_low.get("filter_operators")),
+            "rejected_changes": _safe_list(normalized_pre_low.get("rejected_changes")),
         },
         "preprocessing_high": {
             "status": preprocessing_high_status,

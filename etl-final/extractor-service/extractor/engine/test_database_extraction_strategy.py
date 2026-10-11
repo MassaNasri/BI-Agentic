@@ -13,8 +13,8 @@ Tests cover:
 
 import unittest
 from unittest.mock import Mock, MagicMock, patch
-from database_extraction_strategy import DatabaseExtractionStrategy
-from extraction_strategy import ExtractionConfig, ExtractionError, ValidationError
+from .database_extraction_strategy import DatabaseExtractionStrategy
+from .extraction_strategy import ExtractionConfig, ExtractionError, ValidationError
 
 
 class TestDatabaseExtractionStrategy(unittest.TestCase):

@@ -37,7 +37,8 @@ class BIHardeningTests(unittest.TestCase):
         chart = recommend_chart(intent)
 
         self.assertEqual(intent["intent"], "distribution")
-        self.assertIn("SELECT orders", sql)
+        self.assertIn("floor(toFloat64(orders) / 10) * 10 AS bin_start", sql)
+        self.assertIn("COUNT() AS frequency", sql)
         self.assertNotIn("SUM(", sql.upper())
         self.assertEqual(chart["type"], "histogram")
 
@@ -51,19 +52,18 @@ class BIHardeningTests(unittest.TestCase):
         self.assertIn("GROUP BY period", sql)
         self.assertEqual(chart["type"], "line")
 
-    def test_daily_trend_preserves_daily_grain_metric_without_sum(self):
+    def test_daily_trend_aggregates_when_source_grain_is_not_declared(self):
         question = "What is the trend of total sales over time?"
         intent = normalize_analytical_intent(question=question, raw_intent={"table": "sales_fact"}, schema=TEST_SCHEMA)
         sql = compile_sql(intent, schema=TEST_SCHEMA)
         chart = recommend_chart(intent)
 
         self.assertEqual(intent["intent"], "time_series")
-        self.assertTrue(intent["source_grain_matches_requested"])
-        self.assertFalse(intent["time_rollup_required"])
+        self.assertFalse(intent["source_grain_matches_requested"])
+        self.assertTrue(intent["time_rollup_required"])
         self.assertIn("toDate(order_date) AS period", sql)
-        self.assertIn("total_sales", sql)
-        self.assertNotIn("SUM(", sql.upper())
-        self.assertNotIn("GROUP BY", sql.upper())
+        self.assertIn("SUM(total_sales)", sql)
+        self.assertIn("GROUP BY", sql.upper())
         self.assertEqual(chart["type"], "line")
 
     def test_weekly_total_rollup_still_aggregates(self):
@@ -94,17 +94,17 @@ class BIHardeningTests(unittest.TestCase):
         self.assertIn("GROUP BY period", sql)
         self.assertIn("SUM(total_sales)", sql)
         self.assertIn("SUM(orders)", sql)
-        self.assertEqual(chart["type"], "line")
+        self.assertEqual(chart["type"], "line_multi")
 
-    def test_average_per_day_on_daily_grain_uses_line_without_sum(self):
+    def test_average_per_day_uses_explicit_average_aggregation(self):
         question = "What is the average number of orders per day?"
         intent = normalize_analytical_intent(question=question, raw_intent={"table": "sales_fact"}, schema=TEST_SCHEMA)
         sql = compile_sql(intent, schema=TEST_SCHEMA)
         chart = recommend_chart(intent)
 
-        self.assertTrue(intent["source_grain_matches_requested"])
-        self.assertIn("orders", sql)
-        self.assertNotIn("SUM(", sql.upper())
+        self.assertFalse(intent["source_grain_matches_requested"])
+        self.assertIn("AVG(orders)", sql)
+        self.assertIn("GROUP BY", sql.upper())
         self.assertEqual(chart["type"], "line")
 
     def test_kpi_derived_metric_intent_sql_chart(self):

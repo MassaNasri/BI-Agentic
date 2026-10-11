@@ -9,7 +9,6 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
     dependencies = [
         ("workspace", "0001_initial"),
-        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
@@ -58,12 +57,11 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="workspacemember",
             name="user",
-            field=models.ForeignKey(
+            field=models.PositiveBigIntegerField(
                 blank=True,
+                db_column="user_id",
+                db_index=True,
                 null=True,
-                on_delete=django.db.models.deletion.CASCADE,
-                related_name="workspace_memberships",
-                to=settings.AUTH_USER_MODEL,
             ),
         ),
         migrations.AddIndex(

@@ -4,13 +4,10 @@ Tests that indexes are properly created and improve query performance.
 """
 import pytest
 import os
-import sys
 from clickhouse_driver import Client
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from models.bronze_schema import BronzeTableSchema
-from utils.clickhouse_schemas import ClickHouseSchemaManager
+from shared.models.bronze_schema import BronzeTableSchema
+from shared.utils.clickhouse_schemas import ClickHouseSchemaManager
 
 
 @pytest.fixture

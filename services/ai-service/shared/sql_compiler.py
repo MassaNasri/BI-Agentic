@@ -12,7 +12,7 @@ TIME_GRANULARITY_EXPRESSIONS = {
     "week": "toStartOfWeek({column})",
     "month": "toStartOfMonth({column})",
     "quarter": "toStartOfQuarter({column})",
-    "year": "toYear({column})",
+    "year": "toStartOfYear({column})",
 }
 BUSINESS_METRIC_HINT_TOKENS = (
     "sales",
@@ -49,16 +49,38 @@ def compile_sql(intent: dict[str, Any], schema: dict[str, list[dict[str, Any]]])
 
     dimensions = intent.get("dimensions") or []
     filters = intent.get("filters") or []
+    semantic_filters = intent.get("semantic_filters") or []
+    filters = _merge_semantic_filters(
+        filters=filters if isinstance(filters, list) else [],
+        semantic_filters=semantic_filters if isinstance(semantic_filters, list) else [],
+        column_map=column_map,
+    )
     order_by = intent.get("order_by") or []
     limit = intent.get("limit")
     type_cast_map = _build_type_cast_map(intent.get("type_casting") or intent.get("type_casting_needed") or [])
-    time_granularity = str(intent.get("time_granularity", "")).strip().lower()
+    time_granularity = str(intent.get("time_granularity") or intent.get("time_grain") or "").strip().lower()
     time_column = str(intent.get("time_column", "")).strip()
     time_grouping_detected = bool(intent.get("time_grouping_detected"))
     row_count_requested = bool(intent.get("row_count_requested"))
     time_dimension_alias = str(intent.get("time_dimension_alias", "")).strip() or "period"
     time_dimension_expression = str(intent.get("time_dimension_expression", "")).strip()
     explicit_top_n_requested = bool(intent.get("explicit_top_n_requested"))
+    distribution_requested = _is_distribution_intent(intent)
+
+    if distribution_requested:
+        distribution_sql = _compile_distribution_sql(
+            intent=intent,
+            schema_table=schema_table,
+            from_table=from_table,
+            column_map=column_map,
+            filters=filters if isinstance(filters, list) else [],
+            type_cast_map=type_cast_map,
+            metric_aliases={},
+        )
+        if distribution_sql:
+            final_sql = _normalize_clickhouse_date_casts(distribution_sql)
+            _validate_sql_structure(final_sql)
+            return final_sql
     if (
         time_grouping_detected
         and time_granularity in TIME_GRANULARITY_EXPRESSIONS
@@ -212,9 +234,10 @@ def compile_sql(intent: dict[str, Any], schema: dict[str, list[dict[str, Any]]])
         raise ValueError("Unsafe time-grouped SQL shape: aggregation over time requires GROUP BY transformed time dimension.")
 
     where_clause = _build_where_clause(filters, column_map, type_cast_map)
-    if has_aggregated_metric and time_grouping_detected and time_dimension_alias:
+    composite_temporal_ranking = bool(intent.get("composite_temporal_ranking"))
+    if has_aggregated_metric and time_grouping_detected and time_dimension_alias and not composite_temporal_ranking:
         order_by = [{"column": time_dimension_alias, "direction": "ASC"}]
-    if time_grouping_detected and not explicit_top_n_requested:
+    if time_grouping_detected and not explicit_top_n_requested and not composite_temporal_ranking:
         limit = None
     order_clause = _build_order_clause(order_by, column_map, metric_aliases, dimension_aliases)
     limit_clause = _build_limit_clause(limit)
@@ -346,6 +369,51 @@ def _compile_formula_expression(
     safe_division = bool(formula.get("safe_division", True))
     denominator_sql = f"NULLIF({denominator_expr}, 0)" if safe_division else denominator_expr
     return f"({numerator_expr} / {denominator_sql})", numerator_agg or denominator_agg
+
+
+def _merge_semantic_filters(
+    *,
+    filters: list[dict[str, Any]],
+    semantic_filters: list[dict[str, Any]],
+    column_map: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not semantic_filters:
+        return filters
+
+    merged = [item for item in filters if isinstance(item, dict)]
+    seen = {
+        (
+            str(item.get("column", "")).strip(),
+            str(item.get("operator", "")).strip().upper(),
+            str(item.get("value")),
+        )
+        for item in merged
+    }
+
+    for semantic_filter in semantic_filters:
+        if not isinstance(semantic_filter, dict):
+            continue
+        column = str(
+            semantic_filter.get("column")
+            or semantic_filter.get("metric")
+            or semantic_filter.get("metric_hint")
+            or ""
+        ).strip()
+        operator = str(semantic_filter.get("operator", "=")).strip().upper() or "="
+        value = semantic_filter.get("value")
+        if not column or value is None:
+            continue
+        if column not in column_map:
+            continue
+        if operator not in VALID_OPERATORS:
+            continue
+        fingerprint = (column, operator, str(value))
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        merged.append({"column": column, "operator": operator, "value": value})
+
+    return merged
 
 
 def _format_filter_value(value: Any) -> str:
@@ -511,7 +579,10 @@ def _build_time_dimension_expression(
         return ""
     column_type = str(column_map.get(column_name, {}).get("type", "")).strip().lower()
     base_column = column_name
+    already_to_date = base_column.lower().startswith("todate(")
     if _is_string_like_type(column_type):
+        base_column = f"toDate({column_name})" if not already_to_date else base_column
+    elif granularity != "hour" and not already_to_date:
         base_column = f"toDate({column_name})"
     expression = template.format(column=base_column)
     return _normalize_clickhouse_date_casts(expression)
@@ -555,3 +626,126 @@ def _infer_groupable_dimension(columns: list[dict[str, Any]]) -> str | None:
         return ranked[0]
 
     return None
+
+
+def _is_distribution_intent(intent: dict[str, Any]) -> bool:
+    primary_intent = str(intent.get("intent", "")).strip().lower()
+    analysis_mode = str(intent.get("analysis_mode", "")).strip().lower()
+    operations = {
+        str(operation).strip().lower()
+        for operation in (intent.get("operations") or [])
+        if str(operation).strip()
+    }
+    return primary_intent == "distribution" or analysis_mode == "distribution" or "distribution" in operations
+
+
+def _distribution_bin_width(intent: dict[str, Any]) -> float:
+    raw_width = intent.get("histogram_bin_width")
+    if isinstance(raw_width, (int, float)) and raw_width > 0:
+        return float(raw_width)
+    return 10.0
+
+
+def _compile_distribution_sql(
+    *,
+    intent: dict[str, Any],
+    schema_table: str,
+    from_table: str,
+    column_map: dict[str, dict[str, Any]],
+    filters: list[dict[str, Any]],
+    type_cast_map: dict[str, str],
+    metric_aliases: dict[str, str],
+) -> str:
+    metrics = intent.get("metrics") or []
+    if not isinstance(metrics, list) or not metrics:
+        return ""
+    primary_metric = metrics[0] if isinstance(metrics[0], dict) else {}
+    metric_column = str(primary_metric.get("column", "")).strip()
+    if not metric_column or metric_column == "*" or metric_column not in column_map:
+        return ""
+    if not is_numeric_type(column_map[metric_column].get("type", "")) and metric_column not in type_cast_map:
+        return ""
+
+    metric_expr = _metric_expression(column=metric_column, cast_target=type_cast_map.get(metric_column))
+    numeric_expr = f"toFloat64({metric_expr})"
+    bin_width = _distribution_bin_width(intent)
+    bin_width_literal = str(int(bin_width)) if float(bin_width).is_integer() else str(bin_width)
+    bin_expression = f"floor({numeric_expr} / {bin_width_literal}) * {bin_width_literal}"
+    where_filters = list(filters)
+    where_filters.append({"column": metric_column, "operator": "!=", "value": None})
+    where_clause = _build_distribution_where_clause(
+        filters=where_filters,
+        column_map=column_map,
+        type_cast_map=type_cast_map,
+        metric_column=metric_column,
+    )
+    sql_parts = [
+        "SELECT "
+        f"{bin_expression} AS bin_start,\n"
+        "       COUNT() AS frequency",
+        f"FROM {from_table}",
+    ]
+    if where_clause:
+        sql_parts.append(where_clause)
+    sql_parts.append("GROUP BY bin_start")
+    sql_parts.append("ORDER BY bin_start ASC")
+    limit_clause = _build_limit_clause(intent.get("limit"))
+    if limit_clause:
+        sql_parts.append(limit_clause)
+    _ = schema_table, metric_aliases
+    return "\n".join(sql_parts) + ";"
+
+
+def _build_distribution_where_clause(
+    *,
+    filters: list[dict[str, Any]],
+    column_map: dict[str, dict[str, Any]],
+    type_cast_map: dict[str, str],
+    metric_column: str,
+) -> str:
+    clauses = []
+    for filter_item in filters:
+        if not isinstance(filter_item, dict):
+            continue
+        column = str(filter_item.get("column", "")).strip()
+        operator = str(filter_item.get("operator", "=")).strip().upper() or "="
+        value = filter_item.get("value")
+        if not column or column not in column_map:
+            continue
+        filter_expr = _metric_expression(column=column, cast_target=type_cast_map.get(column))
+
+        if value is None:
+            if operator in {"=", "IS"}:
+                clauses.append(f"{filter_expr} IS NULL")
+            elif operator in {"!=", "<>", "IS NOT"}:
+                clauses.append(f"{filter_expr} IS NOT NULL")
+            continue
+
+        if operator not in VALID_OPERATORS:
+            continue
+        if operator == "IN":
+            value_list = value if isinstance(value, list) else [value]
+            if not value_list:
+                continue
+            clauses.append(f"{filter_expr} IN {_format_filter_value(value_list)}")
+            continue
+        if operator == "BETWEEN":
+            if isinstance(value, (list, tuple)) and len(value) == 2:
+                low_value, high_value = value[0], value[1]
+            elif isinstance(value, dict):
+                low_value, high_value = value.get("low"), value.get("high")
+            else:
+                continue
+            if low_value is None or high_value is None:
+                continue
+            clauses.append(
+                f"{filter_expr} BETWEEN {_format_filter_value(low_value)} AND {_format_filter_value(high_value)}"
+            )
+            continue
+        clauses.append(f"{filter_expr} {operator} {_format_filter_value(value)}")
+
+    metric_expr = _metric_expression(column=metric_column, cast_target=type_cast_map.get(metric_column))
+    non_null_clause = f"{metric_expr} IS NOT NULL"
+    if non_null_clause not in clauses:
+        clauses.append(non_null_clause)
+    return f"WHERE {' AND '.join(clauses)}" if clauses else ""

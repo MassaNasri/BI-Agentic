@@ -1,0 +1,98 @@
+{
+  "phase": "P0-B",
+  "generated_at": "2026-09-30T19:45:00+03:00",
+  "scope": "Metadata-only inventory of source and P0-B recovery artifacts; no credentials or record values",
+  "off_host_copy_status": "NOT PERFORMED - operator action required before production",
+  "artifacts": [
+    {
+      "store": "PostgreSQL bi_voice_agent source snapshot",
+      "backup_path_reference": "backups/phase0-20260913T141937Z/bi_voice_agent.dump",
+      "timestamp": "2026-09-13T14:19:37Z",
+      "size_bytes": 4672736,
+      "sha256": "89458c319fffd1c87e1713380491d1d168c503f0cbef7efdc5464153ea4fee1b",
+      "version": "PostgreSQL 18.3",
+      "restore_verification_status": "PASS - isolated restore, 27-table count parity, P0-B upgrade and repeat no-op migrations"
+    },
+    {
+      "store": "Metabase original H2 primary file",
+      "backup_path_reference": "backups/phase0-20260913T141937Z/metabase.db/metabase.db.mv.db",
+      "timestamp": "2026-09-13T14:19:37Z",
+      "size_bytes": 19910656,
+      "sha256": "09e1805de256d71358ef67be71fb68b7ea2161f3a99cc5848cb33e5bf06e4780",
+      "version": "Metabase v0.58.8.5 (23da6ce), H2 source",
+      "restore_verification_status": "PASS - original hash preserved; exact-version working copy opened and migrated"
+    },
+    {
+      "store": "Metabase original H2 trace file",
+      "backup_path_reference": "backups/phase0-20260913T141937Z/metabase.db/metabase.db.trace.db",
+      "timestamp": "2026-09-13T14:19:37Z",
+      "size_bytes": 51504,
+      "sha256": "8921f62729d84a10657be4588edadea382eaf6786462bef9bdb5b5d53528ce98",
+      "version": "Metabase v0.58.8.5 (23da6ce), H2 source",
+      "restore_verification_status": "PRESERVED - companion diagnostic file; primary H2 restore verified"
+    },
+    {
+      "store": "Metabase PostgreSQL before at-rest encryption",
+      "backup_path_reference": "backups/p0b-20260930T131800Z/metabase_app.dump",
+      "timestamp": "2026-09-30T13:18:00Z",
+      "size_bytes": 2062748,
+      "sha256": "55FB4316FDADDB05E63EF6E8C1F8AD13ECF09559EE973975918BF8DC63C0D193",
+      "version": "PostgreSQL 18.3 / Metabase v0.58.8.5",
+      "restore_verification_status": "PASS - isolated restore with 484 cards, 16 dashboards, 4 collections, 2 users and 2 data sources"
+    },
+    {
+      "store": "Metabase PostgreSQL encrypted application database",
+      "backup_path_reference": "backups/p0b-20260930T131800Z/metabase_app_encrypted.dump",
+      "timestamp": "2026-09-30T13:18:00Z",
+      "size_bytes": 2064654,
+      "sha256": "4E5FB43DCF616B64450C589952A0516AF05E3CDFBB6494DB305070FF15F8E1E3",
+      "version": "PostgreSQL 18.3 / Metabase v0.58.8.5",
+      "restore_verification_status": "PASS - isolated database restore, exact-version application startup, login, source health and ClickHouse SELECT 1"
+    },
+    {
+      "store": "Voice durable media",
+      "backup_path_reference": "backups/p0b-20260930T131800Z/media/voice_media.tar",
+      "timestamp": "2026-09-30T13:18:00Z",
+      "size_bytes": 10240,
+      "sha256": "B64BC98C4E6E4121F06DB33B604F409524AB82893DAAE1C55C205862FBF38ADA",
+      "version": "tar archive of voice_service_media named volume",
+      "restore_verification_status": "PASS - isolated volume restore and marker hash parity"
+    },
+    {
+      "store": "SurrealDB active Compose export",
+      "backup_path_reference": "backups/p0b-20260930T131800Z/surreal/p0b-compose-surreal-export.surql",
+      "timestamp": "2026-09-30T13:18:00Z",
+      "size_bytes": 451,
+      "sha256": "23D95B620D8610C65B467FE4F41908030A75EB98D82753D2128FD5791102145F",
+      "version": "SurrealDB 3.0.1 RocksDB",
+      "restore_verification_status": "PASS - native import into isolated volume and exact marker read"
+    },
+    {
+      "store": "SurrealDB disposable pre-Compose drill",
+      "backup_path_reference": "backups/p0b-20260930T131800Z/surreal/p0b-surreal-export.surql",
+      "timestamp": "2026-09-30T13:18:00Z",
+      "size_bytes": 494,
+      "sha256": "2F3CF3FBE1830665F6375309A8B514E193561BC06CC825908E45ACF9CAE004E3",
+      "version": "SurrealDB 3.0.1 RocksDB",
+      "restore_verification_status": "PASS - isolated export/import and read; disposable resources removed"
+    },
+    {
+      "store": "Metabase H2 migration working copy primary file",
+      "backup_path_reference": "backups/p0b-20260930T131800Z/metabase-h2-working/metabase.db.mv.db",
+      "timestamp": "2026-09-30T13:18:00Z",
+      "size_bytes": 39440384,
+      "sha256": "6EAEA46C909B20EF413027D2679D44138121AAFDEC5CF9865A6C91E019B4646C",
+      "version": "Metabase v0.58.8.5 migration working copy",
+      "restore_verification_status": "MIGRATION SOURCE ONLY - successfully imported; not the immutable rollback copy"
+    },
+    {
+      "store": "Metabase H2 migration working copy trace file",
+      "backup_path_reference": "backups/p0b-20260930T131800Z/metabase-h2-working/metabase.db.trace.db",
+      "timestamp": "2026-09-30T13:18:00Z",
+      "size_bytes": 52596,
+      "sha256": "6DD10BA9601CF98988BD61F1EF1D02ACBBDAE2E9998AD051D0385BBC56232E41",
+      "version": "Metabase v0.58.8.5 migration working copy",
+      "restore_verification_status": "MIGRATION SOURCE ONLY - companion diagnostic file"
+    }
+  ]
+}

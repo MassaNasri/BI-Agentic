@@ -1,0 +1,2 @@
+# Test-only dependencies; production images install requirements.txt only.
+hypothesis==6.151.9

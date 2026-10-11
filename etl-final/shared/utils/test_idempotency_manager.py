@@ -6,7 +6,7 @@ import pytest
 import uuid
 from datetime import datetime
 from unittest.mock import Mock, MagicMock, patch
-from idempotency_manager import (
+from .idempotency_manager import (
     IdempotencyManager,
     IdempotencyKey,
     PipelineStage
@@ -24,7 +24,9 @@ def mock_clickhouse_client():
 @pytest.fixture
 def idempotency_manager(mock_clickhouse_client):
     """Create an IdempotencyManager instance with mock client."""
-    return IdempotencyManager(mock_clickhouse_client)
+    manager = IdempotencyManager(mock_clickhouse_client)
+    mock_clickhouse_client.execute.reset_mock()
+    return manager
 
 
 class TestIdempotencyKey:
@@ -216,7 +218,7 @@ class TestIsDuplicate:
         
         # Mock: key1 is duplicate, key2 is not
         def mock_execute(query, params):
-            dedup_key = params.get('dedup_key', '')
+            dedup_key = (params.get('dedup_keys') or ('',))[0]
             if 'batch_001' in dedup_key:
                 return [[1]]
             else:
@@ -412,7 +414,7 @@ class TestEndToEndScenarios:
         call_count = [0]
         
         def mock_execute(query, params=None):
-            if 'SELECT COUNT' in query:
+            if 'SELECT _dedup_key' in query:
                 # First check: not duplicate, subsequent checks: duplicate
                 call_count[0] += 1
                 if call_count[0] in [1, 3, 5]:  # First check for each stage
@@ -453,7 +455,7 @@ class TestEndToEndScenarios:
         call_count = [0]
         
         def mock_execute(query, params=None):
-            if 'SELECT COUNT' in query:
+            if 'SELECT _dedup_key' in query:
                 call_count[0] += 1
                 if call_count[0] == 1:
                     return [[0]]  # First check: not duplicate
@@ -491,7 +493,7 @@ class TestEndToEndScenarios:
         call_count = [0]
         
         def mock_execute(query, params=None):
-            if 'SELECT COUNT' in query:
+            if 'SELECT _dedup_key' in query:
                 call_count[0] += 1
                 if call_count[0] <= 5:  # First 5 checks: not duplicate
                     return [[0]]

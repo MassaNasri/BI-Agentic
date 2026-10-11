@@ -3,7 +3,11 @@ Enhanced ClickHouse Client with Batch Insert Support
 Optimized for high-throughput data loading
 """
 import logging
+import json
+import math
 import re
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Any, Optional
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
@@ -27,7 +31,7 @@ class ClickHouseClient:
         host,
         port=9000,
         user="etl_user",
-        password="etl_pass123",
+        password=None,
         database="etl",
         connect_timeout: int = 10,
         send_receive_timeout: int = 300,
@@ -47,6 +51,8 @@ class ClickHouseClient:
             password: Password
             database: Database name
         """
+        if not password:
+            raise ValueError("CLICKHOUSE_PASSWORD is required")
         try:
             self.insert_retries = max(1, int(insert_retries))
             try:
@@ -188,6 +194,18 @@ class ClickHouseClient:
                 {mapping[str(k)]: v for k, v in row.items()}
                 for row in non_empty_rows
             ]
+            table_schema = self.get_table_schema(table)
+            normalized_rows, coercion_issues = self.normalize_rows_for_schema(
+                normalized_rows,
+                table_schema,
+            )
+            if coercion_issues:
+                logger.warning(
+                    "[ClickHouse] Normalized %s incompatible values to NULL before loading %s: %s",
+                    sum(coercion_issues.values()),
+                    table,
+                    coercion_issues,
+                )
             # Union of all keys across rows, stable deterministic ordering.
             columns = sorted({key for row in normalized_rows for key in row.keys()})
             columns_str = ", ".join(self._quote_identifier(column) for column in columns)
@@ -234,6 +252,171 @@ class ClickHouseClient:
             import traceback
             logger.error(traceback.format_exc())
             raise
+
+    @classmethod
+    def normalize_rows_for_schema(
+        cls,
+        rows: List[Dict[str, Any]],
+        schema: Dict[str, str],
+    ) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """Coerce batch values to the destination schema without losing the batch.
+
+        Source columns are nullable by design.  Dirty values that cannot be
+        converted are therefore represented as SQL NULL and counted per column.
+        Non-nullable pipeline metadata remains strict and still fails loudly.
+        """
+        if not schema:
+            return rows, {}
+
+        issues: Dict[str, int] = {}
+        normalized_rows: List[Dict[str, Any]] = []
+        for row in rows:
+            normalized: Dict[str, Any] = {}
+            for column, value in row.items():
+                column_type = schema.get(column)
+                if not column_type:
+                    normalized[column] = value
+                    continue
+                nullable = cls._is_nullable_type(column_type)
+                try:
+                    normalized[column] = cls._coerce_clickhouse_value(value, column_type)
+                except (TypeError, ValueError, InvalidOperation, OverflowError):
+                    if not nullable:
+                        raise
+                    normalized[column] = None
+                    issues[column] = issues.get(column, 0) + 1
+            normalized_rows.append(normalized)
+        return normalized_rows, issues
+
+    @staticmethod
+    def _is_nullable_type(column_type: str) -> bool:
+        return str(column_type).strip().startswith("Nullable(")
+
+    @staticmethod
+    def _base_clickhouse_type(column_type: str) -> str:
+        value = str(column_type).strip()
+        while value.startswith("Nullable(") and value.endswith(")"):
+            value = value[len("Nullable("):-1].strip()
+        while value.startswith("LowCardinality(") and value.endswith(")"):
+            value = value[len("LowCardinality("):-1].strip()
+        return value
+
+    @classmethod
+    def _coerce_clickhouse_value(cls, value: Any, column_type: str) -> Any:
+        nullable = cls._is_nullable_type(column_type)
+        base_type = cls._base_clickhouse_type(column_type)
+        if value is None:
+            if nullable:
+                return None
+            raise ValueError("NULL supplied for a non-nullable ClickHouse column")
+        if isinstance(value, float) and not math.isfinite(value):
+            if nullable:
+                return None
+            raise ValueError("Non-finite number supplied for a non-nullable ClickHouse column")
+
+        if base_type.startswith("String") or base_type.startswith("FixedString"):
+            if isinstance(value, (dict, list, tuple)):
+                return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            return str(value)
+
+        if base_type.startswith(("Int", "UInt")):
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, int):
+                result = value
+            elif isinstance(value, (float, Decimal)):
+                if not math.isfinite(float(value)) or float(value) % 1:
+                    raise ValueError("Non-integral value")
+                result = int(value)
+            else:
+                candidate = str(value).strip().replace("_", "")
+                decimal_value = Decimal(candidate)
+                if decimal_value != decimal_value.to_integral_value():
+                    raise ValueError("Non-integral value")
+                result = int(decimal_value)
+            if base_type.startswith("UInt") and result < 0:
+                raise ValueError("Negative value for unsigned integer")
+            return result
+
+        if base_type.startswith(("Float", "Decimal")):
+            if isinstance(value, bool):
+                return float(value)
+            if isinstance(value, (int, float, Decimal)):
+                result = float(value)
+            else:
+                candidate = cls._normalize_numeric_string(str(value))
+                result = float(Decimal(candidate))
+            if not math.isfinite(result):
+                raise ValueError("Non-finite numeric value")
+            return result
+
+        if base_type in {"Bool", "Boolean"}:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)) and value in (0, 1):
+                return bool(value)
+            candidate = str(value).strip().casefold()
+            if candidate in {"true", "yes", "y", "on", "1"}:
+                return True
+            if candidate in {"false", "no", "n", "off", "0"}:
+                return False
+            raise ValueError("Unknown boolean value")
+
+        if base_type.startswith("DateTime"):
+            return cls._coerce_datetime(value)
+        if base_type == "Date" or base_type.startswith("Date32"):
+            return cls._coerce_datetime(value).date()
+        return value
+
+    @staticmethod
+    def _normalize_numeric_string(value: str) -> str:
+        candidate = value.strip()
+        if not candidate or candidate.startswith(("=", "+", "@")):
+            raise ValueError("Unsafe or empty numeric value")
+        candidate = re.sub(r"^[\$\u20ac\u00a3\u00a5]\s*", "", candidate)
+        candidate = candidate.replace(" ", "")
+        if "," in candidate and "." in candidate:
+            if candidate.rfind(",") > candidate.rfind("."):
+                candidate = candidate.replace(".", "").replace(",", ".")
+            else:
+                candidate = candidate.replace(",", "")
+        elif "," in candidate:
+            parts = candidate.split(",")
+            if len(parts) == 2 and len(parts[1]) in (1, 2):
+                candidate = ".".join(parts)
+            else:
+                candidate = "".join(parts)
+        return candidate
+
+    @staticmethod
+    def _coerce_datetime(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, date):
+            parsed = datetime.combine(value, datetime.min.time())
+        else:
+            candidate = str(value).strip()
+            normalized = candidate[:-1] + "+00:00" if candidate.endswith("Z") else candidate
+            try:
+                parsed = datetime.fromisoformat(normalized)
+            except ValueError:
+                parsed = None
+                for fmt in (
+                    "%m/%d/%Y %I:%M %p",
+                    "%m/%d/%Y %H:%M",
+                    "%d/%m/%Y %H:%M",
+                    "%Y-%m-%d %H:%M:%S",
+                ):
+                    try:
+                        parsed = datetime.strptime(candidate, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if parsed is None:
+                    raise ValueError("Invalid datetime value")
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
 
     def create_table(
         self,

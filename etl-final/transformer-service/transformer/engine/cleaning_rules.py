@@ -3,6 +3,7 @@ Enhanced Cleaning Rules for ETL Pipeline
 Comprehensive data cleaning with validation and edge-case handling
 """
 from typing import Dict, Any, List, Optional, Tuple
+import math
 import re
 import logging
 
@@ -46,6 +47,25 @@ class CleaningRules:
             if not keep_empty_strings and v == "":
                 continue  # Skip empty strings
             cleaned[k] = v
+        return cleaned
+
+    def normalize_null_values(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize common CSV null sentinels before type inference.
+
+        Pandas represents empty numeric cells as ``NaN``.  JSON/Kafka can carry
+        that non-finite float all the way to the loader, where it is invalid for
+        integer, boolean, and date columns.  Treating well-known sentinel values
+        as SQL NULL keeps the batch loadable without inventing replacement data.
+        """
+        null_tokens = {"null", "none", "n/a", "na", "nan"}
+        cleaned: Dict[str, Any] = {}
+        for key, value in row.items():
+            if isinstance(value, float) and not math.isfinite(value):
+                cleaned[key] = None
+            elif isinstance(value, str) and value.strip().casefold() in null_tokens:
+                cleaned[key] = None
+            else:
+                cleaned[key] = value
         return cleaned
     
     def trim_strings(self, row: Dict[str, Any]) -> Dict[str, Any]:
@@ -240,8 +260,9 @@ class CleaningRules:
             return {}, warnings_and_errors
         
         try:
-            # Step 1: Handle nulls and empty strings
-            cleaned = self.remove_null_fields(row, keep_empty_strings=False)
+            # Step 1: Normalize CSV null sentinels, then handle nulls/empties.
+            cleaned = self.normalize_null_values(row)
+            cleaned = self.remove_null_fields(cleaned, keep_empty_strings=False)
             
             # Step 2: Trim strings
             cleaned = self.trim_strings(cleaned)

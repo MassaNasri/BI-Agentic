@@ -2,6 +2,22 @@
 import re
 from typing import Any
 
+from bi_platform_shared.semantic.intent_priority import build_intent_priority_payload
+
+from shared.bi_semantic_layer import (
+    build_nl_semantic_metadata,
+    extract_conjoined_metric_phrases,
+    extract_semantic_filters,
+    extra_numeric_filter_pattern_specs,
+)
+from shared.bi_temporal_semantics import (
+    analyze_temporal_intent,
+    build_grouping_metadata,
+    detect_composite_temporal_superlative,
+    infer_nl_time_granularity,
+    metric_lexical_variants,
+    should_treat_as_relationship_scatter,
+)
 from shared.schema_filtering import is_technical_table_name
 from shared.schema_utils import (
     build_table_metadata,
@@ -40,6 +56,26 @@ SUM_KEYWORDS = ("sum", "total of", "in total", "overall total", "total")
 MAX_KEYWORDS = ("maximum", "max")
 MIN_KEYWORDS = ("minimum", "min")
 
+TEMPORAL_BUCKET_TOKENS = {
+    "hour",
+    "hours",
+    "day",
+    "days",
+    "date",
+    "week",
+    "weeks",
+    "month",
+    "months",
+    "quarter",
+    "quarters",
+    "year",
+    "years",
+    "time",
+    "timestamp",
+    "period",
+    "ds",
+}
+
 VALID_AGGREGATIONS = {"SUM", "AVG", "COUNT", "MIN", "MAX"}
 VALID_FILTER_OPERATORS = {"=", "!=", ">", "<", ">=", "<=", "IN", "LIKE", "BETWEEN"}
 
@@ -77,24 +113,49 @@ TIME_GRANULARITY_EXPRESSIONS = {
     "week": "toStartOfWeek({column})",
     "month": "toStartOfMonth({column})",
     "quarter": "toStartOfQuarter({column})",
-    "year": "toYear({column})",
+    "year": "toStartOfYear({column})",
 }
 TIME_GRANULARITY_TERMS = {"hour", "day", "week", "month", "quarter", "year"}
-RELATIONSHIP_KEYWORDS = (
-    "relationship",
-    "correlation",
-    "associate",
-    "association",
-    "impact",
-    "effect",
-    "influence",
-    "compare",
-    "comparison",
-    "compared",
-    "versus",
-    " vs ",
-)
 DISTRIBUTION_KEYWORDS = ("distribution", "distributed", "histogram", "spread", "frequency")
+
+TIME_GRAIN_DETECTION_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    # Explicit grain phrases.
+    (re.compile(r"\b(?:by|per|for each|in each|each)\s+hour\b", flags=re.IGNORECASE), "hour", "explicit"),
+    (re.compile(r"\b(?:by|per|for each|in each|each)\s+day\b", flags=re.IGNORECASE), "day", "explicit"),
+    (re.compile(r"\b(?:by|per|for each|in each|each)\s+week\b", flags=re.IGNORECASE), "week", "explicit"),
+    (re.compile(r"\b(?:by|per|for each|in each|each)\s+month\b", flags=re.IGNORECASE), "month", "explicit"),
+    (re.compile(r"\b(?:by|per|for each|in each|each)\s+quarter\b", flags=re.IGNORECASE), "quarter", "explicit"),
+    (re.compile(r"\b(?:by|per|for each|in each|each)\s+year\b", flags=re.IGNORECASE), "year", "explicit"),
+    # Frequency adjectives.
+    (re.compile(r"\bhourly\b", flags=re.IGNORECASE), "hour", "explicit"),
+    (re.compile(r"\bdaily\b", flags=re.IGNORECASE), "day", "explicit"),
+    (re.compile(r"\bweekly\b", flags=re.IGNORECASE), "week", "explicit"),
+    (re.compile(r"\bmonthly\b", flags=re.IGNORECASE), "month", "explicit"),
+    (re.compile(r"\bquarterly\b", flags=re.IGNORECASE), "quarter", "explicit"),
+    (re.compile(r"\b(?:yearly|annual|annually)\b", flags=re.IGNORECASE), "year", "explicit"),
+    # Explicit "over/across <grain>" forms.
+    (re.compile(r"\bover\s+hours?\b", flags=re.IGNORECASE), "hour", "explicit"),
+    (re.compile(r"\bover\s+days?\b", flags=re.IGNORECASE), "day", "explicit"),
+    (re.compile(r"\bover\s+weeks?\b", flags=re.IGNORECASE), "week", "explicit"),
+    (re.compile(r"\bover\s+months?\b", flags=re.IGNORECASE), "month", "explicit"),
+    (re.compile(r"\bover\s+quarters?\b", flags=re.IGNORECASE), "quarter", "explicit"),
+    (re.compile(r"\bover\s+years?\b", flags=re.IGNORECASE), "year", "explicit"),
+    (re.compile(r"\bacross\s+hours?\b", flags=re.IGNORECASE), "hour", "explicit"),
+    (re.compile(r"\bacross\s+days?\b", flags=re.IGNORECASE), "day", "explicit"),
+    (re.compile(r"\bacross\s+weeks?\b", flags=re.IGNORECASE), "week", "explicit"),
+    (re.compile(r"\bacross\s+months?\b", flags=re.IGNORECASE), "month", "explicit"),
+    (re.compile(r"\bacross\s+quarters?\b", flags=re.IGNORECASE), "quarter", "explicit"),
+    (re.compile(r"\bacross\s+years?\b", flags=re.IGNORECASE), "year", "explicit"),
+)
+
+TIME_DEFAULT_GROUPING_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bover\s+time\b", flags=re.IGNORECASE),
+    re.compile(r"\bthrough\s+time\b", flags=re.IGNORECASE),
+    re.compile(r"\bacross\s+time\b", flags=re.IGNORECASE),
+    re.compile(r"\btime\s+series\b", flags=re.IGNORECASE),
+    re.compile(r"\btimeline\b", flags=re.IGNORECASE),
+    re.compile(r"\btrend\b", flags=re.IGNORECASE),
+)
 
 NUMERIC_FILTER_PATTERNS = [
     {
@@ -138,6 +199,7 @@ NUMERIC_FILTER_PATTERNS = [
         "captures_operator": False,
     },
 ]
+NUMERIC_FILTER_PATTERNS.extend(extra_numeric_filter_pattern_specs())
 
 BETWEEN_FILTER_PATTERNS = [
     r"\b([a-z_][a-z0-9_ ]+?)\s+between\s+(-?\d+(?:\.\d+)?)\s+and\s+(-?\d+(?:\.\d+)?)\b",
@@ -167,6 +229,7 @@ LANGUAGE_STOP_TOKENS = {
     "by",
     "compare",
     "compared",
+    "comparing",
     "comparison",
     "do",
     "does",
@@ -211,8 +274,17 @@ LANGUAGE_STOP_TOKENS = {
     "with",
     "year",
     "years",
+    "generated",
+    "generates",
+    "produced",
+    "produces",
+    "performing",
+    "performance",
+    "increase",
+    "increases",
+    "decrease",
+    "decreases",
 }
-
 
 DERIVED_METRIC_PATTERNS = [
     {
@@ -281,13 +353,10 @@ def _looks_temporal_column_name(column_name: str) -> bool:
 
 
 def _is_relationship_question(question_lower: str) -> bool:
-    normalized = str(question_lower or "").strip().lower()
-    if any(keyword in f" {normalized} " for keyword in RELATIONSHIP_KEYWORDS):
-        return True
-    return bool(
-        re.search(r"\b(?:relationship|correlation|association)\s+(?:of|between)\b", normalized)
-        or re.search(r"\bcompare\s+.+?\s+(?:and|with|to|against|vs|versus)\s+.+", normalized)
-    )
+    """
+    Relationship / scatter path — delegated to temporal-vs-relationship arbitration.
+    """
+    return should_treat_as_relationship_scatter(str(question_lower or ""))
 
 
 def _is_distribution_question(question_lower: str) -> bool:
@@ -454,6 +523,36 @@ def _infer_relationship_metrics(
     ]
 
 
+def _extract_preselected_columns(raw_intent: dict[str, Any], table_meta: dict[str, Any]) -> list[str]:
+    candidate_lists = [
+        raw_intent.get("selected_columns_preprocessing_high"),
+        raw_intent.get("selected_columns"),
+    ]
+    selected: list[str] = []
+    seen: set[str] = set()
+    valid_columns = {
+        str(column.get("name", "")).strip()
+        for column in table_meta.get("columns", [])
+        if isinstance(column, dict) and str(column.get("name", "")).strip()
+    }
+
+    for raw_list in candidate_lists:
+        if not isinstance(raw_list, list):
+            continue
+        for item in raw_list:
+            column_name = str(item or "").strip()
+            if not column_name:
+                continue
+            if column_name not in valid_columns:
+                continue
+            lowered = column_name.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            selected.append(column_name)
+    return selected
+
+
 def normalize_analytical_intent(
     *,
     question: str,
@@ -465,6 +564,13 @@ def normalize_analytical_intent(
 
     schema_metadata = build_schema_metadata(schema)
     ambiguities: list[dict[str, Any]] = []
+    nl_semantics = build_nl_semantic_metadata(question)
+    analytical_semantic_hints = (
+        nl_semantics.get("analytical_semantic_hints")
+        if isinstance(nl_semantics.get("analytical_semantic_hints"), dict)
+        else {}
+    )
+    intent_priority_payload = build_intent_priority_payload(question)
 
     table = _resolve_table(question, raw_intent, schema_metadata, ambiguities=ambiguities)
     if not table:
@@ -472,11 +578,45 @@ def normalize_analytical_intent(
 
     table_meta = schema_metadata[table]
     question_lower = question.lower()
+    temporal_semantics = analyze_temporal_intent(question)
+    composite_rank = detect_composite_temporal_superlative(question)
     relationship_requested = _is_relationship_question(question_lower)
+    explicit_correlation_requested = bool(intent_priority_payload.get("explicit_correlation"))
+    minimal_temporal_query = _is_minimal_temporal_grouping_query(question_lower)
+    temporal_dominance_active = (
+        bool(intent_priority_payload.get("suppress_relationship_scatter"))
+        and str(intent_priority_payload.get("dominant_intent", "")).strip().lower() == "time_series"
+    )
+    if minimal_temporal_query and not explicit_correlation_requested:
+        temporal_dominance_active = True
+    if relationship_requested and temporal_dominance_active:
+        relationship_requested = False
     distribution_requested = _is_distribution_question(question_lower)
+    preselected_columns = _extract_preselected_columns(raw_intent, table_meta)
+    preselected_metric_columns = [
+        column_name
+        for column_name in preselected_columns
+        if column_name in table_meta.get("numeric_columns", [])
+    ]
+    metric_lock_enabled = bool(preselected_metric_columns)
 
     dimensions = _infer_dimensions(question, raw_intent, table_meta, ambiguities=ambiguities)
-    time_granularity = _infer_time_granularity(question_lower)
+    if dimensions and relationship_requested and not explicit_correlation_requested:
+        # "Compare X and Y by <dimension>" is a grouped categorical comparison,
+        # not a row-wise correlation/scatter request. Keep explicit relationship,
+        # correlation and scatter wording on the relationship path.
+        relationship_requested = False
+    time_grain_detection = detect_time_grain(question)
+    time_granularity = str(time_grain_detection.get("grain") or "").strip().lower()
+    time_grain_source = str(time_grain_detection.get("source") or "none").strip().lower() or "none"
+    detected_time_phrase = str(time_grain_detection.get("matched_phrase") or "").strip()
+    if not time_granularity and composite_rank.get("active"):
+        time_granularity = str(composite_rank.get("time_granularity") or "").strip().lower()
+        if time_granularity:
+            time_grain_source = "inferred"
+            if not detected_time_phrase:
+                detected_time_phrase = str(composite_rank.get("matched_phrase") or "").strip()
+    composite_bucket_rank = bool(composite_rank.get("active"))
     time_column = _select_time_column(table_meta) if time_granularity else ""
     time_dimension_expression = ""
     time_dimension_alias = ""
@@ -490,27 +630,47 @@ def normalize_analytical_intent(
             column_name=time_column,
             granularity=time_granularity,
         )
-        # Time-series intent takes precedence over generic "compare X and Y" phrasing.
-        # Without this, prompts like "compare sales and orders per week" can be
-        # misrouted into relationship/scatter semantics and lose the time axis.
-        relationship_requested = False
-        if time_column not in dimensions:
-            dimensions = [time_column, *dimensions]
-            ambiguities.append(
-                {
-                    "type": "dimension_inference",
-                    "message": f"Time grouping detected ({time_granularity}); auto-selected time dimension.",
-                    "candidates": [time_column],
-                    "selected_dimension": time_column,
-                    "resolution": "auto_selected_dimension",
-                }
-            )
+        if relationship_requested and explicit_correlation_requested:
+            # Explicit correlation language ("relationship between", "correlation",
+            # "scatter", etc.) should preserve relationship intent even when temporal
+            # hints are present in the same sentence.
+            time_grouping_detected = False
+            time_granularity = ""
+            time_grain_source = "none"
+            detected_time_phrase = ""
+            time_column = ""
+            time_dimension_expression = ""
+            time_dimension_alias = ""
+        else:
+            # Time-series intent takes precedence over generic "compare X and Y" phrasing.
+            # Without this, prompts like "compare sales and orders per week" can be
+            # misrouted into relationship/scatter semantics and lose the time axis.
+            relationship_requested = False
+            if time_column not in dimensions:
+                dimensions = [time_column, *dimensions]
+                ambiguities.append(
+                    {
+                        "type": "dimension_inference",
+                        "message": f"Time grouping detected ({time_granularity}); auto-selected time dimension.",
+                        "candidates": [time_column],
+                        "selected_dimension": time_column,
+                        "resolution": "auto_selected_dimension",
+                    }
+                )
 
     ranking = _infer_ranking(question_lower=question_lower, raw_intent=raw_intent)
+    ranking_direction_hint = str(analytical_semantic_hints.get("ranking_direction_hint") or "").strip().upper()
+    if ranking_direction_hint in {"ASC", "DESC"} and not ranking.get("direction"):
+        ranking["direction"] = ranking_direction_hint
+        ranking["source"] = "analytical_semantic_hint"
+    if composite_bucket_rank and composite_rank.get("ranking_direction") and not ranking.get("direction"):
+        ranking["direction"] = composite_rank["ranking_direction"]
+        ranking["source"] = "composite_temporal_superlative"
     explicit_top_n_requested = bool(ranking.get("explicit_limit_requested"))
     if (time_grouping_detected or relationship_requested) and not explicit_top_n_requested:
-        ranking["direction"] = None
-        ranking["source"] = "time_series_or_relationship_override"
+        if not (composite_bucket_rank and time_grouping_detected):
+            ranking["direction"] = None
+            ranking["source"] = "time_series_or_relationship_override"
     limit = ranking["limit"]
     ranking_requested = bool(ranking.get("direction")) or isinstance(limit, int)
     overall_total_requested = _is_overall_total_request(question_lower)
@@ -528,6 +688,14 @@ def normalize_analytical_intent(
         year_filter = _infer_year_filter(question_lower, table_meta)
         if year_filter:
             filters.append(year_filter)
+    filter_sources = sorted(
+        {
+            str(filter_item.get("source") or "").strip()
+            for filter_item in filters
+            if isinstance(filter_item, dict) and str(filter_item.get("source") or "").strip()
+        }
+    )
+    filter_source = ",".join(filter_sources) if filter_sources else ("intent_filters" if filters else "none")
 
     source_grain_matches_requested = _source_grain_matches_requested(
         table_meta=table_meta,
@@ -542,11 +710,23 @@ def normalize_analytical_intent(
         raw_intent=raw_intent,
         table_meta=table_meta,
         dimensions=dimensions,
+        filters=filters,
         ranking=ranking,
         ambiguities=ambiguities,
         relationship_requested=relationship_requested,
         distribution_requested=distribution_requested,
-        preserve_time_grain_metric=bool(time_grouping_detected and source_grain_matches_requested),
+        time_grouping_detected=time_grouping_detected,
+        analytical_semantic_hints=analytical_semantic_hints,
+        preserve_time_grain_metric=source_grain_matches_requested,
+        locked_metric_columns=preselected_metric_columns,
+        metric_lock_enabled=metric_lock_enabled,
+    )
+    metrics = _bind_filter_metric_context(
+        question=question,
+        metrics=metrics,
+        filters=filters,
+        dimensions=dimensions,
+        table_meta=table_meta,
     )
     if not metrics:
         metrics = [{"column": "*", "aggregation": "COUNT", "alias": _metric_alias("COUNT", "*")}]
@@ -573,8 +753,9 @@ def normalize_analytical_intent(
         primary_metric_alias = metrics[0]["alias"]
         order_by = [{"column": primary_metric_alias, "direction": "DESC"}]
     if (time_grouping_detected or relationship_requested) and not explicit_top_n_requested:
-        limit = None
-    if time_grouping_detected and not ranking["direction"]:
+        if not composite_bucket_rank:
+            limit = None
+    if time_grouping_detected and not ranking["direction"] and not composite_bucket_rank:
         order_by = [{"column": time_dimension_alias or "period", "direction": "ASC"}]
     if relationship_requested:
         order_by = []
@@ -600,7 +781,8 @@ def normalize_analytical_intent(
         primary_intent = "time_series"
         if "time_grouping" not in operations:
             operations.append("time_grouping")
-        operations = [op for op in operations if op != "ranking"]
+        if not composite_bucket_rank:
+            operations = [op for op in operations if op != "ranking"]
     if relationship_requested and "comparison" not in operations:
         operations.append("comparison")
     ambiguities = _normalize_dimension_ambiguities(ambiguities)
@@ -624,12 +806,14 @@ def normalize_analytical_intent(
         "aggregation": aggregation_summary,
         "ranking": {
             "direction": ranking["direction"],
-            "requested": bool(ranking["direction"]),
+            "requested": bool(ranking["direction"]) or explicit_top_n_requested or composite_bucket_rank,
             "source": ranking["source"],
         },
         "order_by": order_by,
         "limit": limit,
         "time_granularity": time_granularity,
+        "time_grain_source": time_grain_source if time_grouping_detected else "none",
+        "detected_time_phrase": detected_time_phrase if time_grouping_detected else "",
         "time_column": time_column,
         "time_grouping_detected": time_grouping_detected,
         "source_grain_matches_requested": source_grain_matches_requested,
@@ -641,7 +825,23 @@ def normalize_analytical_intent(
         "kpi_allowed_without_dimension": overall_total_requested,
         "row_count_requested": _is_explicit_row_count_request(question_lower),
         "analysis_mode": "relationship" if relationship_requested else "distribution" if distribution_requested else "",
-        "reasoning_version": "semantic_ir_v1",
+        "reasoning_version": "semantic_ir_v2",
+        "grouping": build_grouping_metadata(question, time_granularity=time_granularity),
+        "filter_source": filter_source,
+        "semantic_filters": nl_semantics.get("semantic_filters", []),
+        "analytical_semantics": nl_semantics.get("analytical_semantics", []),
+        "analytical_semantic_hints": analytical_semantic_hints,
+        "temporal_semantics": {
+            **temporal_semantics,
+            "grouping": build_grouping_metadata(question, time_granularity=time_granularity),
+            "composite_temporal_superlative": composite_rank,
+        },
+        "intent_priority": intent_priority_payload.get("intent_priority", {}),
+        "semantic_reasoning": intent_priority_payload,
+        "minimal_temporal_grouping_query": minimal_temporal_query,
+        "composite_temporal_ranking": composite_bucket_rank,
+        "selected_columns_preprocessing_high": preselected_columns,
+        "metric_lock_enabled": metric_lock_enabled,
     }
 
 
@@ -655,39 +855,58 @@ def _is_overall_total_request(question_lower: str) -> bool:
     return False
 
 
-def _infer_time_granularity(question_lower: str) -> str:
-    normalized = str(question_lower or "").strip().lower()
+def detect_time_grain(question_text: str) -> dict[str, Any]:
+    normalized = str(question_text or "").strip().lower()
     if not normalized:
-        return ""
-    explicit_patterns = (
-        (r"\b(?:per|by|for each|in each|grouped by)\s+hour\b", "hour"),
-        (r"\b(?:per|by|for each|in each|grouped by)\s+day\b", "day"),
-        (r"\b(?:per|by|for each|in each|grouped by)\s+week\b", "week"),
-        (r"\b(?:per|by|for each|in each|grouped by)\s+month\b", "month"),
-        (r"\b(?:per|by|for each|in each|grouped by)\s+quarter\b", "quarter"),
-        (r"\b(?:per|by|for each|in each|grouped by)\s+year\b", "year"),
-    )
-    for pattern, granularity in explicit_patterns:
-        if re.search(pattern, normalized):
-            return granularity
+        return {
+            "has_time_grouping": False,
+            "grain": None,
+            "source": "none",
+            "matched_phrase": None,
+        }
 
-    if _is_trend_over_time_question(normalized):
-        return "day"
+    for pattern, grain, source in TIME_GRAIN_DETECTION_PATTERNS:
+        match = pattern.search(normalized)
+        if not match:
+            continue
+        return {
+            "has_time_grouping": True,
+            "grain": grain,
+            "source": source,
+            "matched_phrase": match.group(0),
+        }
 
-    # Soft inference when time concepts are present without explicit "per".
-    soft_patterns = (
-        (r"\bhourly\b|\bhour\b", "hour"),
-        (r"\bdaily\b|\bday\b", "day"),
-        (r"\bdate\b|\btime\b", "day"),
-        (r"\bweekly\b|\bweek\b", "week"),
-        (r"\bmonthly\b|\bmonth\b", "month"),
-        (r"\bquarterly\b|\bquarter\b", "quarter"),
-        (r"\byearly\b|\byear\b|\bannual\b|\bannually\b", "year"),
-    )
-    for pattern, granularity in soft_patterns:
-        if re.search(pattern, normalized):
-            return granularity
-    return ""
+    for pattern in TIME_DEFAULT_GROUPING_PATTERNS:
+        match = pattern.search(normalized)
+        if not match:
+            continue
+        return {
+            "has_time_grouping": True,
+            "grain": "day",
+            "source": "default",
+            "matched_phrase": match.group(0),
+        }
+
+    inferred_grain = infer_nl_time_granularity(normalized)
+    if inferred_grain:
+        return {
+            "has_time_grouping": True,
+            "grain": inferred_grain,
+            "source": "inferred",
+            "matched_phrase": None,
+        }
+
+    return {
+        "has_time_grouping": False,
+        "grain": None,
+        "source": "none",
+        "matched_phrase": None,
+    }
+
+
+def _infer_time_granularity(question_lower: str) -> str:
+    detected = detect_time_grain(question_lower)
+    return str(detected.get("grain") or "")
 
 
 def _is_trend_over_time_question(question_lower: str) -> bool:
@@ -704,13 +923,17 @@ def _is_trend_over_time_question(question_lower: str) -> bool:
         r"\bthrough time\b",
         r"\bacross time\b",
         r"\btime series\b",
+        r"\bgrowth\b",
+        r"\btimeline\b",
     )
     has_trend_language = any(re.search(pattern, normalized) for pattern in trend_terms)
     has_time_axis = bool(
         re.search(r"\bover\s+time\b|\bthrough\s+time\b|\bacross\s+time\b|\btime\s+series\b", normalized)
         or re.search(r"\bby\s+(?:date|time|day|week|month|quarter|year)\b", normalized)
+        or re.search(r"\b(?:during|across)\s+(?:the\s+)?(?:last|past)\b", normalized)
+        or re.search(r"\bacross\s+(?:months|years|weeks|days)\b", normalized)
     )
-    return has_trend_language and has_time_axis
+    return has_trend_language or has_time_axis
 
 
 def _select_time_column(table_meta: dict[str, Any]) -> str:
@@ -739,6 +962,8 @@ def _time_dimension_expression(*, table_meta: dict[str, Any], column_name: str, 
         or "char" in column_type
     ):
         normalized_column = f"toDate({column_name})" if not already_to_date else normalized_column
+    elif granularity != "hour" and not already_to_date:
+        normalized_column = f"toDate({column_name})"
     if granularity == "hour":
         if "string" in column_type or "fixedstring" in column_type or "varchar" in column_type or "char" in column_type:
             normalized_column = f"toDateTime({column_name})"
@@ -755,35 +980,23 @@ def _source_grain_matches_requested(
     time_grouping_detected: bool,
 ) -> bool:
     """
-    Infer whether the selected time column is already at the requested analysis grain.
+    Return true only when schema metadata explicitly declares the source grain.
 
-    This is intentionally schema-based and table-agnostic: Date columns are already
-    day-grain, while explicit week/month/quarter/year columns can satisfy matching
-    rollups without re-aggregating. Datetime/timestamp columns do not count as
-    day-grain because multiple rows per day are common.
+    A Date column describes a value's type, not table cardinality; a fact table can
+    contain many rows for the same date. Treating Date as proof of daily grain can
+    silently under-aggregate results, so names and types alone are insufficient.
     """
     if not time_grouping_detected or not time_column or not time_granularity:
         return False
 
     column_meta = table_meta.get("column_map", {}).get(time_column, {})
-    column_type = str(column_meta.get("type", "")).strip().lower()
-    column_name = str(time_column or "").strip().lower()
-
-    if time_granularity == "day":
-        if "datetime" in column_type or "timestamp" in column_type:
-            return False
-        if column_type.startswith("date") or column_name in {"ds", "date", "day"}:
-            return True
-        return column_name.endswith("_date") or column_name.endswith("_day")
-
-    grain_name_markers = {
-        "week": ("week",),
-        "month": ("month", "yyyy_mm", "year_month"),
-        "quarter": ("quarter",),
-        "year": ("year",),
-    }
-    markers = grain_name_markers.get(time_granularity, ())
-    return any(marker in column_name for marker in markers)
+    declared_grain = str(
+        column_meta.get("source_grain")
+        or column_meta.get("time_grain")
+        or column_meta.get("grain")
+        or ""
+    ).strip().lower()
+    return declared_grain == time_granularity
 
 
 def _supports_hour_granularity(*, table_meta: dict[str, Any], column_name: str) -> bool:
@@ -990,6 +1203,22 @@ def _resolve_column_name(candidate: str, columns: list[dict[str, Any]]) -> str |
         if singular_match:
             return singular_match[0]
 
+    def _token_variants_set(raw: str) -> set[str]:
+        variants: set[str] = set()
+        joined = raw.lower().strip().replace(" ", "_")
+        if len(joined) > 1:
+            variants.add(joined)
+        for part in re.findall(r"[a-z0-9_]+", joined):
+            if len(part) > 1:
+                variants |= metric_lexical_variants(part)
+        return {v for v in variants if len(v) > 1}
+
+    cand_variants = _token_variants_set(normalized_target)
+    for col in columns:
+        cn = col["name"].lower()
+        if cn in cand_variants:
+            return col["name"]
+
     target_tokens = _expand_tokens(tokenize(candidate_clean))
     best = None
     best_score = 0
@@ -1012,9 +1241,17 @@ def _resolve_column_name_with_ambiguity(
     context: str,
     ambiguities: list[dict[str, Any]],
 ) -> str | None:
-    candidate_tokens = _expand_tokens(tokenize(candidate))
+    stripped = str(candidate or "").strip()
+    if not stripped:
+        return None
+
+    direct = _resolve_column_name(stripped, columns)
+    if direct:
+        return direct
+
+    candidate_tokens = _expand_tokens(tokenize(stripped))
     if not candidate_tokens:
-        return _resolve_column_name(candidate, columns)
+        return None
 
     scored: list[tuple[str, int]] = []
     for col in columns:
@@ -1034,8 +1271,9 @@ def _resolve_column_name_with_ambiguity(
                 }
             )
             return scored[0][0]
+        return scored[0][0]
 
-    return _resolve_column_name(candidate, columns)
+    return None
 
 
 def _expand_tokens(tokens: set[str]) -> set[str]:
@@ -1045,12 +1283,61 @@ def _expand_tokens(tokens: set[str]) -> set[str]:
             expanded.add(token[:-3] + "y")
         if token.endswith("s") and len(token) > 3:
             expanded.add(token[:-1])
+        if len(token) > 2:
+            expanded |= metric_lexical_variants(token)
     return expanded
 
 
+def _contains_keyword_or_phrase(question_lower: str, keyword: str) -> bool:
+    normalized_question = str(question_lower or "").strip().lower()
+    normalized_keyword = str(keyword or "").strip().lower()
+    if not normalized_question or not normalized_keyword:
+        return False
+    pattern = re.compile(
+        rf"(?<![a-z0-9_]){re.escape(normalized_keyword)}(?![a-z0-9_])",
+        flags=re.IGNORECASE,
+    )
+    return bool(pattern.search(normalized_question))
+
+
+def _has_any_keyword_or_phrase(question_lower: str, keywords: tuple[str, ...]) -> bool:
+    return any(_contains_keyword_or_phrase(question_lower, keyword) for keyword in keywords)
+
+
+def _looks_temporal_metric_column_name(column_name: str) -> bool:
+    tokens = tokenize(column_name)
+    if not tokens:
+        return False
+    expanded = _expand_tokens(tokens)
+    if expanded <= TEMPORAL_BUCKET_TOKENS:
+        return True
+    lowered = str(column_name or "").strip().lower()
+    if lowered in TEMPORAL_BUCKET_TOKENS:
+        return True
+    if lowered in {"created_at", "updated_at", "event_time", "event_date"}:
+        return True
+    return False
+
+
+def _is_minimal_temporal_grouping_query(question_lower: str) -> bool:
+    normalized = str(question_lower or "").strip().lower()
+    if not normalized:
+        return False
+    if re.search(r"\b(?:by|per|group(?:ed)?\s+by|for each|in each)\s+(?:hour|day|week|month|quarter|year)\b", normalized):
+        return True
+    if re.search(r"\b(?:hourly|daily|weekly|monthly|quarterly|yearly|annually)\b", normalized):
+        return True
+    return False
+
+
 def _detect_rank_direction(question_lower: str) -> str | None:
-    has_desc = any(keyword in question_lower for keyword in DESC_RANK_KEYWORDS)
-    has_asc = any(keyword in question_lower for keyword in ASC_RANK_KEYWORDS)
+    normalized = str(question_lower or "").strip().lower()
+    if not normalized:
+        return None
+    # Filter-threshold comparators (at least/at most) should not trigger ranking.
+    normalized = re.sub(r"\b(?:at least|at most|no less than|no more than)\b", " ", normalized)
+    has_desc = _has_any_keyword_or_phrase(normalized, DESC_RANK_KEYWORDS)
+    has_asc = _has_any_keyword_or_phrase(normalized, ASC_RANK_KEYWORDS)
     if has_desc and has_asc:
         # In mixed phrasing (e.g. "top ... worst"), explicit low-end terms should win.
         return "ASC"
@@ -1105,15 +1392,15 @@ def _infer_ranking(*, question_lower: str, raw_intent: dict[str, Any]) -> dict[s
         "explicit_limit_requested": explicit_limit_requested,
     }
 def _detect_explicit_aggregation(question_lower: str) -> str | None:
-    if any(k in question_lower for k in AVG_KEYWORDS):
+    if _has_any_keyword_or_phrase(question_lower, AVG_KEYWORDS):
         return "AVG"
-    if any(k in question_lower for k in COUNT_KEYWORDS):
+    if _has_any_keyword_or_phrase(question_lower, COUNT_KEYWORDS):
         return "COUNT"
-    if any(k in question_lower for k in SUM_KEYWORDS):
+    if _has_any_keyword_or_phrase(question_lower, SUM_KEYWORDS):
         return "SUM"
-    if any(k in question_lower for k in MAX_KEYWORDS):
+    if _has_any_keyword_or_phrase(question_lower, MAX_KEYWORDS):
         return "MAX"
-    if any(k in question_lower for k in MIN_KEYWORDS):
+    if _has_any_keyword_or_phrase(question_lower, MIN_KEYWORDS):
         return "MIN"
     return None
 
@@ -1171,7 +1458,7 @@ def _aggregation_for_ranking(column_name: str, question_lower: str, has_dimensio
 def _has_grouping_intent(question_lower: str) -> bool:
     return bool(
         re.search(
-            r"\b(by|per|across|for each|in each|top|bottom|highest|lowest|largest|smallest|best|worst)\b",
+            r"\b(by|per|across|for each|in each|top|bottom|highest|lowest|largest|smallest|best|worst|group\s+by)\b",
             question_lower,
         )
     )
@@ -1187,8 +1474,9 @@ def _metric_alias(aggregation: str | None, column: str) -> str:
 
 
 def _score_metric_column(column_name: str, question_tokens: set[str]) -> int:
-    col_tokens = tokenize(column_name)
-    score = len(col_tokens & question_tokens) * 4
+    col_tokens = _expand_tokens(tokenize(column_name))
+    question_token_variants = _expand_tokens(set(question_tokens))
+    score = len(col_tokens & question_token_variants) * 4
 
     if "_id" in column_name.lower() or _looks_identifier_like(column_name):
         score -= 2
@@ -1196,6 +1484,8 @@ def _score_metric_column(column_name: str, question_tokens: set[str]) -> int:
         score += 1
     if _looks_additive(column_name):
         score += 1
+    if _looks_temporal_metric_column_name(column_name):
+        score -= 1
 
     return score
 
@@ -1204,14 +1494,20 @@ def _extract_metric_hints_from_question(question: str) -> list[str]:
     question_lower = question.lower()
     hints: list[str] = []
 
+    for joined in extract_conjoined_metric_phrases(question):
+        cleaned = _clean_metric_hint(joined)
+        if cleaned:
+            hints.append(cleaned)
+
     select_match = re.search(
-        r"\b(?:show|list|display|give|compare|what is|what are|which)\s+(.+?)(?:\s+\bby\b|\s+\bwhere\b|\s+\bin\b|\s+\bwith\b|$)",
+        r"\b(?:show|list|display|give|compare|compared|comparing|what is|what are|which)\s+(.+?)(?:\s+\bby\b|\s+\bwhere\b|\s+\bin\b|\s+\bwith\b|$)",
         question_lower,
     )
     if select_match:
         projected_part = select_match.group(1)
         projected_part = re.sub(
-            r"\b(the|a|an|all|total|overall|top\s+\d+|bottom\s+\d+|trend|relationship|between|over\s+time)\b",
+            r"\b(the|a|an|all|total|overall|top\s+\d+|bottom\s+\d+|trend|relationship|between|over\s+time|"
+            r"generated|produces?|produced|performing|performance|increases?|decreases?|growth)\b",
             " ",
             projected_part,
         )
@@ -1220,15 +1516,29 @@ def _extract_metric_hints_from_question(question: str) -> list[str]:
             if hint and hint not in {"the", "a", "an"}:
                 hints.append(hint)
 
-    by_match = re.search(
-        r"\bby\s+([a-z_][a-z0-9_ ]+?)(?:\s+\bwhere\b|\s+\bwith\b|\s+\bin\b|$)",
+    # Ranking pattern: metric commonly appears after "by".
+    if re.search(r"\b(?:top|bottom)\s+\d+\b", question_lower) or re.search(
+        r"\b(?:highest|lowest|largest|smallest|best|worst|most|least)\b",
+        question_lower,
+    ):
+        by_match = re.search(
+            r"\bby\s+([a-z_][a-z0-9_ ]+?)(?:\s+\bwhere\b|\s+\bwith\b|\s+\bin\b|$)",
+            question_lower,
+        )
+        if by_match:
+            for chunk in re.split(r"\band\b|,", by_match.group(1)):
+                hint = _clean_metric_hint(chunk.strip())
+                if hint:
+                    hints.append(hint)
+
+    leading_metric_match = re.search(
+        r"^\s*([a-z_][a-z0-9_ ]+?)\s+(?:by|per|across)\s+([a-z_][a-z0-9_ ]+?)(?:\s+\bwhere\b|\s+\bwith\b|\s+\bin\b|$)",
         question_lower,
     )
-    if by_match:
-        for chunk in re.split(r"\band\b|,", by_match.group(1)):
-            hint = _clean_metric_hint(chunk.strip())
-            if hint:
-                hints.append(hint)
+    if leading_metric_match and not re.search(r"^\s*(?:top|bottom)\s+\d+\b", question_lower):
+        leading_metric = _clean_metric_hint(leading_metric_match.group(1).strip())
+        if leading_metric:
+            hints.append(leading_metric)
 
     rank_metric_match = re.search(
         r"\b(?:highest|lowest|largest|smallest|best|worst)\s+([a-z_][a-z0-9_ ]+)\b",
@@ -1239,7 +1549,29 @@ def _extract_metric_hints_from_question(question: str) -> list[str]:
         if hint:
             hints.append(hint)
 
-    return hints
+    noun_phrase_match = re.search(
+        r"^\s*([a-z_][a-z0-9_ ]+?)\s+(?:by|per|over|across)\s+"
+        r"(?:hour|day|week|month|quarter|year|time|date)\b",
+        question_lower,
+    )
+    if noun_phrase_match:
+        noun_phrase = re.sub(
+            r"\b(growth|trend|trends|increase|increases|decrease|decreases|generated|produced|performing|performance)\b",
+            " ",
+            noun_phrase_match.group(1),
+        )
+        hint = _clean_metric_hint(noun_phrase.strip())
+        if hint:
+            hints.append(hint)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for hint in hints:
+        key = hint.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(hint)
+    return deduped
 
 
 def _iter_raw_metric_candidates(raw_intent: dict[str, Any]) -> list[tuple[str, str | None]]:
@@ -1273,13 +1605,24 @@ def _infer_metrics(
     raw_intent: dict[str, Any],
     table_meta: dict[str, Any],
     dimensions: list[str],
+    filters: list[dict[str, Any]] | None,
     ranking: dict[str, Any],
     ambiguities: list[dict[str, Any]],
     relationship_requested: bool,
     distribution_requested: bool,
+    time_grouping_detected: bool = False,
+    analytical_semantic_hints: dict[str, Any] | None = None,
     preserve_time_grain_metric: bool = False,
+    locked_metric_columns: list[str] | None = None,
+    metric_lock_enabled: bool = False,
 ) -> list[dict[str, Any]]:
     question_lower = question.lower()
+    semantic_hints = analytical_semantic_hints if isinstance(analytical_semantic_hints, dict) else {}
+    semantic_operations = {
+        str(op).strip().lower()
+        for op in semantic_hints.get("semantic_operations", [])
+        if str(op).strip()
+    }
     if relationship_requested:
         relationship_metrics = _infer_relationship_metrics(
             question=question,
@@ -1304,6 +1647,12 @@ def _infer_metrics(
 
     numeric_columns = table_meta["numeric_columns"]
     all_columns = table_meta["columns"]
+    filter_metric_candidates = [
+        str(filter_item.get("column", "")).strip()
+        for filter_item in (filters or [])
+        if isinstance(filter_item, dict)
+        and str(filter_item.get("column", "")).strip() in numeric_columns
+    ]
 
     if distribution_requested:
         # Distribution should project one numeric series without aggregation.
@@ -1329,6 +1678,18 @@ def _infer_metrics(
 
     metric_candidates: list[tuple[str, str | None]] = []
     seen_columns: set[str] = set()
+    locked_columns = [
+        str(column).strip()
+        for column in (locked_metric_columns or [])
+        if str(column).strip() and str(column).strip() in numeric_columns
+    ]
+    locked_column_set = set(locked_columns)
+
+    if metric_lock_enabled and locked_columns:
+        for locked_column in locked_columns:
+            if locked_column not in seen_columns:
+                metric_candidates.append((locked_column, None))
+                seen_columns.add(locked_column)
 
     for raw_column, raw_agg in _iter_raw_metric_candidates(raw_intent):
         resolved = _resolve_column_name_with_ambiguity(
@@ -1337,6 +1698,8 @@ def _infer_metrics(
             context="metric",
             ambiguities=ambiguities,
         )
+        if metric_lock_enabled and locked_column_set and resolved and resolved not in locked_column_set:
+            continue
         if resolved and resolved not in seen_columns:
             metric_candidates.append((resolved, raw_agg))
             seen_columns.add(resolved)
@@ -1355,6 +1718,8 @@ def _infer_metrics(
             context="metric",
             ambiguities=ambiguities,
         )
+        if metric_lock_enabled and locked_column_set and resolved and resolved not in locked_column_set:
+            continue
         if resolved:
             resolved_any_hints.append(resolved)
         if resolved and resolved not in seen_columns and resolved in numeric_columns:
@@ -1372,14 +1737,40 @@ def _infer_metrics(
             metric_candidates.append(("*", "COUNT"))
 
     if not metric_candidates:
+        if metric_lock_enabled and locked_columns:
+            for locked_column in locked_columns:
+                if locked_column not in seen_columns:
+                    metric_candidates.append((locked_column, None))
+                    seen_columns.add(locked_column)
+
+    if not metric_candidates:
+        for filter_column in filter_metric_candidates:
+            if filter_column and filter_column not in seen_columns:
+                if metric_lock_enabled and locked_column_set and filter_column not in locked_column_set:
+                    continue
+                metric_candidates.append((filter_column, None))
+                seen_columns.add(filter_column)
+
+    if not metric_candidates:
         if resolved_any_hints and explicit_agg is None:
             for resolved_hint in resolved_any_hints:
                 if resolved_hint not in seen_columns:
                     metric_candidates.append((resolved_hint, None))
                     seen_columns.add(resolved_hint)
         if numeric_columns:
+            numeric_fallback_pool = list(numeric_columns)
+            if metric_lock_enabled and locked_columns:
+                numeric_fallback_pool = [column for column in numeric_fallback_pool if column in locked_column_set]
+                if not numeric_fallback_pool:
+                    numeric_fallback_pool = list(locked_columns)
+            if time_grouping_detected:
+                non_temporal_numeric = [
+                    col_name for col_name in numeric_fallback_pool if not _looks_temporal_metric_column_name(col_name)
+                ]
+                if non_temporal_numeric:
+                    numeric_fallback_pool = non_temporal_numeric
             scored = sorted(
-                numeric_columns,
+                numeric_fallback_pool,
                 key=lambda col: _score_metric_column(col, question_tokens),
                 reverse=True,
             )
@@ -1392,7 +1783,7 @@ def _infer_metrics(
     metrics: list[dict[str, Any]] = []
     for metric_column, raw_agg in metric_candidates:
         aggregation: str | None = explicit_agg
-        if preserve_time_grain_metric and aggregation in {"SUM", "AVG"}:
+        if preserve_time_grain_metric and aggregation == "SUM":
             aggregation = None
 
         if (
@@ -1413,7 +1804,7 @@ def _infer_metrics(
 
         if aggregation is None and raw_agg in VALID_AGGREGATIONS:
             aggregation = raw_agg
-            if preserve_time_grain_metric and aggregation in {"SUM", "AVG"}:
+            if preserve_time_grain_metric and aggregation == "SUM":
                 aggregation = None
             if (
                 raw_agg == "SUM"
@@ -1440,6 +1831,19 @@ def _infer_metrics(
                     aggregation = None
             else:
                 aggregation = None
+
+        if (
+            time_grouping_detected
+            and not preserve_time_grain_metric
+            and aggregation is None
+            and "distribution" not in semantic_operations
+        ):
+            if metric_column == "*":
+                aggregation = "COUNT"
+            elif metric_column in numeric_columns:
+                aggregation = "AVG" if (_is_rate_like(metric_column) or _is_avg_like(metric_column)) else "SUM"
+            else:
+                aggregation = "COUNT"
 
         if (
             aggregation == "COUNT"
@@ -1470,6 +1874,58 @@ def _infer_metrics(
         metrics.append({"column": metric_column, "aggregation": aggregation, "alias": alias})
 
     return metrics
+
+
+def _bind_filter_metric_context(
+    *,
+    question: str,
+    metrics: list[dict[str, Any]],
+    filters: list[dict[str, Any]],
+    dimensions: list[str],
+    table_meta: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not metrics or not filters:
+        return metrics
+
+    explicit_metric_hints = _extract_metric_hints_from_question(question)
+    if explicit_metric_hints:
+        return metrics
+
+    numeric_columns = set(table_meta.get("numeric_columns", []))
+    filter_columns = [
+        str(filter_item.get("column", "")).strip()
+        for filter_item in filters
+        if isinstance(filter_item, dict)
+        and str(filter_item.get("column", "")).strip()
+    ]
+    if not filter_columns:
+        return metrics
+
+    bound_column = next((column for column in filter_columns if column in numeric_columns), filter_columns[0])
+    if not bound_column:
+        return metrics
+
+    existing_metric_columns = [
+        str(metric.get("column", "")).strip()
+        for metric in metrics
+        if isinstance(metric, dict)
+    ]
+    if bound_column in existing_metric_columns:
+        return metrics
+
+    aggregation: str | None = None
+    if dimensions:
+        if bound_column in numeric_columns:
+            aggregation = "SUM"
+        else:
+            aggregation = "COUNT"
+
+    bound_metric = {
+        "column": bound_column,
+        "aggregation": aggregation,
+        "alias": _metric_alias(aggregation, bound_column),
+    }
+    return [bound_metric, *metrics]
 def _clean_dimension_phrase(phrase: str) -> str:
     tokens = [t for t in re.findall(r"[a-z0-9_]+", phrase.lower()) if t not in LANGUAGE_STOP_TOKENS]
     return " ".join(tokens[:4])
@@ -1650,6 +2106,162 @@ def _resolve_filter_column(
     return None
 
 
+def _resolve_numeric_filter_column(
+    *,
+    candidate_column: str,
+    all_columns: list[dict[str, Any]],
+    column_map: dict[str, dict[str, Any]],
+    preferred_numeric_columns: list[str],
+    ambiguities: list[dict[str, Any]],
+) -> str | None:
+    preferred_column_defs = [
+        column_map[column_name]
+        for column_name in preferred_numeric_columns
+        if column_name in column_map
+    ]
+    if candidate_column and preferred_column_defs:
+        preferred_match = _resolve_column_name_with_ambiguity(
+            candidate=candidate_column,
+            columns=preferred_column_defs,
+            context="filter",
+            ambiguities=ambiguities,
+        )
+        if preferred_match and column_map.get(preferred_match, {}).get("is_numeric"):
+            return preferred_match
+
+    resolved = _resolve_filter_column(
+        candidate_column,
+        all_columns,
+        column_map,
+        require_numeric=True,
+        ambiguities=ambiguities,
+    )
+    if resolved:
+        return resolved
+
+    if not candidate_column and len(preferred_numeric_columns) == 1:
+        return preferred_numeric_columns[0]
+    return None
+
+
+def _numeric_filter_source_text(match: re.Match[str], *, include_column: bool = False) -> str:
+    full = str(match.group(0) or "").strip()
+    if include_column:
+        return full
+    try:
+        raw_column = str(match.group(1) or "")
+    except IndexError:
+        raw_column = ""
+    if raw_column and full.lower().startswith(raw_column.lower()):
+        return full[len(raw_column):].strip()
+    return full
+
+
+def detect_numeric_filters(
+    question_text: str,
+    selected_columns: list[str],
+    schema_columns: list[dict[str, Any]],
+    *,
+    ambiguities: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    question_lower = str(question_text or "").strip().lower()
+    if not question_lower:
+        return []
+
+    ambiguity_list = ambiguities if isinstance(ambiguities, list) else []
+    all_columns = [column for column in schema_columns if isinstance(column, dict)]
+    column_map = {
+        str(column.get("name", "")).strip(): column
+        for column in all_columns
+        if str(column.get("name", "")).strip()
+    }
+    preferred_numeric_columns = [
+        str(column_name).strip()
+        for column_name in selected_columns
+        if str(column_name).strip()
+        and str(column_name).strip() in column_map
+        and bool(column_map[str(column_name).strip()].get("is_numeric"))
+    ]
+
+    filters: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for pattern in BETWEEN_FILTER_PATTERNS:
+        for match in re.finditer(pattern, question_lower):
+            candidate_column = match.group(1).strip()
+            column = _resolve_numeric_filter_column(
+                candidate_column=candidate_column,
+                all_columns=all_columns,
+                column_map=column_map,
+                preferred_numeric_columns=preferred_numeric_columns,
+                ambiguities=ambiguity_list,
+            )
+            if not column:
+                continue
+            low = _normalize_numeric_filter_value(match.group(2).strip())
+            high = _normalize_numeric_filter_value(match.group(3).strip())
+            fingerprint = (column, "BETWEEN", f"{low}|{high}")
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            filters.append(
+                {
+                    "column": column,
+                    "operator": "BETWEEN",
+                    "value": [low, high],
+                    "source_text": _numeric_filter_source_text(match),
+                    "source": "numeric_pattern",
+                }
+            )
+
+    for pattern_item in NUMERIC_FILTER_PATTERNS:
+        pattern = pattern_item["pattern"]
+        default_operator = pattern_item["operator"]
+        captures_operator = bool(pattern_item["captures_operator"])
+        for match in re.finditer(pattern, question_lower):
+            candidate_column = match.group(1).strip()
+            if captures_operator:
+                raw_operator = match.group(2).strip()
+                if raw_operator in {"=>", ">="}:
+                    normalized_operator = ">="
+                elif raw_operator in {"=<", "<="}:
+                    normalized_operator = "<="
+                elif raw_operator in {"==", "="}:
+                    normalized_operator = "="
+                else:
+                    normalized_operator = default_operator
+                raw_value = match.group(3).strip()
+            else:
+                normalized_operator = default_operator
+                raw_value = match.group(2).strip()
+
+            column = _resolve_numeric_filter_column(
+                candidate_column=candidate_column,
+                all_columns=all_columns,
+                column_map=column_map,
+                preferred_numeric_columns=preferred_numeric_columns,
+                ambiguities=ambiguity_list,
+            )
+            if not column:
+                continue
+            value = _normalize_numeric_filter_value(raw_value)
+            fingerprint = (column, normalized_operator, str(value))
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            filters.append(
+                {
+                    "column": column,
+                    "operator": normalized_operator,
+                    "value": value,
+                    "source_text": _numeric_filter_source_text(match),
+                    "source": "numeric_pattern",
+                }
+            )
+
+    return filters
+
+
 def _normalize_filters(
     question: str,
     raw_intent: dict[str, Any],
@@ -1661,12 +2273,18 @@ def _normalize_filters(
     all_columns = table_meta["columns"]
     column_map = table_meta["column_map"]
     seen: set[tuple[str, str, str]] = set()
+    selected_columns = _extract_preselected_columns(raw_intent, table_meta)
+    selected_numeric_columns = [
+        column_name
+        for column_name in selected_columns
+        if column_name in column_map and bool(column_map[column_name].get("is_numeric"))
+    ]
 
     for filter_item in raw_intent.get("filters", []) or []:
         if not isinstance(filter_item, dict):
             continue
         column = _resolve_column_name_with_ambiguity(
-            candidate=str(filter_item.get("column", "")),
+            candidate=str(filter_item.get("column", "") or filter_item.get("metric", "")),
             columns=all_columns,
             context="filter",
             ambiguities=ambiguities,
@@ -1695,68 +2313,74 @@ def _normalize_filters(
         if fingerprint in seen:
             continue
         seen.add(fingerprint)
-        filters.append({"column": column, "operator": operator, "value": value})
+        filters.append(
+            {
+                "column": column,
+                "operator": operator,
+                "value": value,
+                "source_text": str(filter_item.get("source_text") or "").strip(),
+                "source": "intent_filters",
+            }
+        )
+
+    for sf in raw_intent.get("semantic_filters") or []:
+        if not isinstance(sf, dict):
+            continue
+        hint = str(sf.get("column") or sf.get("metric") or sf.get("metric_hint") or "").strip()
+        operator = str(sf.get("operator") or ">").strip().upper()
+        value = sf.get("value")
+        if not hint or value is None or operator not in VALID_FILTER_OPERATORS:
+            continue
+        column = _resolve_numeric_filter_column(
+            candidate_column=hint,
+            all_columns=all_columns,
+            column_map=column_map,
+            preferred_numeric_columns=selected_numeric_columns,
+            ambiguities=ambiguities,
+        )
+        if not column:
+            continue
+        fingerprint = (column, operator, str(value))
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        filters.append(
+            {
+                "column": column,
+                "operator": operator,
+                "value": value,
+                "source_text": str(sf.get("source_text") or sf.get("phrase") or "").strip(),
+                "source": "semantic_filters",
+            }
+        )
 
     question_lower = question.lower()
-
-    for pattern in BETWEEN_FILTER_PATTERNS:
-        for match in re.finditer(pattern, question_lower):
-            candidate_column = match.group(1).strip()
-            column = _resolve_filter_column(
-                candidate_column,
-                all_columns,
-                column_map,
-                require_numeric=True,
-                ambiguities=ambiguities,
-            )
-            if not column:
-                continue
-            low = _normalize_numeric_filter_value(match.group(2).strip())
-            high = _normalize_numeric_filter_value(match.group(3).strip())
-            low_fingerprint = (column, ">=", str(low))
-            high_fingerprint = (column, "<=", str(high))
-            if low_fingerprint not in seen:
-                seen.add(low_fingerprint)
-                filters.append({"column": column, "operator": ">=", "value": low})
-            if high_fingerprint not in seen:
-                seen.add(high_fingerprint)
-                filters.append({"column": column, "operator": "<=", "value": high})
-
-    for pattern_item in NUMERIC_FILTER_PATTERNS:
-        pattern = pattern_item["pattern"]
-        default_operator = pattern_item["operator"]
-        captures_operator = bool(pattern_item["captures_operator"])
-        for match in re.finditer(pattern, question_lower):
-            candidate_column = match.group(1).strip()
-            if captures_operator:
-                raw_operator = match.group(2).strip()
-                if raw_operator in {"=>", ">="}:
-                    normalized_operator = ">="
-                elif raw_operator in {"=<", "<="}:
-                    normalized_operator = "<="
-                elif raw_operator in {"==", "="}:
-                    normalized_operator = "="
-                else:
-                    normalized_operator = default_operator
-                raw_value = match.group(3).strip()
-            else:
-                normalized_operator = default_operator
-                raw_value = match.group(2).strip()
-            column = _resolve_filter_column(
-                candidate_column,
-                all_columns,
-                column_map,
-                require_numeric=True,
-                ambiguities=ambiguities,
-            )
-            if not column:
-                continue
-            value = _normalize_numeric_filter_value(raw_value)
-            fingerprint = (column, normalized_operator, str(value))
-            if fingerprint in seen:
-                continue
-            seen.add(fingerprint)
-            filters.append({"column": column, "operator": normalized_operator, "value": value})
+    for detected_filter in detect_numeric_filters(
+        question_text=question_lower,
+        selected_columns=selected_columns,
+        schema_columns=all_columns,
+        ambiguities=ambiguities,
+    ):
+        if not isinstance(detected_filter, dict):
+            continue
+        column = str(detected_filter.get("column") or "").strip()
+        operator = str(detected_filter.get("operator") or "").strip().upper()
+        value = detected_filter.get("value")
+        if not column or value is None or operator not in VALID_FILTER_OPERATORS:
+            continue
+        fingerprint = (
+            column,
+            operator,
+            (
+                f"{value[0]}|{value[1]}"
+                if operator == "BETWEEN" and isinstance(value, (list, tuple)) and len(value) == 2
+                else str(value)
+            ),
+        )
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        filters.append(detected_filter)
 
     for pattern in TEXT_FILTER_PATTERNS:
         for match in re.finditer(pattern, question_lower):
@@ -1783,7 +2407,15 @@ def _normalize_filters(
             if fingerprint in seen:
                 continue
             seen.add(fingerprint)
-            filters.append({"column": column, "operator": "=", "value": normalized_value})
+            filters.append(
+                {
+                    "column": column,
+                    "operator": "=",
+                    "value": normalized_value,
+                    "source_text": _numeric_filter_source_text(match, include_column=True),
+                    "source": "text_pattern",
+                }
+            )
 
     for pattern in TEXT_CONTAINS_PATTERNS:
         for match in re.finditer(pattern, question_lower):
@@ -1806,7 +2438,44 @@ def _normalize_filters(
             if fingerprint in seen:
                 continue
             seen.add(fingerprint)
-            filters.append({"column": column, "operator": "LIKE", "value": like_value})
+            filters.append(
+                {
+                    "column": column,
+                    "operator": "LIKE",
+                    "value": like_value,
+                    "source_text": _numeric_filter_source_text(match, include_column=True),
+                    "source": "text_pattern",
+                }
+            )
+
+    for nl_filter in extract_semantic_filters(question):
+        operator = str(nl_filter.get("operator") or ">").strip().upper()
+        value = nl_filter.get("value")
+        hint = str(nl_filter.get("metric_hint") or nl_filter.get("left_context") or "").strip()
+        if value is None or operator not in VALID_FILTER_OPERATORS:
+            continue
+        column = _resolve_numeric_filter_column(
+            candidate_column=hint,
+            all_columns=all_columns,
+            column_map=column_map,
+            preferred_numeric_columns=selected_numeric_columns,
+            ambiguities=ambiguities,
+        )
+        if not column:
+            continue
+        fingerprint = (column, operator, str(value))
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        filters.append(
+            {
+                "column": column,
+                "operator": operator,
+                "value": value,
+                "source_text": str(nl_filter.get("phrase") or "").strip(),
+                "source": "semantic_nl",
+            }
+        )
 
     return filters
 
@@ -1875,6 +2544,8 @@ def _derive_operations(
         operations.append("grouping")
     if filters:
         operations.append("filtering")
+    if order_by:
+        operations.append("sorting")
     if ranking_requested:
         operations.append("ranking")
     if limit:
@@ -1889,6 +2560,8 @@ def _derive_operations(
         operations.append("distribution")
     if time_grouping_detected:
         operations.append("time_grouping")
+    if len(metrics) > 1:
+        operations.append("multi_metric")
 
     return operations
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { CheckCircle, XCircle, UserPlus, Loader2 } from 'lucide-react'
 import { workspaceAPI } from '../../api/endpoints'
@@ -19,21 +19,10 @@ function AcceptInvite() {
   const [invitedEmail, setInvitedEmail] = useState('')
   const [invitedRole, setInvitedRole] = useState('')
 
-  useEffect(() => {
-    if (token) {
-      acceptInvitation()
-    } else {
-      setStatus('error')
-      setMessage('No invitation token provided')
-    }
-  }, [token])
-
-  const acceptInvitation = async () => {
+  const acceptInvitation = useCallback(async () => {
     try {
       setStatus('loading')
-      console.log('Attempting to accept invitation with token:', token)
       const response = await workspaceAPI.acceptInvitation(token)
-      console.log('Accept invitation response:', response.data)
       
       // === CASE A: Existing user - redirect to LOGIN ===
       if (response.data.success && response.data.need_login) {
@@ -54,8 +43,6 @@ function AcceptInvite() {
         const role = response.data.role
         const invitation_token = response.data.invitation_token
         const workspaceName = response.data.workspace?.name || 'workspace'
-        
-        console.log('Redirecting to signup:', { email, role, invitation_token })
         
         // Store data in state
         setInvitedEmail(email)
@@ -118,7 +105,16 @@ function AcceptInvite() {
         toast.error(errorMsg)
       }
     }
-  }
+  }, [navigate, token])
+
+  useEffect(() => {
+    if (token) {
+      acceptInvitation()
+    } else {
+      setStatus('error')
+      setMessage('No invitation token provided')
+    }
+  }, [acceptInvitation, token])
 
   if (!token) {
     return (
@@ -126,8 +122,8 @@ function AcceptInvite() {
         <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
           <XCircle className="w-8 h-8 text-red-600" />
         </div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-3">Invalid Invitation</h2>
-        <p className="text-gray-600 mb-6">No invitation token was provided.</p>
+        <h2 className="text-2xl font-bold text-white mb-3">Invalid Invitation</h2>
+        <p className="text-[var(--c-muted)] mb-6">No invitation token was provided.</p>
         <Link to="/">
           <Button fullWidth>Back to Home</Button>
         </Link>
@@ -148,11 +144,11 @@ function AcceptInvite() {
     <div className="card text-center">
       {status === 'loading' && (
         <>
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-primary-100 rounded-full mb-4">
-            <Loader2 className="w-8 h-8 text-primary-600 animate-spin" />
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-700/30 rounded-full mb-4">
+            <Loader2 className="w-8 h-8 text-brand-500 animate-spin" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Processing Invitation</h2>
-          <p className="text-gray-600">Please wait while we process your workspace invitation...</p>
+          <h2 className="text-2xl font-bold text-white mb-3">Processing Invitation</h2>
+          <p className="text-[var(--c-muted)]">Please wait while we process your workspace invitation...</p>
         </>
       )}
 
@@ -161,8 +157,8 @@ function AcceptInvite() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
             <CheckCircle className="w-8 h-8 text-green-600" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Invitation Accepted!</h2>
-          <p className="text-gray-600 mb-2">{message}</p>
+          <h2 className="text-2xl font-bold text-white mb-3">Invitation Accepted!</h2>
+          <p className="text-[var(--c-muted)] mb-2">{message}</p>
           {workspaceInfo && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 mt-4">
               <p className="text-sm text-green-800">
@@ -172,7 +168,7 @@ function AcceptInvite() {
           )}
           {isAuthenticated ? (
             <>
-              <p className="text-sm text-gray-500 mb-6">
+              <p className="text-sm text-brand-300/80 mb-6">
                 Redirecting to dashboard...
               </p>
               <Link to="/dashboard/members">
@@ -181,7 +177,7 @@ function AcceptInvite() {
             </>
           ) : (
             <>
-              <p className="text-sm text-gray-500 mb-6">
+              <p className="text-sm text-brand-300/80 mb-6">
                 Redirecting to login page...
               </p>
               <Link to="/login?workspace_joined=true">
@@ -194,29 +190,29 @@ function AcceptInvite() {
 
       {status === 'signup_required' && (
         <>
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
-            <UserPlus className="w-8 h-8 text-blue-600" />
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-700/30 rounded-full mb-4">
+            <UserPlus className="w-8 h-8 text-brand-500" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Sign Up Required</h2>
-          <p className="text-gray-600 mb-4">{message}</p>
+          <h2 className="text-2xl font-bold text-white mb-3">Sign Up Required</h2>
+          <p className="text-[var(--c-muted)] mb-4">{message}</p>
           {workspaceInfo && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-blue-800 mb-2">
+            <div className="bg-brand-900/30 border border-brand-700/40 rounded-lg p-4 mb-6">
+              <p className="text-sm text-brand-200 mb-2">
                 <strong>Invited to:</strong> {workspaceInfo.name}
               </p>
               {invitedEmail && (
-                <p className="text-sm text-blue-800 mb-1">
+                <p className="text-sm text-brand-200 mb-1">
                   <strong>Email:</strong> {invitedEmail}
                 </p>
               )}
               {invitedRole && (
-                <p className="text-sm text-blue-800">
+                <p className="text-sm text-brand-200">
                   <strong>Role:</strong> {invitedRole.charAt(0).toUpperCase() + invitedRole.slice(1)}
                 </p>
               )}
             </div>
           )}
-          <p className="text-sm text-gray-600 mb-6">
+          <p className="text-sm text-[var(--c-muted)] mb-6">
             Please create an account to accept this invitation and join the workspace.
           </p>
           <div className="space-y-3">
@@ -238,8 +234,8 @@ function AcceptInvite() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
             <XCircle className="w-8 h-8 text-red-600" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Invitation Failed</h2>
-          <p className="text-gray-600 mb-6">{message}</p>
+          <h2 className="text-2xl font-bold text-white mb-3">Invitation Failed</h2>
+          <p className="text-[var(--c-muted)] mb-6">{message}</p>
           <div className="space-y-3">
             <Link to="/login">
               <Button fullWidth>Go to Login</Button>

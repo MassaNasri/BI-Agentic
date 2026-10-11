@@ -30,6 +30,7 @@ from shared.utils.metrics import ROWS_PROCESSED, ERRORS_TOTAL, PROCESS_LATENCY, 
 from shared.utils.health_server import start_health_server
 from shared.utils.lineage_tracker import LineageTracker
 from shared.utils.db_type_utils import normalize_db_type
+from shared.connectors import ConnectorError, normalize_snapshot_row, safe_connector_error
 from shared.models.lineage import LineageRecord
 from shared.utils.tracing import configure_tracing, get_tracer, set_trace_id_from_span
 from shared.utils.schema_contract_store import build_schema_contract_store_from_env
@@ -40,6 +41,19 @@ from .database_extraction_strategy import DatabaseExtractionStrategy
 from .extraction_strategy import ExtractionConfig
 
 logger = logging.getLogger(__name__)
+
+
+def database_table_source(scope_fields, database_name, schema, table):
+    """Create a tenant/dataset-qualified source name consumed by the loader."""
+    parts = [
+        f"w{scope_fields.get('workspace_id')}",
+        f"d{scope_fields.get('dataset_id')}",
+        str(database_name or "database"),
+    ]
+    if schema:
+        parts.append(str(schema))
+    parts.append(str(table))
+    return "_".join(parts)
 
 configure_logging()
 configure_tracing("extractor-service")
@@ -149,6 +163,15 @@ class ConnectionListener:
         except Exception as exc:
             logger.warning("[EXTRACTOR] Lineage write failed and was skipped: %s", exc)
 
+    def _safe_record_lineage_batch(self, records: List[LineageRecord]) -> None:
+        """Write lineage once per extracted batch instead of once per row."""
+        if not self.lineage_tracker or not records:
+            return
+        try:
+            self.lineage_tracker.record_transformations(records)
+        except Exception as exc:
+            logger.warning("[EXTRACTOR] Batch lineage write failed and was skipped: %s", exc)
+
     def _derive_schema_version(self, schema_payload: Dict[str, Any]) -> str:
         normalized = json.dumps(schema_payload, sort_keys=True, default=str)
         return f"sv_{hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:12]}"
@@ -166,11 +189,18 @@ class ConnectionListener:
             )
             return None
 
-    def _build_idempotency_key(self, source_id: str, row_hash: str) -> IdempotencyKey:
-        # Use stage-scoped batch identifier so retries of the same source row hash are deduplicated.
+    def _build_idempotency_key(
+        self,
+        source_id: str,
+        row_hash: str,
+        ingestion_job_id: str | None = None,
+    ) -> IdempotencyKey:
+        # Retries within one ingestion job are deduplicated, while a deliberate
+        # replacement upload is a new job and must be allowed to load again.
+        job_scope = str(ingestion_job_id or "legacy")
         return IdempotencyKey(
             source_id=source_id,
-            batch_id=f"extract:{source_id}",
+            batch_id=f"extract:{source_id}:{job_scope}",
             row_hash=row_hash,
         )
 
@@ -182,6 +212,7 @@ class ConnectionListener:
         source_id = message.get("filename", "unknown")
         file_path = message.get("path")
         batch_id = str(uuid4())
+        scope_fields = MetadataSchema.scope_fields(message)
 
         try:
             start_time = datetime.now()
@@ -190,7 +221,14 @@ class ConnectionListener:
                 logger.error("[EXTRACTOR ERROR] Missing file path")
                 return False
 
-            schema = {"source": source_id, "type": "file", "columns": [], "dtypes": {}, "row_count": 0}
+            schema = {
+                "source": source_id,
+                "type": "file",
+                "columns": [],
+                "dtypes": {},
+                "row_count": 0,
+                **scope_fields,
+            }
             if file_path.endswith(".csv"):
                 head_df = pd.read_csv(file_path, nrows=1)
                 schema["columns"] = list(head_df.columns)
@@ -242,6 +280,7 @@ class ConnectionListener:
 
             self._send_with_retry("schema_topic", schema, "schema_topic file schema")
             schema_metadata = MetadataSchema.create_schema_metadata(source_id=source_id, schema=schema, row_count=0)
+            schema_metadata.update(scope_fields)
             self._send_with_retry("metadata_topic", schema_metadata, "metadata_topic file schema")
 
             rows_successful = 0
@@ -253,6 +292,7 @@ class ConnectionListener:
             errors = deque(maxlen=self.max_error_entries)
             batch_rows: List[Dict[str, Any]] = []
             batch_claims: List[IdempotencyClaim] = []
+            lineage_records: List[LineageRecord] = []
             send_failures = 0
 
             for chunk in file_iterator:
@@ -276,7 +316,11 @@ class ConnectionListener:
                             "row_hash": row_hash,
                         })
                         prepared_keys.append(
-                            self._build_idempotency_key(source_id, row_hash)
+                            self._build_idempotency_key(
+                                source_id,
+                                row_hash,
+                                scope_fields.get("ingestion_job_id"),
+                            )
                         )
                     except Exception as e:
                         rows_failed += 1
@@ -291,9 +335,11 @@ class ConnectionListener:
                     allowed_keys = set(claim_by_dedup.keys())
 
                 for row_meta, idempotency_key in zip(prepared_rows, prepared_keys):
-                    if idempotency_key.to_dedup_key() not in allowed_keys:
+                    dedup_key = idempotency_key.to_dedup_key()
+                    if dedup_key not in allowed_keys:
                         rows_skipped += 1
                         continue
+                    allowed_keys.remove(dedup_key)
 
                     row_data = {
                         "source": source_id,
@@ -311,7 +357,7 @@ class ConnectionListener:
                         stage=PipelineStage.EXTRACT.value,
                     )
                     row_data["_lineage_row_id"] = str(lineage_row_id)
-                    self._safe_record_lineage(
+                    lineage_records.append(
                         LineageRecord(
                             row_id=lineage_row_id,
                             source_id=source_id,
@@ -323,7 +369,7 @@ class ConnectionListener:
                     )
                     batch_rows.append(row_data)
                     if claim_by_dedup:
-                        claim = claim_by_dedup.get(idempotency_key.to_dedup_key())
+                        claim = claim_by_dedup.get(dedup_key)
                         if claim:
                             batch_claims.append(claim)
 
@@ -335,6 +381,7 @@ class ConnectionListener:
                                 "batch_id": batch_id,
                                 "schema_version": schema_version,
                                 "schema_contract": schema_contract,
+                                **scope_fields,
                             },
                             batch_rows,
                         )
@@ -347,8 +394,10 @@ class ConnectionListener:
                             send_failures += 1
                             if self.idempotency_manager and batch_claims:
                                 self.idempotency_manager.rollback_claims(batch_claims, PipelineStage.EXTRACT)
+                        self._safe_record_lineage_batch(lineage_records)
                         batch_rows = []
                         batch_claims = []
+                        lineage_records = []
 
             if batch_rows:
                 sent = self._send_batch(
@@ -358,6 +407,7 @@ class ConnectionListener:
                         "batch_id": batch_id,
                         "schema_version": schema_version,
                         "schema_contract": schema_contract,
+                        **scope_fields,
                     },
                     batch_rows,
                 )
@@ -370,6 +420,7 @@ class ConnectionListener:
                     send_failures += 1
                     if self.idempotency_manager and batch_claims:
                         self.idempotency_manager.rollback_claims(batch_claims, PipelineStage.EXTRACT)
+                self._safe_record_lineage_batch(lineage_records)
 
             extraction_metadata = MetadataSchema.create_extraction_metadata(
                 source_id=source_id,
@@ -380,6 +431,7 @@ class ConnectionListener:
             )
             extraction_metadata["error_count"] = error_count
             extraction_metadata["error_sample_count"] = len(errors)
+            extraction_metadata.update(scope_fields)
             self._send_with_retry("metadata_topic", extraction_metadata, "metadata_topic extraction")
             if PROCESS_LATENCY:
                 PROCESS_LATENCY.labels(service="extractor", stage="extract").observe(
@@ -407,90 +459,78 @@ class ConnectionListener:
             message: Message from connection_topic
         """
         batch_id = str(uuid4())  # Generate batch ID for this extraction
+        scope_fields = MetadataSchema.scope_fields(message)
         
         connection = None
         try:
             start_time = datetime.now()
-            # Decrypt password if encrypted
-            encryption = get_encryption_instance()
-            password = message["password"]
-            
-            if message.get("_password_encrypted", False):
-                logger.info("[EXTRACTOR] Decrypting database password")
-                password = encryption.decrypt(password)
-            
             db_type = normalize_db_type(message.get("db_type"))
             if db_type is None:
                 logger.error("[EXTRACTOR ERROR] Unsupported database type: %s", message.get("db_type"))
                 return False
 
-            db_config = {
-                "db_type": db_type,
-                "host": message["host"],
-                "user": message["user"],
-                "password": password,
-                "database": message["database"],
-                "port": message["port"]
-            }
-            
-            source_id = f"{db_config['database']}"
-            logger.info(f"[EXTRACTOR] Connecting to {db_config['db_type']} database: {source_id} (batch_id: {batch_id})")
+            db_config = dict(message.get("configuration") or {})
+            if not db_config:
+                db_config = {
+                    "host": message.get("host"), "username": message.get("user"),
+                    "password": message.get("password", ""), "database": message.get("database"),
+                    "port": message.get("port"),
+                    "_password_encrypted": message.get("_password_encrypted", False),
+                }
+            db_config["db_type"] = db_type
+            db_config["workspace_id"] = scope_fields.get("workspace_id")
+            if db_config.get("_password_encrypted"):
+                logger.info("[EXTRACTOR] Decrypting database credential connector=%s", db_type)
+                db_config["password"] = get_encryption_instance().decrypt(db_config.get("password", ""))
+                db_config.pop("_password_encrypted", None)
+
+            connector = self.db_connector.get_connector(db_config)
+            database_name = db_config.get("database") or db_config.get("service_name") or "sqlite"
+            source_id = str(message.get("source_id") or database_name)
+            logger.info(
+                "database_snapshot_connect connector=%s workspace=%s dataset=%s job=%s",
+                connector.key, scope_fields.get("workspace_id"), scope_fields.get("dataset_id"),
+                scope_fields.get("ingestion_job_id"),
+            )
             
             # Connect to database
-            connection = self.db_connector.connect(db_config)
-            cursor = connection.cursor()
-            
-            # Get list of tables
-            if db_config["db_type"] == "mysql":
-                cursor.execute("SHOW TABLES")
-                tables = [row[0] for row in cursor.fetchall()]
-            elif db_config["db_type"] == "postgres":
-                cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
-                tables = [row[0] for row in cursor.fetchall()]
+            validated_config = connector.validate_configuration(db_config)
+            connection = connector.connect(validated_config)
+            selected_tables = message.get("selected_tables")
+            if selected_tables:
+                table_entries = [
+                    {"schema": item.get("schema"), "name": item.get("name")}
+                    for item in selected_tables if isinstance(item, dict) and item.get("name")
+                ]
             else:
-                logger.error(f"[EXTRACTOR ERROR] Unsupported database type")
-                return False
-            
-            logger.info(f"[EXTRACTOR] Found {len(tables)} tables")
+                table_entries = connector.list_tables(connection, db_config.get("schema"))
+            logger.info(f"[EXTRACTOR] Found {len(table_entries)} tables")
             table_schema_versions: Dict[str, str] = {}
             table_schema_contracts: Dict[str, Any] = {}
+            table_source_columns: Dict[str, List[Dict[str, Any]]] = {}
             
             # Extract schema for each table
-            for table in tables:
-                # Use proper identifier quoting to prevent SQL injection
-                # Table names come from database metadata queries but should still be quoted
-                if db_config["db_type"] == "mysql":
-                    # MySQL uses backticks for identifier quoting
-                    quoted_table = f"`{table.replace('`', '``')}`"
-                elif db_config["db_type"] == "postgres":
-                    # PostgreSQL uses double quotes for identifier quoting
-                    safe_table = table.replace('"', '""')
-                    quoted_table = f'"{safe_table}"'
-                else:
-                    # Fallback: validate table name contains only safe characters
-                    import re
-                    if not re.match(r'^[a-zA-Z0-9_]+$', table):
-                        logger.error(f"[EXTRACTOR ERROR] Invalid table name: {table}")
-                        continue
-                    quoted_table = table
-                
-                query = f"SELECT * FROM {quoted_table} LIMIT 1"
-                cursor.execute(query)
-                columns = [desc[0] for desc in cursor.description]
-                
-                table_source = f"{db_config['database']}.{table}"
+            for table_entry in table_entries:
+                table = str(table_entry["name"])
+                source_schema = table_entry.get("schema")
+                table_info = connector.inspect_table(connection, source_schema, table)
+                columns = [item["column_name"] for item in table_info.get("columns", [])]
+                table_source = database_table_source(scope_fields, database_name, source_schema, table)
                 schema = {
                     "source": table_source,
                     "source_id": table_source,
                     "type": "database",
                     "table": table,
+                    "source_schema": source_schema,
                     "columns": columns,
-                    "db_type": db_config["db_type"]
+                    "db_type": db_config["db_type"],
+                    **scope_fields,
                 }
                 schema_version = message.get("schema_version") or self._derive_schema_version(schema)
                 schema["version"] = schema_version
                 table_schema_versions[table_source] = schema_version
                 table_schema_contracts[table_source] = self._resolve_schema_contract(table_source, schema_version)
+                table_source_columns[table_source] = list(table_info.get("columns", []))
                 
                 self._send_with_retry("schema_topic", schema, "schema_topic db schema")
                 logger.info(f"[EXTRACTOR] Published schema for {table}: {len(columns)} columns")
@@ -501,6 +541,7 @@ class ConnectionListener:
                     schema=schema,
                     row_count=0  # Will be updated after extraction
                 )
+                schema_metadata.update(scope_fields)
                 self._send_with_retry("metadata_topic", schema_metadata, "metadata_topic db schema")
             
             # Extract rows with idempotency checks.
@@ -513,17 +554,24 @@ class ConnectionListener:
             errors = deque(maxlen=self.max_error_entries)
             order_by_config = message.get("order_by")
 
-            for table in tables:
-                table_source = f"{db_config['database']}.{table}"
+            for table_entry in table_entries:
+                table = str(table_entry["name"])
+                source_schema = table_entry.get("schema")
+                table_source = database_table_source(scope_fields, database_name, source_schema, table)
                 table_batch_rows: List[Dict[str, Any]] = []
                 table_batch_claims: List[IdempotencyClaim] = []
+                table_lineage_records: List[LineageRecord] = []
+                table_rows_seen = 0
 
                 if isinstance(order_by_config, dict):
-                    table_order_by = order_by_config.get(table)
+                    qualified_key = f"{source_schema}.{table}" if source_schema else table
+                    table_order_by = order_by_config.get(qualified_key, order_by_config.get(table))
                 else:
                     table_order_by = order_by_config
 
-                pk_column = self.database_strategy.detect_primary_key(connection, table)
+                pk_column = self.database_strategy.detect_primary_key(
+                    connection, table, connector=connector, schema=source_schema
+                )
 
                 offset = 0
                 with self._db_state_lock:
@@ -534,6 +582,8 @@ class ConnectionListener:
                         source_type="database",
                         connection_params={
                             "connection": connection,
+                            "connector": connector,
+                            "schema": source_schema,
                             "table": table,
                             "order_by": table_order_by,
                             "pk_column": pk_column,
@@ -546,6 +596,7 @@ class ConnectionListener:
                     )
                     if not batch.rows:
                         break
+                    table_rows_seen += len(batch.rows)
 
                     pagination_mode = batch.metadata.get("pagination_mode")
                     if pagination_mode == "keyset":
@@ -555,7 +606,9 @@ class ConnectionListener:
                     prepared_keys: List[IdempotencyKey] = []
                     for row in batch.rows:
                         try:
-                            row_dict = {k: v for k, v in row.items() if not str(k).startswith("_")}
+                            row_dict = normalize_snapshot_row({
+                                k: v for k, v in row.items() if not str(k).startswith("_")
+                            })
                             if self.idempotency_manager:
                                 row_hash = self.idempotency_manager.generate_row_hash(row_dict)
                             else:
@@ -564,7 +617,11 @@ class ConnectionListener:
                                 row_hash = hashlib.sha256(str(sorted_items).encode('utf-8')).hexdigest()
                             prepared_rows.append({"row_dict": row_dict, "row_hash": row_hash})
                             prepared_keys.append(
-                                self._build_idempotency_key(table_source, row_hash)
+                                self._build_idempotency_key(
+                                    table_source,
+                                    row_hash,
+                                    scope_fields.get("ingestion_job_id"),
+                                )
                             )
                         except Exception as e:
                             if ERRORS_TOTAL:
@@ -582,9 +639,11 @@ class ConnectionListener:
                         allowed_keys = set(claim_by_dedup.keys())
 
                     for row_meta, idempotency_key in zip(prepared_rows, prepared_keys):
-                        if idempotency_key.to_dedup_key() not in allowed_keys:
+                        dedup_key = idempotency_key.to_dedup_key()
+                        if dedup_key not in allowed_keys:
                             rows_skipped += 1
                             continue
+                        allowed_keys.remove(dedup_key)
 
                         row_data = {
                             "source": table_source,
@@ -603,7 +662,7 @@ class ConnectionListener:
                             stage=PipelineStage.EXTRACT.value,
                         )
                         row_data["_lineage_row_id"] = str(lineage_row_id)
-                        self._safe_record_lineage(
+                        table_lineage_records.append(
                             LineageRecord(
                                 row_id=lineage_row_id,
                                 source_id=table_source,
@@ -615,7 +674,7 @@ class ConnectionListener:
                         )
                         table_batch_rows.append(row_data)
                         if claim_by_dedup:
-                            claim = claim_by_dedup.get(idempotency_key.to_dedup_key())
+                            claim = claim_by_dedup.get(dedup_key)
                             if claim:
                                 table_batch_claims.append(claim)
                         total_rows += 1
@@ -629,6 +688,7 @@ class ConnectionListener:
                                     "schema_version": table_schema_versions.get(table_source, "derived_unknown"),
                                     "schema_contract": table_schema_contracts.get(table_source),
                                     "table": table,
+                                    **scope_fields,
                                 },
                                 table_batch_rows,
                             )
@@ -645,8 +705,10 @@ class ConnectionListener:
                                 send_failures += 1
                                 if self.idempotency_manager and table_batch_claims:
                                     self.idempotency_manager.rollback_claims(table_batch_claims, PipelineStage.EXTRACT)
+                            self._safe_record_lineage_batch(table_lineage_records)
                             table_batch_rows = []
                             table_batch_claims = []
+                            table_lineage_records = []
                     if not batch.has_more:
                         break
                     if pagination_mode == "keyset":
@@ -665,6 +727,7 @@ class ConnectionListener:
                             "schema_version": table_schema_versions.get(table_source, "derived_unknown"),
                             "schema_contract": table_schema_contracts.get(table_source),
                             "table": table,
+                            **scope_fields,
                         },
                         table_batch_rows,
                     )
@@ -681,10 +744,40 @@ class ConnectionListener:
                         send_failures += 1
                         if self.idempotency_manager and table_batch_claims:
                             self.idempotency_manager.rollback_claims(table_batch_claims, PipelineStage.EXTRACT)
+                    self._safe_record_lineage_batch(table_lineage_records)
 
                 if pk_column and last_pk is not None:
                     with self._db_state_lock:
                         self._db_last_pk_state[table_source] = last_pk
+
+                # Preserve a real zero-row table through the asynchronous
+                # pipeline. The transformer forwards this schema-only control
+                # message and the loader materializes an empty destination.
+                if table_rows_seen == 0:
+                    schema_only = {
+                        "source": table_source,
+                        "source_id": table_source,
+                        "batch_id": batch_id,
+                        "schema_version": table_schema_versions.get(table_source, "derived_unknown"),
+                        "schema_only": True,
+                        "columns": table_source_columns.get(table_source, []),
+                        "rows": [],
+                        "row_count": 0,
+                        "table": table,
+                        **scope_fields,
+                    }
+                    if not self._send_with_retry(
+                        "extracted_rows_topic", schema_only, "empty database table schema"
+                    ):
+                        send_failures += 1
+                        error_count += 1
+                        errors.append(f"Table {table}: Failed to publish empty-table schema")
+                    else:
+                        logger.info(
+                            "database_empty_table_published connector=%s workspace=%s dataset=%s source_schema=%s source_table=%s",
+                            connector.key, scope_fields.get("workspace_id"), scope_fields.get("dataset_id"),
+                            source_schema, table,
+                        )
 
             logger.info(
                 f"[EXTRACTOR] Published {rows_successful} rows "
@@ -701,6 +794,7 @@ class ConnectionListener:
             )
             extraction_metadata["error_count"] = error_count
             extraction_metadata["error_sample_count"] = len(errors)
+            extraction_metadata.update(scope_fields)
             self._send_with_retry("metadata_topic", extraction_metadata, "metadata_topic extraction")
             if PROCESS_LATENCY:
                 duration = (datetime.now() - start_time).total_seconds()
@@ -710,9 +804,12 @@ class ConnectionListener:
         except Exception as e:
             if ERRORS_TOTAL:
                 ERRORS_TOTAL.labels(service="extractor", stage="extract").inc()
-            logger.error(f"[EXTRACTOR ERROR] Failed to process database: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+            safe = safe_connector_error(e)
+            logger.error(
+                "database_snapshot_failed code=%s workspace=%s dataset=%s job=%s",
+                safe.code, scope_fields.get("workspace_id"), scope_fields.get("dataset_id"),
+                scope_fields.get("ingestion_job_id"),
+            )
             return False
         finally:
             if connection:
@@ -726,11 +823,20 @@ class ConnectionListener:
                 logger.info(f"[EXTRACTOR] Received message: type={message.get('type')}")
                 
                 # Emit connection metadata
+                safe_message = dict(message)
+                if isinstance(safe_message.get("configuration"), dict):
+                    safe_message["configuration"] = {
+                        key: value for key, value in safe_message["configuration"].items()
+                        if key not in {"password", "_password_encrypted", "ssl_key", "wallet_password"}
+                    }
+                safe_message.pop("password", None)
+                safe_message.pop("_password_encrypted", None)
                 connection_metadata = MetadataSchema.create_connection_metadata(
                     source_type=message.get("type", "unknown"),
                     source_id=message.get("filename") or message.get("database", "unknown"),
-                    connection_info=message
+                    connection_info=safe_message
                 )
+                connection_metadata.update(MetadataSchema.scope_fields(message))
                 self._send_with_retry("metadata_topic", connection_metadata, "metadata_topic connection")
                 
                 if message.get("type") == "file":
@@ -745,6 +851,8 @@ class ConnectionListener:
                     self.consumer.commit(record)
                 else:
                     logger.warning("[EXTRACTOR] Message processing failed, offset not committed")
+                    self.consumer.rewind(record)
+                    time.sleep(max(0.0, float(os.getenv("KAFKA_PROCESSING_RETRY_SECONDS", "2"))))
         except KeyboardInterrupt:
             logger.info("[EXTRACTOR] Shutting down...")
         except Exception as e:

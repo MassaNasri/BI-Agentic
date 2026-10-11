@@ -5,7 +5,9 @@ Tests encryption, decryption, and credential handling functionality.
 """
 import unittest
 import os
-from credential_encryption import CredentialEncryption, get_encryption_instance
+from unittest.mock import patch
+from . import credential_encryption
+from .credential_encryption import CredentialEncryption, get_encryption_instance
 
 
 class TestCredentialEncryption(unittest.TestCase):
@@ -169,8 +171,10 @@ class TestCredentialEncryption(unittest.TestCase):
     
     def test_singleton_instance(self):
         """Test that get_encryption_instance returns singleton"""
-        instance1 = get_encryption_instance()
-        instance2 = get_encryption_instance()
+        credential_encryption._encryption_instance = None
+        with patch.dict(os.environ, {"CREDENTIAL_SECRET_KEY": self.test_secret}):
+            instance1 = get_encryption_instance()
+            instance2 = get_encryption_instance()
         
         # Should be the same instance
         self.assertIs(instance1, instance2)

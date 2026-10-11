@@ -82,3 +82,30 @@ class TestDatabasePaginationContract(unittest.TestCase):
         self.assertEqual(executed_params, (10,))
         self.assertEqual(batch.metadata["pagination_mode"], "keyset")
         self.assertEqual(batch.metadata["next_last_pk"], 12)
+
+    def test_preserves_named_connector_parameters(self):
+        connection, cursor = self._mysql_connection(rows=[{"id": 11}])
+        connector = Mock()
+        connector.key = "clickhouse"
+        connector.qualified_table.return_value = '"analytics"."events"'
+        connector.build_snapshot_query.return_value = (
+            'SELECT * FROM "analytics"."events" WHERE "id" > %(last_pk)s',
+            {"last_pk": 10},
+        )
+        config = ExtractionConfig(
+            source_id="events",
+            source_type="database",
+            connection_params={
+                "connection": connection,
+                "connector": connector,
+                "schema": "analytics",
+                "table": "events",
+                "pk_column": "id",
+                "last_pk": 10,
+            },
+            batch_size=100,
+        )
+
+        self.strategy.extract_batch(config, offset=0, limit=100)
+
+        self.assertEqual(cursor.execute.call_args.args[1], {"last_pk": 10})

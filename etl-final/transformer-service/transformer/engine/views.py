@@ -12,6 +12,7 @@ from clickhouse_driver import Client
 from shared.models.rule_yaml_parser import load_rules_from_yaml
 from shared.models.rules_engine import RulesEngine
 from shared.utils.metrics import render_metrics
+from shared.security.internal_auth import ETLInternalAuthentication, require_etl_scope
 
 from .transformer_service import TransformerService
 
@@ -21,7 +22,10 @@ class TestTransformView(APIView):
     Manual test endpoint for transformation.
     """
 
+    authentication_classes = [ETLInternalAuthentication]
+
     def post(self, request):
+        scope = require_etl_scope(request)
 
         table = request.data.get("table")
         row = request.data.get("row")
@@ -33,6 +37,7 @@ class TestTransformView(APIView):
                 "batch_id": request.data.get("batch_id"),
                 "data": row,
                 "schema_contract": request.data.get("schema_contract"),
+                **scope.as_message_fields(),
             }])
 
             result = results[0] if results else None
@@ -62,7 +67,10 @@ class QuarantineReviewView(APIView):
     Review quarantined rows.
     """
 
+    authentication_classes = [ETLInternalAuthentication]
+
     def get(self, request):
+        scope = require_etl_scope(request)
         try:
             limit = int(request.query_params.get("limit", 100))
             offset = int(request.query_params.get("offset", 0))
@@ -82,6 +90,10 @@ class QuarantineReviewView(APIView):
                 include_reprocessed=include_reprocessed,
             )
 
+            rows = [
+                row for row in rows
+                if all(str(row.get(key)) == str(value) for key, value in scope.as_message_fields().items())
+            ]
             return Response(make_response(True, "Quarantine rows", {
                 "rows": rows,
                 "limit": limit,
@@ -96,7 +108,10 @@ class QuarantineReprocessView(APIView):
     Reprocess quarantined rows.
     """
 
+    authentication_classes = [ETLInternalAuthentication]
+
     def post(self, request):
+        scope = require_etl_scope(request)
         try:
             ids = request.data.get("ids", [])
             if not ids:
@@ -120,6 +135,10 @@ class QuarantineReprocessView(APIView):
             producer = KafkaMessageProducer()
 
             records = manager.get_by_ids(ids)
+            records = [
+                record for record in records
+                if all(str(record.get(key)) == str(value) for key, value in scope.as_message_fields().items())
+            ]
             messages = []
             record_ids = []
             for record in records:
@@ -136,6 +155,7 @@ class QuarantineReprocessView(APIView):
                     "batch_id": record.get("_batch_id"),
                     "data": row_data,
                     "schema_contract": schema_contract,
+                    **scope.as_message_fields(),
                 }
                 messages.append(message)
                 record_ids.append(str(record.get("_quarantine_id")))

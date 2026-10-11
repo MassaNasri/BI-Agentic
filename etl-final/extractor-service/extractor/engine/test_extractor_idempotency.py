@@ -16,7 +16,7 @@ import os
 from datetime import datetime
 
 from .kafka_listener import ConnectionListener
-from shared.utils.idempotency_manager import IdempotencyManager, IdempotencyKey, PipelineStage
+from shared.utils.idempotency_manager import IdempotencyClaim, IdempotencyManager, IdempotencyKey, PipelineStage
 
 
 class TestExtractorIdempotency(unittest.TestCase):
@@ -37,6 +37,19 @@ class TestExtractorIdempotency(unittest.TestCase):
              patch('engine.kafka_listener.KafkaMessageProducer', return_value=self.mock_producer), \
              patch('engine.kafka_listener.Client', return_value=self.mock_clickhouse_client):
             self.listener = ConnectionListener()
+        self.listener.idempotency_manager.claim_new_keys = Mock(
+            side_effect=lambda keys, stage: [
+                IdempotencyClaim(key=key, claim_row_id=uuid4()) for key in keys
+            ]
+        )
+        self.listener.idempotency_manager.rollback_claims = Mock(return_value=True)
+
+    def _published_rows(self):
+        rows = []
+        for producer_call in self.mock_producer.send.call_args_list:
+            if producer_call.args[0] == "extracted_rows_topic":
+                rows.extend(producer_call.args[1].get("rows", []))
+        return rows
     
     def test_idempotency_manager_initialized_with_clickhouse_client(self):
         """Test that IdempotencyManager is initialized with ClickHouse client."""
@@ -62,24 +75,20 @@ class TestExtractorIdempotency(unittest.TestCase):
                 "path": temp_file
             }
             
-            # Mock is_duplicate to return False for first extraction, True for second
-            call_count = [0]
-            def mock_is_duplicate(key, stage):
-                call_count[0] += 1
-                # First two calls (Alice, Bob) return False (not duplicate)
-                # Next two calls return True (duplicate)
-                return call_count[0] > 2
-            
-            self.listener.idempotency_manager.is_duplicate = Mock(side_effect=mock_is_duplicate)
-            self.listener.idempotency_manager.mark_processed = Mock(return_value=True)
+            claim_calls = [0]
+            def claim_once(keys, stage):
+                claim_calls[0] += 1
+                if claim_calls[0] > 1:
+                    return []
+                return [IdempotencyClaim(key=key, claim_row_id=uuid4()) for key in keys]
+
+            self.listener.idempotency_manager.claim_new_keys = Mock(side_effect=claim_once)
             
             # First extraction - should process all rows
             self.listener.process_file(message)
             
             # Verify all rows were published
-            published_calls = [call for call in self.mock_producer.send.call_args_list 
-                             if call[0][0] == "extracted_rows_topic"]
-            self.assertEqual(len(published_calls), 2, "Should publish 2 rows on first extraction")
+            self.assertEqual(len(self._published_rows()), 2, "Should publish 2 rows on first extraction")
             
             # Reset mock
             self.mock_producer.send.reset_mock()
@@ -88,9 +97,7 @@ class TestExtractorIdempotency(unittest.TestCase):
             self.listener.process_file(message)
             
             # Verify no rows were published (all duplicates)
-            published_calls = [call for call in self.mock_producer.send.call_args_list 
-                             if call[0][0] == "extracted_rows_topic"]
-            self.assertEqual(len(published_calls), 0, "Should skip all duplicate rows on second extraction")
+            self.assertEqual(len(self._published_rows()), 0, "Should skip all duplicate rows on second extraction")
             
         finally:
             os.unlink(temp_file)
@@ -110,18 +117,12 @@ class TestExtractorIdempotency(unittest.TestCase):
                 "path": temp_file
             }
             
-            # Mock idempotency methods
-            self.listener.idempotency_manager.is_duplicate = Mock(return_value=False)
-            self.listener.idempotency_manager.mark_processed = Mock(return_value=True)
-            
             # Process file
             self.listener.process_file(message)
             
-            # Verify mark_processed was called
-            self.listener.idempotency_manager.mark_processed.assert_called()
-            
-            # Verify it was called with EXTRACT stage
-            call_args = self.listener.idempotency_manager.mark_processed.call_args
+            # The race-safe insert-first claim is the processed marker.
+            self.listener.idempotency_manager.claim_new_keys.assert_called()
+            call_args = self.listener.idempotency_manager.claim_new_keys.call_args
             self.assertEqual(call_args[0][1], PipelineStage.EXTRACT)
             
         finally:
@@ -148,15 +149,11 @@ class TestExtractorIdempotency(unittest.TestCase):
             # Mock Kafka publish to fail
             self.mock_producer.send = Mock(return_value=False)
             
-            # Mock idempotency methods
-            self.listener.idempotency_manager.is_duplicate = Mock(return_value=False)
-            self.listener.idempotency_manager.mark_processed = Mock(return_value=True)
-            
             # Process file
             self.listener.process_file(message)
             
-            # Verify mark_processed was NOT called (because publish failed)
-            self.listener.idempotency_manager.mark_processed.assert_not_called()
+            # A failed downstream publish rolls back its insert-first claims.
+            self.listener.idempotency_manager.rollback_claims.assert_called()
             
         finally:
             os.unlink(temp_file)
@@ -176,19 +173,13 @@ class TestExtractorIdempotency(unittest.TestCase):
                 "path": temp_file
             }
             
-            # Mock idempotency methods
-            self.listener.idempotency_manager.is_duplicate = Mock(return_value=False)
-            self.listener.idempotency_manager.mark_processed = Mock(return_value=True)
-            
             # Process file
             self.listener.process_file(message)
             
             # Verify row data includes _dedup_key
-            published_calls = [call for call in self.mock_producer.send.call_args_list 
-                             if call[0][0] == "extracted_rows_topic"]
-            self.assertEqual(len(published_calls), 1)
-            
-            row_data = published_calls[0][0][1]
+            published_rows = self._published_rows()
+            self.assertEqual(len(published_rows), 1)
+            row_data = published_rows[0]
             self.assertIn("_dedup_key", row_data)
             self.assertEqual(len(row_data["_dedup_key"]), 64, "SHA256 hash should be 64 hex characters")
             
@@ -210,15 +201,11 @@ class TestExtractorIdempotency(unittest.TestCase):
                 "path": temp_file
             }
             
-            # Mock idempotency methods
-            self.listener.idempotency_manager.is_duplicate = Mock(return_value=False)
-            self.listener.idempotency_manager.mark_processed = Mock(return_value=True)
-            
             # Process file
             self.listener.process_file(message)
             
-            # Verify is_duplicate was called with EXTRACT stage
-            call_args = self.listener.idempotency_manager.is_duplicate.call_args
+            # Verify the insert-first claim used the EXTRACT stage.
+            call_args = self.listener.idempotency_manager.claim_new_keys.call_args
             self.assertEqual(call_args[0][1], PipelineStage.EXTRACT)
             
         finally:
@@ -275,18 +262,12 @@ class TestExtractorIdempotency(unittest.TestCase):
             temp_file2 = f2.name
         
         try:
-            # Mock idempotency methods
-            self.listener.idempotency_manager.is_duplicate = Mock(return_value=False)
-            self.listener.idempotency_manager.mark_processed = Mock(return_value=True)
-            
             # Process first file
             message1 = {"type": "file", "filename": "test1.csv", "path": temp_file1}
             self.listener.process_file(message1)
             
             # Get hash from first file
-            published_calls1 = [call for call in self.mock_producer.send.call_args_list 
-                               if call[0][0] == "extracted_rows_topic"]
-            hash1 = published_calls1[0][0][1]["_dedup_key"]
+            hash1 = self._published_rows()[0]["_dedup_key"]
             
             # Reset mock
             self.mock_producer.send.reset_mock()
@@ -296,9 +277,7 @@ class TestExtractorIdempotency(unittest.TestCase):
             self.listener.process_file(message2)
             
             # Get hash from second file
-            published_calls2 = [call for call in self.mock_producer.send.call_args_list 
-                               if call[0][0] == "extracted_rows_topic"]
-            hash2 = published_calls2[0][0][1]["_dedup_key"]
+            hash2 = self._published_rows()[0]["_dedup_key"]
             
             # Verify hashes are identical
             self.assertEqual(hash1, hash2, "Identical row content should produce identical hash")
@@ -319,18 +298,13 @@ class TestExtractorIdempotency(unittest.TestCase):
         try:
             message = {"type": "file", "filename": "test.csv", "path": temp_file}
             
-            # Mock idempotency methods
-            self.listener.idempotency_manager.is_duplicate = Mock(return_value=False)
-            self.listener.idempotency_manager.mark_processed = Mock(return_value=True)
-            
             # Process file
             self.listener.process_file(message)
             
             # Get hashes from both rows
-            published_calls = [call for call in self.mock_producer.send.call_args_list 
-                             if call[0][0] == "extracted_rows_topic"]
-            hash1 = published_calls[0][0][1]["_dedup_key"]
-            hash2 = published_calls[1][0][1]["_dedup_key"]
+            published_rows = self._published_rows()
+            hash1 = published_rows[0]["_dedup_key"]
+            hash2 = published_rows[1]["_dedup_key"]
             
             # Verify hashes are different
             self.assertNotEqual(hash1, hash2, "Different row content should produce different hashes")
@@ -379,8 +353,17 @@ class TestExtractorIdempotencyIntegration(unittest.TestCase):
         try:
             message = {"type": "file", "filename": "test.csv", "path": temp_file}
             
+            first_key = None
+            def claim_first(keys, stage):
+                nonlocal first_key
+                if first_key is not None:
+                    return []
+                first_key = keys[0]
+                return [IdempotencyClaim(key=keys[0], claim_row_id=uuid4())]
+
+            self.listener.idempotency_manager.claim_new_keys = Mock(side_effect=claim_first)
+
             # First extraction - no duplicates
-            self.mock_clickhouse_client.execute = Mock(return_value=[[0]])
             self.listener.process_file(message)
             
             # Verify row was published
@@ -388,22 +371,11 @@ class TestExtractorIdempotencyIntegration(unittest.TestCase):
                              if call[0][0] == "extracted_rows_topic"]
             self.assertEqual(len(published_calls), 1)
             
-            # Verify is_duplicate was checked (SELECT COUNT query)
-            select_calls = [call for call in self.mock_clickhouse_client.execute.call_args_list
-                          if 'SELECT COUNT' in str(call)]
-            self.assertGreater(len(select_calls), 0, "Should check for duplicates")
-            
-            # Verify mark_processed was called (INSERT query)
-            insert_calls = [call for call in self.mock_clickhouse_client.execute.call_args_list
-                          if 'INSERT INTO deduplication_log' in str(call)]
-            self.assertGreater(len(insert_calls), 0, "Should mark as processed")
+            self.listener.idempotency_manager.claim_new_keys.assert_called_once()
             
             # Reset mocks
             self.mock_producer.send.reset_mock()
-            self.mock_clickhouse_client.execute.reset_mock()
-            
             # Second extraction - duplicate found
-            self.mock_clickhouse_client.execute = Mock(return_value=[[1]])  # Duplicate found
             self.listener.process_file(message)
             
             # Verify row was NOT published (duplicate skipped)

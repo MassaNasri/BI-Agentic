@@ -72,7 +72,7 @@ const buildDiffSegments = (beforeText, afterText) => {
 
 const segmentClassName = (segmentType, mode) => {
   if (segmentType === 'equal') {
-    return 'text-slate-700 dark:text-slate-200'
+    return 'text-brand-300 dark:text-brand-200'
   }
   if (mode === 'original' && segmentType === 'removed') {
     return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200 line-through'
@@ -80,7 +80,7 @@ const segmentClassName = (segmentType, mode) => {
   if (mode === 'cleaned' && segmentType === 'added') {
     return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
   }
-  return 'text-slate-400 dark:text-slate-500'
+  return 'text-brand-300/60 dark:text-brand-300/80'
 }
 
 function DiffLine({ label, mode, segments }) {
@@ -92,12 +92,12 @@ function DiffLine({ label, mode, segments }) {
 
   return (
     <div>
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">
         {label}
       </p>
-      <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm leading-6 dark:border-slate-700 dark:bg-slate-900/40">
+      <div className="rounded-lg border border-brand-700/30 bg-[var(--c-card-bg)] p-3 text-sm leading-6 dark:border-brand-700/40 dark:bg-brand-950/40">
         {filtered.length === 0 ? (
-          <span className="text-slate-400 dark:text-slate-500">No content</span>
+          <span className="text-brand-300/60 dark:text-brand-300/80">No content</span>
         ) : (
           filtered.map((segment, index) => (
             <span

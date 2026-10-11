@@ -49,6 +49,7 @@ static/
 # Environment Variables
 .env
 .env.local
+.env.microservices
 .env.*.local
 
 # Coverage

@@ -21,7 +21,7 @@ function LoadingSkeleton({ type = 'text', count = 1, className = '' }) {
             variants={shimmer}
             initial="initial"
             animate="animate"
-            className={`h-4 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded ${className}`}
+            className={`h-4 rounded bg-gradient-to-r from-brand-700/30 via-brand-600/40 to-brand-700/30 ${className}`}
             style={{ backgroundSize: '200% 100%' }}
           />
         )
@@ -31,7 +31,7 @@ function LoadingSkeleton({ type = 'text', count = 1, className = '' }) {
             variants={shimmer}
             initial="initial"
             animate="animate"
-            className={`h-8 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded ${className}`}
+            className={`h-8 rounded bg-gradient-to-r from-brand-700/30 via-brand-600/40 to-brand-700/30 ${className}`}
             style={{ backgroundSize: '200% 100%' }}
           />
         )
@@ -41,7 +41,7 @@ function LoadingSkeleton({ type = 'text', count = 1, className = '' }) {
             variants={shimmer}
             initial="initial"
             animate="animate"
-            className={`w-12 h-12 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded-full ${className}`}
+            className={`h-12 w-12 rounded-full bg-gradient-to-r from-brand-700/30 via-brand-600/40 to-brand-700/30 ${className}`}
             style={{ backgroundSize: '200% 100%' }}
           />
         )
@@ -51,7 +51,7 @@ function LoadingSkeleton({ type = 'text', count = 1, className = '' }) {
             variants={shimmer}
             initial="initial"
             animate="animate"
-            className={`h-32 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded-lg ${className}`}
+            className={`h-32 rounded-lg bg-gradient-to-r from-brand-700/30 via-brand-600/40 to-brand-700/30 ${className}`}
             style={{ backgroundSize: '200% 100%' }}
           />
         )
@@ -61,7 +61,7 @@ function LoadingSkeleton({ type = 'text', count = 1, className = '' }) {
             variants={shimmer}
             initial="initial"
             animate="animate"
-            className={`h-10 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded-lg ${className}`}
+            className={`h-10 rounded-lg bg-gradient-to-r from-brand-700/30 via-brand-600/40 to-brand-700/30 ${className}`}
             style={{ backgroundSize: '200% 100%' }}
           />
         )

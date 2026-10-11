@@ -4,7 +4,7 @@ Tests that dedup keys are generated correctly and preserved through the pipeline
 """
 import pytest
 from unittest.mock import Mock, MagicMock, patch
-from idempotency_manager import IdempotencyManager, IdempotencyKey, PipelineStage
+from .idempotency_manager import IdempotencyManager, IdempotencyKey, PipelineStage
 
 
 class TestDeduplicationKeyGeneration:

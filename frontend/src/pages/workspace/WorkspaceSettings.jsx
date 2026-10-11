@@ -24,7 +24,7 @@ function WorkspaceSettings() {
     if (hasRole('manager')) {
       loadWorkspace()
     }
-  }, [user?.role])
+  }, [user?.role, hasRole])
 
   // Only managers can access this page
   if (!hasRole('manager')) {
@@ -32,11 +32,11 @@ function WorkspaceSettings() {
       <div className="max-w-2xl mx-auto">
         <Card>
           <div className="text-center py-8">
-            <Settings className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            <Settings className="w-16 h-16 text-brand-300/60 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-2">
               Access Denied
             </h2>
-            <p className="text-gray-600">
+            <p className="text-[var(--c-muted)]">
               Only workspace owners (managers) can access workspace settings.
             </p>
           </div>
@@ -120,22 +120,22 @@ function WorkspaceSettings() {
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Workspace Settings</h1>
-          <p className="text-gray-600 mt-1">Manage your workspace configuration</p>
+          <h1 className="text-3xl font-bold text-white">Workspace Settings</h1>
+          <p className="text-[var(--c-muted)] mt-1">Manage your workspace configuration</p>
         </div>
       </div>
 
       <Card>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="flex items-center space-x-3 pb-6 border-b">
-            <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
-              <Building className="w-6 h-6 text-primary-600" />
+            <div className="w-12 h-12 bg-brand-700/30 rounded-lg flex items-center justify-center">
+              <Building className="w-6 h-6 text-brand-500" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">
+              <h3 className="text-lg font-semibold text-white">
                 Workspace Information
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-[var(--c-muted)]">
                 Update your workspace name and description
               </p>
             </div>
@@ -154,7 +154,7 @@ function WorkspaceSettings() {
           />
 
           <div>
-            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="description" className="block text-sm font-medium text-brand-300 mb-2">
               Description (Optional)
             </label>
             <textarea
@@ -180,7 +180,7 @@ function WorkspaceSettings() {
           />
 
           <div>
-            <label htmlFor="company_address" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="company_address" className="block text-sm font-medium text-brand-300 mb-2">
               Company Address
             </label>
             <textarea
@@ -194,10 +194,10 @@ function WorkspaceSettings() {
             />
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-brand-900/30 border border-brand-700/40 rounded-lg p-4">
             <div className="flex items-start space-x-3">
-              <Settings className="w-5 h-5 text-blue-600 mt-0.5" />
-              <div className="text-sm text-blue-800">
+              <Settings className="w-5 h-5 text-brand-500 mt-0.5" />
+              <div className="text-sm text-brand-200">
                 <p className="font-medium mb-1">Workspace Information</p>
                 <p>
                   This workspace is owned by you. Only workspace owners can update 
@@ -232,16 +232,16 @@ function WorkspaceSettings() {
       <Card title="Workspace Owner">
         <div className="space-y-3">
           <div className="flex items-center justify-between py-2">
-            <span className="text-sm font-medium text-gray-700">Owner Name</span>
-            <span className="text-sm text-gray-900">{user?.name}</span>
+            <span className="text-sm font-medium text-brand-300">Owner Name</span>
+            <span className="text-sm text-white">{user?.name}</span>
           </div>
           <div className="flex items-center justify-between py-2">
-            <span className="text-sm font-medium text-gray-700">Owner Email</span>
-            <span className="text-sm text-gray-900">{user?.email}</span>
+            <span className="text-sm font-medium text-brand-300">Owner Email</span>
+            <span className="text-sm text-white">{user?.email}</span>
           </div>
           <div className="flex items-center justify-between py-2">
-            <span className="text-sm font-medium text-gray-700">Role</span>
-            <span className="text-sm text-gray-900 capitalize">{user?.role}</span>
+            <span className="text-sm font-medium text-brand-300">Role</span>
+            <span className="text-sm text-white capitalize">{user?.role}</span>
           </div>
         </div>
       </Card>

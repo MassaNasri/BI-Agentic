@@ -1,0 +1,121 @@
+services:
+  p1-mssql:
+    image: ${P1_MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-CU16-ubuntu-22.04}
+    profiles: ["p1-mssql"]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${P1_MSSQL_SA_PASSWORD:?Set a test-only SQL Server password}
+    ports:
+      - "127.0.0.1:11433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
+  p1-oracle:
+    image: ${P1_ORACLE_IMAGE:-gvenzl/oracle-free:23.5-slim-faststart}
+    profiles: ["p1-oracle"]
+    environment:
+      ORACLE_PASSWORD: ${P1_ORACLE_PASSWORD:?Set a test-only Oracle password}
+      APP_USER: p1user
+      APP_USER_PASSWORD: ${P1_ORACLE_APP_PASSWORD:?Set a test-only Oracle application password}
+      P1R_READER_PASSWORD: ${P1R_READER_PASSWORD:?Set a test-only reader password}
+    ports:
+      - "127.0.0.1:11521:1521"
+    volumes:
+      - ./seed/oracle_seed.sql:/container-entrypoint-initdb.d/10-p1r-seed.sql:ro
+      - ./seed/oracle_reader.sh:/container-entrypoint-initdb.d/20-p1r-reader.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+
+  p1r-postgres:
+    image: postgres:18.3
+    profiles: ["p1r-core"]
+    container_name: p1r-postgres
+    environment:
+      POSTGRES_DB: p1r_source
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${P1R_ADMIN_PASSWORD:?Set a test-only admin password}
+      P1R_READER_PASSWORD: ${P1R_READER_PASSWORD:?Set a test-only reader password}
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - ./seed/postgresql_seed.sh:/docker-entrypoint-initdb.d/10-p1r-seed.sh:ro
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d p1r_source"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  p1r-mysql:
+    image: mysql:8.4
+    profiles: ["p1r-core"]
+    container_name: p1r-mysql
+    environment:
+      MYSQL_DATABASE: p1r_source
+      MYSQL_ROOT_PASSWORD: ${P1R_ADMIN_PASSWORD:?Set a test-only admin password}
+      P1R_READER_PASSWORD: ${P1R_READER_PASSWORD:?Set a test-only reader password}
+    ports:
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - ./seed/mysql_seed.sh:/docker-entrypoint-initdb.d/10-p1r-seed.sh:ro
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  p1r-mariadb:
+    image: ${P1R_MARIADB_IMAGE:-mariadb:11.8}
+    profiles: ["p1r-mariadb"]
+    container_name: p1r-mariadb
+    environment:
+      MARIADB_DATABASE: p1r_source
+      MARIADB_ROOT_PASSWORD: ${P1R_ADMIN_PASSWORD:?Set a test-only admin password}
+      P1R_READER_PASSWORD: ${P1R_READER_PASSWORD:?Set a test-only reader password}
+    ports:
+      - "127.0.0.1:13307:3306"
+    volumes:
+      - ./seed/mariadb_seed.sh:/docker-entrypoint-initdb.d/10-p1r-seed.sh:ro
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  p1r-clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    profiles: ["p1r-core"]
+    container_name: p1r-clickhouse
+    environment:
+      CLICKHOUSE_DB: p1r_source
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${P1R_ADMIN_PASSWORD:?Set a test-only admin password}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      P1R_READER_PASSWORD: ${P1R_READER_PASSWORD:?Set a test-only reader password}
+    ports:
+      - "127.0.0.1:18123:8123"
+      - "127.0.0.1:19000:9000"
+    volumes:
+      - ./seed/clickhouse_seed.sh:/docker-entrypoint-initdb.d/10-p1r-seed.sh:ro
+    tmpfs:
+      - /var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user default --password $$CLICKHOUSE_PASSWORD --query 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+

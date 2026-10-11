@@ -590,6 +590,6 @@ def dispatch_subscription_expiry_warnings():
 def is_internal_api_key_valid(request_key):
     expected = getattr(settings, 'NOTIFICATION_INTERNAL_API_KEY', '').strip()
     if not expected:
-        return True
+        return False
     provided = (request_key or '').strip()
     return hmac.compare_digest(expected, provided)

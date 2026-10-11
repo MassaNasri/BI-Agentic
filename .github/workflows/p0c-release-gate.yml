@@ -1,0 +1,210 @@
+name: P0-C release gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: test
+  DJANGO_EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+  EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+  OPENROUTER_API_KEY: ""
+  CREDENTIAL_SECRET_KEY: "biavora-p0c-test-only-credential-key"
+  PYTHONHASHSEED: "0"
+
+jobs:
+  static-and-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python syntax and merge-marker gate
+        run: python scripts/p0c_static_check.py
+      - name: POSIX script syntax
+        run: bash -n scripts/test.sh scripts/check-migration-drift.sh scripts/run-migrations.sh scripts/start_project.sh
+      - name: Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Clean dependency install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Tests
+        working-directory: frontend
+        run: npm test
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+      - name: Production bundle policy
+        run: python scripts/verify_frontend_bundle.py
+
+  backend-and-ai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install service test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/voice-service/requirements.txt -r services/report-service/requirements.txt -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r services/subscription-service/requirements.txt -r services/notification-service/requirements.txt -r services/ai-service/requirements.txt pytest
+      - name: Shared readiness and request IDs
+        run: python -m pytest tests/test_health_readiness.py -q --junitxml=test-results/shared-readiness.xml
+      - name: Query tests
+        working-directory: services/query-service
+        run: python -m pytest tests -q --junitxml=../../test-results/query.xml
+      - name: Visualization tests
+        working-directory: services/visualization-service
+        run: python -m pytest visualization_api/tests -q --junitxml=../../test-results/visualization.xml
+      - name: Voice tests
+        working-directory: services/voice-service
+        run: python -m pytest voice_reports/tests_ai_trace_service.py voice_reports/tests_query_execute_metabase_fallback.py voice_reports/tests_query_service_contract.py voice_reports/tests_security_workspace_authorization.py -q --junitxml=../../test-results/voice.xml
+      - name: Report tests
+        working-directory: services/report-service
+        run: python -m pytest voice_reports/tests_sql_normalization.py -q --junitxml=../../test-results/report.xml
+      - name: Auth and Workspace security tests
+        run: |
+          (cd services/auth-service && python manage.py test users.tests_security_invitation --verbosity 1)
+          (cd services/workspace-service && python manage.py test workspace.tests_security_invitation --verbosity 1)
+      - name: Subscription and Notification smoke/security tests
+        run: |
+          (cd services/subscription-service && python manage.py test subscription.tests --verbosity 1)
+          (cd services/notification-service && python manage.py test notification.tests --verbosity 1)
+      - name: Deterministic AI tests
+        working-directory: services/ai-service
+        run: >-
+          python -m pytest
+          intent_extraction/tests.py llm_app/tests.py preprocessing_high/tests_llm_client.py preprocessing_high/tests_recovery.py
+          reasoning_app/tests.py shared/tests_sql_review.py tests/test_bi_generalized_semantics_pipeline.py tests/test_bi_hardening.py
+          tests/test_bi_semantic_layer.py tests/test_bi_semantic_reasoning_integration.py tests/test_bi_temporal_semantics.py
+          tests/test_forecasting_pipeline.py tests/test_pipeline_integration.py tests/test_preprocessing_high_recovery.py
+          tests/test_preprocessing_low_semantic_guard.py tests/test_tiered_resolution.py tests/test_value_index.py whisper_app/tests.py
+          -q --junitxml=../../test-results/ai.xml
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: test-results/*.xml
+
+  etl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install ETL test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r etl-final/shared/requirements.txt -r etl-final/connector-service/requirements.txt -r etl-final/detector-service/requirements.txt -r etl-final/extractor-service/requirements.txt -r etl-final/transformer-service/requirements.txt -r etl-final/loader-service/requirements.txt -r etl-final/metadata-service/requirements.txt pytest hypothesis
+      - name: Maintained ETL suites
+        env:
+          PYTHONPATH: ${{ github.workspace }}/etl-final
+        run: |
+          python -m pytest etl-final/shared/models etl-final/shared/security -q
+          for test_file in etl-final/shared/utils/test_*.py; do
+            case "$(basename "$test_file")" in test_bronze_indexes.py|test_kafka_validation_integration.py) continue;; esac
+            python -m pytest "$test_file" -q
+          done
+          (cd etl-final/connector-service/connector && python manage.py test --verbosity 1)
+          python -m pytest etl-final/extractor-service/extractor/engine -q
+          python -m pytest etl-final/transformer-service/transformer/engine -q
+          python -m pytest etl-final/loader-service/loader/engine -q
+          python -m pytest etl-final/tests/test_p0_transform_loader_listeners.py -q
+          (cd etl-final/detector-service/detector && python manage.py test --verbosity 1)
+          (cd etl-final/metadata-service/metadata && python manage.py test --verbosity 1)
+
+  security-regression:
+    needs: [backend-and-ai, etl]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install security regression dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/voice-service/requirements.txt -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r etl-final/shared/requirements.txt pytest
+      - name: Query security regression
+        working-directory: services/query-service
+        run: python -m pytest tests/test_clickhouse_credential_redaction.py tests/test_ingestion_callback_security.py tests/test_security_configuration.py -q
+      - name: Visualization security regression
+        working-directory: services/visualization-service
+        run: python -m pytest visualization_api/tests/test_security_ownership_and_query_reference.py -q
+      - name: Voice security regression
+        working-directory: services/voice-service
+        run: python -m pytest voice_reports/tests_security_workspace_authorization.py -q
+      - name: Invitation security regression
+        run: |
+          (cd services/auth-service && python manage.py test users.tests_security_invitation --verbosity 1)
+          (cd services/workspace-service && python manage.py test workspace.tests_security_invitation --verbosity 1)
+      - name: ETL security regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}/etl-final
+        run: python -m pytest etl-final/shared/security/test_security_controls.py -q
+
+  migration-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Django service dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r services/subscription-service/requirements.txt -r services/notification-service/requirements.txt -r services/voice-service/requirements.txt -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/report-service/requirements.txt
+      - name: Eight-configuration drift gate
+        run: scripts/check-migration-drift.sh
+
+  docker-build:
+    needs: [static-and-compose]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build all maintained images without publishing
+        run: |
+          cp .env.example .env
+          docker compose build
+
+  release-gate:
+    if: always()
+    needs: [static-and-compose, frontend, backend-and-ai, etl, security-regression, migration-drift, docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every P0-C job
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "P0-C job results: ${RESULTS}"
+          test "${RESULTS}" = "success success success success success success success"

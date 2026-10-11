@@ -1,249 +1,154 @@
-/**
- * Animation Variants for Home Page
- * Professional, smooth animations for landing page experience
- */
-
-// Page container animation
 export const pageVariants = {
-  hidden: {
-    opacity: 0,
-  },
+  hidden: { opacity: 0, filter: 'blur(8px)' },
   visible: {
     opacity: 1,
+    filter: 'blur(0px)',
     transition: {
       duration: 0.5,
-      ease: 'easeOut',
-      staggerChildren: 0.15,
-      delayChildren: 0.2,
+      ease: [0.22, 1, 0.36, 1],
+      staggerChildren: 0.08,
+      delayChildren: 0.08,
     },
   },
 }
 
-// Navbar animation (fade down)
 export const navbarVariants = {
-  hidden: {
-    opacity: 0,
-    y: -20,
-  },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: {
-      duration: 0.5,
-      ease: 'easeOut',
-    },
-  },
-}
-
-// Badge animation (scale + fade)
-export const badgeVariants = {
-  hidden: {
-    opacity: 0,
-    scale: 0.8,
-  },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    transition: {
-      duration: 0.5,
-      ease: 'easeOut',
-    },
-  },
-}
-
-// Title slide up animation
-export const titleVariants = {
-  hidden: {
-    opacity: 0,
-    y: 30,
-  },
+  hidden: { opacity: 0, y: -30 },
   visible: {
     opacity: 1,
     y: 0,
     transition: {
       duration: 0.6,
-      ease: 'easeOut',
+      ease: [0.22, 1, 0.36, 1],
     },
   },
 }
 
-// Subtitle fade + scale
-export const subtitleVariants = {
-  hidden: {
-    opacity: 0,
-    scale: 0.95,
-  },
+export const badgeVariants = {
+  hidden: { opacity: 0, scale: 0.9 },
   visible: {
     opacity: 1,
     scale: 1,
     transition: {
       duration: 0.5,
-      ease: 'easeOut',
-      delay: 0.2,
+      ease: [0.22, 1, 0.36, 1],
     },
   },
 }
 
-// Staggered buttons animation
-export const buttonsContainerVariants = {
-  hidden: {
-    opacity: 0,
+export const heroTextVariants = {
+  hidden: { opacity: 0, y: 30 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.7,
+      ease: [0.22, 1, 0.36, 1],
+    },
   },
+}
+
+export const subtitleVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.55,
+      ease: [0.22, 1, 0.36, 1],
+      delay: 0.1,
+    },
+  },
+}
+
+export const buttonsContainerVariants = {
+  hidden: { opacity: 0 },
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.15,
-      delayChildren: 0.3,
+      staggerChildren: 0.1,
+      delayChildren: 0.15,
     },
   },
 }
 
 export const buttonVariants = {
-  hidden: {
-    opacity: 0,
-    y: 20,
-  },
+  hidden: { opacity: 0, y: 18 },
   visible: {
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.4,
-      ease: 'easeOut',
+      duration: 0.45,
+      ease: [0.22, 1, 0.36, 1],
     },
   },
   hover: {
-    scale: 1.05,
-    y: -3,
-    transition: {
-      duration: 0.2,
-      ease: 'easeOut',
-    },
+    scale: 1.04,
+    transition: { duration: 0.2, ease: 'easeOut' },
   },
   tap: {
     scale: 0.97,
+    transition: { duration: 0.12, ease: 'easeOut' },
   },
 }
 
-// Feature cards stagger container
 export const cardsContainerVariants = {
-  hidden: {
-    opacity: 0,
-  },
+  hidden: { opacity: 0 },
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.2,
-      delayChildren: 0.3,
+      staggerChildren: 0.1,
     },
   },
 }
 
-// Individual feature card animation
 export const cardVariants = {
-  hidden: {
-    opacity: 0,
-    scale: 0.95,
-    y: 30,
-  },
-  visible: {
+  hidden: { opacity: 0, y: 40 },
+  visible: (i = 0) => ({
     opacity: 1,
-    scale: 1,
     y: 0,
     transition: {
-      duration: 0.5,
-      ease: 'easeOut',
+      delay: i * 0.12,
+      duration: 0.55,
+      ease: [0.22, 1, 0.36, 1],
     },
-  },
+  }),
   hover: {
-    scale: 1.03,
     y: -8,
-    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1)',
-    transition: {
-      duration: 0.3,
-      ease: 'easeOut',
-    },
+    borderColor: 'rgba(162,155,254,0.6)',
+    boxShadow: '0 0 40px rgba(69,53,212,0.45)',
+    transition: { duration: 0.25 },
   },
 }
 
-// CTA section animation
 export const ctaVariants = {
-  hidden: {
-    opacity: 0,
-    scale: 0.95,
-  },
+  hidden: { opacity: 0, y: 20 },
   visible: {
     opacity: 1,
-    scale: 1,
+    y: 0,
     transition: {
       duration: 0.6,
-      ease: 'easeOut',
+      ease: [0.22, 1, 0.36, 1],
     },
   },
 }
 
-// Footer animation (slide up)
 export const footerVariants = {
-  hidden: {
-    opacity: 0,
-    y: 30,
-  },
+  hidden: { opacity: 0, y: 16 },
   visible: {
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.5,
-      ease: 'easeOut',
+      duration: 0.45,
+      ease: [0.22, 1, 0.36, 1],
     },
   },
 }
 
-// Floating background elements animation
-export const floatingVariants = {
-  animate: {
-    y: [0, -20, 0],
-    x: [0, 10, 0],
-    scale: [1, 1.05, 1],
-    transition: {
-      duration: 8,
-      repeat: Infinity,
-      ease: 'easeInOut',
-    },
-  },
-}
-
-export const floatingVariants2 = {
-  animate: {
-    y: [0, 20, 0],
-    x: [0, -15, 0],
-    scale: [1, 1.08, 1],
-    transition: {
-      duration: 10,
-      repeat: Infinity,
-      ease: 'easeInOut',
-      delay: 1,
-    },
-  },
-}
-
-export const floatingVariants3 = {
-  animate: {
-    y: [0, -15, 0],
-    x: [0, 20, 0],
-    scale: [1, 1.06, 1],
-    transition: {
-      duration: 12,
-      repeat: Infinity,
-      ease: 'easeInOut',
-      delay: 2,
-    },
-  },
-}
-
-// Icon pulse animation
 export const iconPulseVariants = {
   animate: {
     scale: [1, 1.1, 1],
-    opacity: [1, 0.8, 1],
+    opacity: [1, 0.75, 1],
     transition: {
       duration: 2,
       repeat: Infinity,
@@ -251,19 +156,3 @@ export const iconPulseVariants = {
     },
   },
 }
-
-// Gradient text animation
-export const gradientTextVariants = {
-  hidden: {
-    backgroundPosition: '0% 50%',
-  },
-  visible: {
-    backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
-    transition: {
-      duration: 5,
-      repeat: Infinity,
-      ease: 'linear',
-    },
-  },
-}
-

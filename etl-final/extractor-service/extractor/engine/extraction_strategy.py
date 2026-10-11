@@ -285,11 +285,8 @@ class ExtractionStrategy(ABC):
             This method requires the bronze_schema module. Import it when needed:
             from models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
         """
-        # Import here to avoid circular dependencies
-        import sys
-        import os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'shared'))
-        from models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
+        # Import here to avoid circular dependencies while keeping the package boundary explicit.
+        from shared.models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
         
         # Extract metadata from batch
         batch_id = batch.batch_id

@@ -6,6 +6,7 @@ import logging
 import os
 from typing import Any
 
+import requests
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Sum
@@ -19,11 +20,10 @@ from rest_framework.views import APIView
 
 try:  # pragma: no cover
     from bi_platform_shared.http import HttpClientError, get_default_client
+    _SHARED_HTTP_AVAILABLE = True
 except Exception:  # pragma: no cover
     HttpClientError = Exception  # type: ignore[assignment,misc]
-
-    def get_default_client():  # type: ignore[no-redef]
-        raise RuntimeError("bi_platform_shared.http unavailable")
+    _SHARED_HTTP_AVAILABLE = False
 
 from .models import FreeTierUsage, Payment, Plan, Subscription
 from .notification_client import get_notification_client
@@ -73,14 +73,18 @@ def _auth_headers(request) -> dict[str, str]:
 
 
 def _http_get_json(url: str, *, request, timeout: tuple[float, float] = (3.0, 10.0)) -> tuple[int, dict[str, Any]]:
+    headers = _auth_headers(request)
     try:
-        response = get_default_client().get(
-            url,
-            headers=_auth_headers(request),
-            timeout=timeout,
-            attach_internal_api_key=False,
-        )
-    except HttpClientError as exc:  # type: ignore[misc]
+        if _SHARED_HTTP_AVAILABLE:
+            response = get_default_client().get(  # type: ignore[name-defined]
+                url,
+                headers=headers,
+                timeout=timeout,
+                attach_internal_api_key=False,
+            )
+        else:
+            response = requests.get(url, headers=headers, timeout=timeout)
+    except (HttpClientError, requests.RequestException) as exc:  # type: ignore[misc]
         logger.warning("subscription_http_get_failed url=%s error=%s", url, exc)
         return 503, {"success": False, "message": "service_unavailable"}
     except Exception as exc:  # pragma: no cover

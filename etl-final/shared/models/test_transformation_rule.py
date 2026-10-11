@@ -11,7 +11,7 @@ Tests cover:
 import pytest
 from datetime import datetime
 from uuid import UUID, uuid4
-from transformation_rule import (
+from .transformation_rule import (
     RuleType,
     TransformationRule,
     TransformationResult,

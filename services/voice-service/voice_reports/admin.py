@@ -165,7 +165,12 @@ class ReportPageAssignmentAdmin(admin.ModelAdmin):
         'id',
         'report',
         'page',
+        'widget_type',
         'order',
+        'x',
+        'y',
+        'width',
+        'height',
         'added_at'
     ]
     

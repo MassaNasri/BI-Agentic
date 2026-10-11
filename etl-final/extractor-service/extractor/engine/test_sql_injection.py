@@ -21,6 +21,7 @@ class TestSQLInjectionPrevention(unittest.TestCase):
         mock_connection.__class__.__module__ = 'pymysql.connections'
         mock_cursor = Mock()
         mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [("id",), ("name",)]
         mock_connection.cursor.return_value = mock_cursor
         return mock_connection, mock_cursor
     
@@ -31,6 +32,7 @@ class TestSQLInjectionPrevention(unittest.TestCase):
         mock_connection.__class__.__module__ = 'psycopg2.extensions'
         mock_cursor = Mock()
         mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [("id",), ("name",)]
         mock_connection.cursor.return_value = mock_cursor
         return mock_connection, mock_cursor
     
@@ -124,6 +126,7 @@ class TestSQLInjectionPrevention(unittest.TestCase):
         mock_connection.__class__.__module__ = 'unknown.database'
         mock_cursor = Mock()
         mock_cursor.fetchall.return_value = []
+        mock_cursor.description = []
         mock_connection.cursor.return_value = mock_cursor
         
         # Valid table name should work

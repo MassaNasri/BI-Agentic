@@ -4,7 +4,6 @@ import os
 from llm_app.intent_service import extract_intent
 from llm_app.schema_provider import get_schema, is_question_matching_schema
 from reasoning_app.runner import run_reasoning
-from shared.chart_recommender import recommend_chart
 from shared.error_response import make_error
 from shared.query_planner import normalize_analytical_intent
 from shared.sql_compiler import compile_sql
@@ -114,7 +113,9 @@ def process_question(question: str) -> dict:
             retryable=False,
         )
 
-    chart = recommend_chart(intent)
+    chart = {
+        "reason_chart_selected": "deferred_to_visualization_service_chart_type_selector",
+    }
     confidence = _calculate_confidence(intent, schema, extraction_result.get("matches_schema", False))
 
     return {

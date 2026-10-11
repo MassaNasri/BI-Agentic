@@ -1,0 +1,26 @@
+# Keep secrets, backups and generated runtime data out of build contexts.
+.git
+**/.git
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+backups
+**/backups
+node_modules
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+**/*.log
+**/*.dump
+**/*.sqlite3
+**/media
+frontend/dist
+etl-final/etl-infra/clickhouse/data
+etl-final/etl-infra/clickhouse/logs
+etl-infra/clickhouse/data
+etl-infra/clickhouse/logs
+docs/audit

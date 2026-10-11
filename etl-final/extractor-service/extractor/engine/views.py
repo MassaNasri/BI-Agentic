@@ -15,12 +15,16 @@ from shared.utils.surreal_client import SurrealClient
 from shared.utils.response import make_response
 from shared.utils.metrics import render_metrics
 from shared.utils.db_type_utils import normalize_db_type
+from shared.security.internal_auth import ETLInternalAuthentication, require_etl_scope
+from shared.security.destination_policy import validate_destination
 
 from .db_connector import DBConnector
 from .row_extractor import RowExtractor
 
 
 class RunExtractorView(APIView):
+    authentication_classes = [ETLInternalAuthentication]
+
     def _publish_batch(
         self,
         producer: KafkaMessageProducer,
@@ -28,6 +32,7 @@ class RunExtractorView(APIView):
         table: str,
         batch_id: str,
         rows: List[Dict[str, Any]],
+        scope,
     ) -> bool:
         payload = {
             "source": source,
@@ -37,10 +42,12 @@ class RunExtractorView(APIView):
             "schema_version": "derived_unknown",
             "rows": rows,
             "row_count": len(rows),
+            **scope.as_message_fields(),
         }
         return producer.send("extracted_rows_topic", payload)
 
     def post(self, request):
+        scope = require_etl_scope(request)
         cfg = request.data.get("config")
         schema = request.data.get("schema")
         batch_size = int(os.getenv("EXTRACTOR_BATCH_SIZE", "500"))
@@ -67,6 +74,8 @@ class RunExtractorView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            resolved_addresses = validate_destination(cfg.get("host"), cfg.get("port"))
+            cfg = {**cfg, "host": resolved_addresses[0]}
             conn = DBConnector().connect(cfg)
             extractor = RowExtractor()
             producer = KafkaMessageProducer()
@@ -96,7 +105,7 @@ class RunExtractorView(APIView):
                     current_source = table_source
 
                 if table != current_table:
-                    if pending_rows and not self._publish_batch(producer, current_source, current_table, batch_id, pending_rows):
+                    if pending_rows and not self._publish_batch(producer, current_source, current_table, batch_id, pending_rows, scope):
                         return Response(
                             make_response(False, "Failed to publish extracted rows"),
                             status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -108,7 +117,7 @@ class RunExtractorView(APIView):
 
                 pending_rows.append(row_payload)
                 if len(pending_rows) >= batch_size:
-                    if not self._publish_batch(producer, current_source, current_table, batch_id, pending_rows):
+                    if not self._publish_batch(producer, current_source, current_table, batch_id, pending_rows, scope):
                         return Response(
                             make_response(False, "Failed to publish extracted rows"),
                             status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -116,7 +125,7 @@ class RunExtractorView(APIView):
                     published_count += len(pending_rows)
                     pending_rows = []
 
-            if pending_rows and not self._publish_batch(producer, current_source, current_table, batch_id, pending_rows):
+            if pending_rows and not self._publish_batch(producer, current_source, current_table, batch_id, pending_rows, scope):
                 return Response(
                     make_response(False, "Failed to publish extracted rows"),
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -128,11 +137,12 @@ class RunExtractorView(APIView):
                 "tables": tables,
                 "batch_id": batch_id,
                 "rows_published": published_count,
+                **scope.as_message_fields(),
             })
 
             return Response(make_response(True, "Extraction completed", {"batch_id": batch_id, "rows_published": published_count}))
-        except Exception as e:
-            return Response(make_response(False, str(e)))
+        except Exception:
+            return Response(make_response(False, "Extraction failed"), status=400)
         finally:
             if conn is not None:
                 try:
@@ -186,11 +196,15 @@ class ExtractionProgressView(APIView):
         Returns:
             JSON response with progress information
         """
+        scope = require_etl_scope(request)
         tracker = self.get_progress_tracker()
         
         # Check if requesting active extractions list
         if request.query_params.get('active') == 'true' or extraction_id == 'active':
-            active_extractions = tracker.list_active_extractions()
+            active_extractions = [
+                item for item in tracker.list_active_extractions()
+                if all(str(item.to_dict().get(key)) == str(value) for key, value in scope.as_message_fields().items())
+            ]
             return Response(make_response(
                 True,
                 "Active extractions retrieved",
@@ -217,6 +231,8 @@ class ExtractionProgressView(APIView):
         
         # Calculate additional metrics
         progress_data = progress.to_dict()
+        if any(str(progress_data.get(key)) != str(value) for key, value in scope.as_message_fields().items()):
+            return Response(make_response(False, "Extraction not found"), status=404)
         progress_data['progress_percentage'] = progress.get_progress_percentage()
         progress_data['throughput_rows_per_sec'] = progress.get_throughput()
         progress_data['estimated_completion'] = progress.estimate_completion_time()
@@ -240,3 +256,5 @@ class MetricsView(APIView):
     def get(self, request):
         data, content_type = render_metrics()
         return HttpResponse(data, content_type=content_type)
+    authentication_classes = [ETLInternalAuthentication]
+

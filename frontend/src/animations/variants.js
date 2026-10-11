@@ -5,24 +5,35 @@
 
 // Page Transitions
 export const pageVariants = {
-  initial: {
+  hidden: {
     opacity: 0,
-    y: 20,
+    filter: 'blur(8px)',
   },
-  animate: {
+  visible: {
     opacity: 1,
-    y: 0,
+    filter: 'blur(0px)',
     transition: {
-      duration: 0.35,
-      ease: 'easeOut',
+      duration: 0.5,
+      ease: [0.22, 1, 0.36, 1],
     },
   },
   exit: {
     opacity: 0,
-    y: -10,
+    filter: 'blur(8px)',
     transition: {
-      duration: 0.25,
-      ease: 'easeIn',
+      duration: 0.3,
+    },
+  },
+  initial: {
+    opacity: 0,
+    filter: 'blur(8px)',
+  },
+  animate: {
+    opacity: 1,
+    filter: 'blur(0px)',
+    transition: {
+      duration: 0.5,
+      ease: [0.22, 1, 0.36, 1],
     },
   },
 }
@@ -118,7 +129,8 @@ export const buttonTap = {
 
 // Button Hover Animation
 export const buttonHover = {
-  scale: 1.02,
+  scale: 1.03,
+  boxShadow: '0 0 30px rgba(69,53,212,0.5)',
   transition: { duration: 0.2 },
 }
 

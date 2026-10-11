@@ -38,10 +38,12 @@ def _failed_payload(
     """
 
     payload: dict[str, Any] = {
+        "success": False,
         "status": "failed",
         "sql": sql,
         "rows": [],
         "columns": [],
+        "column_names": [],
         "column_types": [],
         "row_count": 0,
         "scanned_rows": None,
@@ -53,6 +55,7 @@ def _failed_payload(
         "error": error,
         "error_code": error_code,
         "error_message": error,
+        "result_shape": None,
     }
     if extra:
         payload.update(extra)
@@ -62,41 +65,41 @@ def _failed_payload(
 def _resolve_workspace_database(payload: dict[str, Any]) -> tuple[str, dict[str, Any] | None, int]:
     """Resolve and validate the ClickHouse database for this request.
 
-    Phase 7 / CRIT-05: an explicit ``workspace_database`` (set by
-    ``QueryExecuteInternalView`` after it consulted the workspace model) is
-    preferred. When absent, we resolve from ``workspace_id``. If neither is
-    available we return an HTTP-400-shaped failure payload.
+    Workspace scope is authoritative: normal requests must provide a
+    ``workspace_id`` that resolves server-side. An explicit
+    ``workspace_database`` is accepted only from trusted internal callers that
+    set ``trusted_internal_workspace_database=true``.
     """
 
+    workspace_id = payload.get("workspace_id")
+    if workspace_id not in (None, "", b""):
+        try:
+            resolution = resolve_workspace_clickhouse_db(workspace_id)
+        except WorkspaceClickhouseDbResolutionError as exc:
+            logger.warning(
+                "execute_sql_payload_workspace_unresolved code=%s message=%s",
+                exc.code,
+                str(exc),
+            )
+            failed = _failed_payload(
+                sql=str(payload.get("sql", "")).strip(),
+                error=str(exc),
+                error_code=exc.code.upper(),
+            )
+            return "", failed, int(exc.http_status or 400)
+
+        return resolution.clickhouse_db, None, 200
+
     explicit_db = str(payload.get("workspace_database") or "").strip()
-    if explicit_db:
+    if explicit_db and str(payload.get("trusted_internal_workspace_database") or "").lower() == "true":
         return explicit_db, None, 200
 
-    workspace_id = payload.get("workspace_id")
-    if workspace_id in (None, "", b""):
-        failed = _failed_payload(
-            sql=str(payload.get("sql", "")).strip(),
-            error="workspace_id is required for query execution.",
-            error_code="WORKSPACE_ID_REQUIRED",
-        )
-        return "", failed, 400
-
-    try:
-        resolution = resolve_workspace_clickhouse_db(workspace_id)
-    except WorkspaceClickhouseDbResolutionError as exc:
-        logger.warning(
-            "execute_sql_payload_workspace_unresolved code=%s message=%s",
-            exc.code,
-            str(exc),
-        )
-        failed = _failed_payload(
-            sql=str(payload.get("sql", "")).strip(),
-            error=str(exc),
-            error_code=exc.code.upper(),
-        )
-        return "", failed, int(exc.http_status or 400)
-
-    return resolution.clickhouse_db, None, 200
+    failed = _failed_payload(
+        sql=str(payload.get("sql", "")).strip(),
+        error="workspace_id is required for query execution.",
+        error_code="WORKSPACE_ID_REQUIRED",
+    )
+    return "", failed, 400
 
 
 def execute_sql_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
@@ -165,10 +168,12 @@ def execute_sql_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
     row_count = int(result.get("row_count", len(rows)) or 0)
     return (
         {
+            "success": True,
             "status": "success",
             "sql": clean_sql,
             "rows": rows,
             "columns": result.get("columns", []),
+            "column_names": result.get("column_names", []),
             "column_types": result.get("column_types", []) or [],
             "row_count": row_count,
             "scanned_rows": result.get("scanned_rows"),
@@ -182,6 +187,7 @@ def execute_sql_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
             "error_code": None,
             "error_message": None,
             "workspace_database": workspace_database,
+            "result_shape": result.get("result_shape"),
         },
         200,
     )

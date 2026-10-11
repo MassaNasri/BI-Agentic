@@ -1,12 +1,14 @@
 Django
 djangorestframework
-kafka-python
+kafka-python==2.3.0
 requests
 pymysql
 psycopg2-binary
 pandas
 openpyxl
 clickhouse-driver
+python-tds==1.17.1
+oracledb==3.4.2
 cryptography
 prometheus_client
 opentelemetry-api

@@ -93,6 +93,7 @@ class TestFileSizeValidation(unittest.TestCase):
         mock_file.size = size
         if content_type:
             mock_file.content_type = content_type
+        mock_file.chunks.return_value = [b"safe-test-content"]
         return mock_file
     
     @patch('etl_engine.file_validator.get_max_file_size')
@@ -212,6 +213,7 @@ class TestValidateFileType(unittest.TestCase):
         mock_file.size = size  # Default 1KB
         if content_type:
             mock_file.content_type = content_type
+        mock_file.chunks.return_value = [b"safe-test-content"]
         return mock_file
     
     def test_valid_csv_file(self):
@@ -294,6 +296,7 @@ class TestValidateFileType(unittest.TestCase):
         mock_file = Mock()
         mock_file.name = 'data.csv'
         mock_file.size = 1000  # Add size attribute
+        mock_file.chunks.return_value = [b"safe-test-content"]
         # Don't set content_type attribute at all
         if hasattr(mock_file, 'content_type'):
             delattr(mock_file, 'content_type')
@@ -323,6 +326,7 @@ class TestValidateFileOrRaise(unittest.TestCase):
         mock_file = Mock()
         mock_file.name = filename
         mock_file.size = size  # Default 1KB
+        mock_file.chunks.return_value = [b"safe-test-content"]
         if content_type:
             mock_file.content_type = content_type
         return mock_file
@@ -358,6 +362,7 @@ class TestSecurityScenarios(unittest.TestCase):
         mock_file = Mock()
         mock_file.name = filename
         mock_file.size = size  # Default 1KB
+        mock_file.chunks.return_value = [b"safe-test-content"]
         if content_type:
             mock_file.content_type = content_type
         return mock_file

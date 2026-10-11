@@ -101,7 +101,11 @@ def _build_query_builder_payload(intent: StructuredIntent) -> dict[str, Any]:
         "order_by": order_by,
         "limit": limit,
         "ranking": intent.get("ranking", {}),
+        "semantic_filters": intent.get("semantic_filters", []),
+        "analytical_semantics": intent.get("analytical_semantics", []),
+        "analytical_semantic_hints": intent.get("analytical_semantic_hints", {}),
         "ambiguities": intent.get("ambiguities", []),
+        "selected_columns_preprocessing_high": intent.get("selected_columns_preprocessing_high", []),
     }
 
 

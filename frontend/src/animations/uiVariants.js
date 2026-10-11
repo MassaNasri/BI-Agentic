@@ -66,6 +66,74 @@ export const scaleFade = {
   },
 }
 
+// Section cards (staggered by index)
+export const sectionCardVariants = {
+  hidden: {
+    opacity: 0,
+    y: 30,
+  },
+  visible: (i) => ({
+    opacity: 1,
+    y: 0,
+    transition: {
+      delay: i * 0.1,
+      duration: 0.55,
+      ease: [0.22, 1, 0.36, 1],
+    },
+  }),
+}
+
+// Profile avatar intro
+export const avatarVariants = {
+  hidden: {
+    opacity: 0,
+    scale: 0.8,
+  },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    transition: {
+      type: 'spring',
+      stiffness: 280,
+      damping: 22,
+    },
+  },
+}
+
+export const infoItemVariants = {
+  hidden: {
+    opacity: 0,
+    scale: 0.93,
+  },
+  visible: (i) => ({
+    opacity: 1,
+    scale: 1,
+    transition: {
+      delay: i * 0.05,
+      duration: 0.4,
+      type: 'spring',
+      stiffness: 260,
+    },
+  }),
+}
+
+// Profile badge intro
+export const badgeVariants = {
+  hidden: {
+    opacity: 0,
+    scale: 0.7,
+  },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    transition: {
+      type: 'spring',
+      stiffness: 300,
+      delay: 0.15,
+    },
+  },
+}
+
 // Stagger container (for lists, grids, tables)
 export const staggerContainer = {
   hidden: {

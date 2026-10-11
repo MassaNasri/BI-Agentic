@@ -34,7 +34,8 @@ class LineageTracker:
         self.client.query("DEFINE FIELD transformation_version ON lineage_node TYPE string;")
         self.client.query("DEFINE FIELD applied_rules ON lineage_node TYPE array;")
 
-    def record_transformation(self, record: LineageRecord) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _statements_for(record: LineageRecord) -> List[str]:
         node_id = f"lineage_node:{record.row_id}"
         payload = {
             "row_id": str(record.row_id),
@@ -45,16 +46,37 @@ class LineageTracker:
             "transformation_version": record.transformation_version,
             "applied_rules": record.applied_rules,
         }
-        self.client.query(f"CREATE {node_id} CONTENT {json.dumps(payload)};")
+        statements = [f"CREATE {node_id} CONTENT {json.dumps(payload)};"]
         for parent in record.parent_row_ids:
             edge_payload = {
                 "timestamp": record.timestamp.isoformat(),
                 "stage": record.stage,
             }
-            self.client.query(
+            statements.append(
                 f"RELATE lineage_node:{parent} -> lineage_edge -> {node_id} CONTENT {json.dumps(edge_payload)};"
             )
+        return statements
+
+    def record_transformation(self, record: LineageRecord) -> Optional[Dict[str, Any]]:
+        self.client.query("\n".join(self._statements_for(record)))
+        payload = {
+            "row_id": str(record.row_id),
+            "source_id": record.source_id,
+            "batch_id": record.batch_id,
+            "stage": record.stage,
+            "timestamp": record.timestamp.isoformat(),
+            "transformation_version": record.transformation_version,
+            "applied_rules": record.applied_rules,
+        }
         return payload
+
+    def record_transformations(self, records: List[LineageRecord]) -> int:
+        """Persist a pipeline batch in one SurrealDB round trip."""
+        if not records:
+            return 0
+        statements = [statement for record in records for statement in self._statements_for(record)]
+        self.client.query("\n".join(statements))
+        return len(records)
 
     def query_lineage(self, row_id: str) -> Dict[str, Any]:
         sql = f"""

@@ -6,7 +6,14 @@ import requests
 import time
 import json
 import subprocess
+import os
+import shlex
 from datetime import datetime
+
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+if not CLICKHOUSE_USER or not CLICKHOUSE_PASSWORD:
+    raise RuntimeError("CLICKHOUSE_USER and CLICKHOUSE_PASSWORD are required")
 
 def run_cmd(cmd):
     """Run command and return output"""
@@ -118,7 +125,7 @@ def test_pipeline():
     # Step 8: Verify ClickHouse data
     print("\n🗄️  Step 8: Verifying ClickHouse Data...")
     success, stdout, stderr = run_cmd(
-        'docker exec clickhouse clickhouse-client -u etl_user --password etl_pass123 -d etl --query "SHOW TABLES"'
+        f'docker exec clickhouse clickhouse-client -u {shlex.quote(CLICKHOUSE_USER)} --password {shlex.quote(CLICKHOUSE_PASSWORD)} -d etl --query "SHOW TABLES"'
     )
     if success and stdout:
         tables = [t.strip() for t in stdout.strip().split('\n') if t.strip()]
@@ -134,7 +141,7 @@ def test_pipeline():
         if test_table:
             # Count rows
             success2, count_out, _ = run_cmd(
-                f'docker exec clickhouse clickhouse-client -u etl_user --password etl_pass123 -d etl --query "SELECT count() FROM {test_table}"'
+                f'docker exec clickhouse clickhouse-client -u {shlex.quote(CLICKHOUSE_USER)} --password {shlex.quote(CLICKHOUSE_PASSWORD)} -d etl --query "SELECT count() FROM {test_table}"'
             )
             if success2:
                 count = count_out.strip()

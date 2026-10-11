@@ -1,13 +1,33 @@
+# Ollama on the Docker host: containers must not use localhost:11434 (that is the
+# container loopback). Use host.docker.internal. host-gateway works on Linux engines;
+# Docker Desktop on Windows/WSL already provides host.docker.internal.
+x-ollama-docker-host-env: &ollama-docker-host-env
+  SQL_REVIEW_OLLAMA_URL: http://host.docker.internal:11434/api/generate
+  SQL_REVIEW_OLLAMA_MODEL: gemma3:1b
+  INTENT_CLASSIFIER_OLLAMA_URL: http://host.docker.internal:11434/api/generate
+  INTENT_CLASSIFIER_OLLAMA_MODEL: gemma3:1b
+  TEXT_PREPROCESS_OLLAMA_URL: http://host.docker.internal:11434/api/generate
+  TEXT_PREPROCESS_MODEL: gemma3:1b
+  PREPROCESS_HIGH_OLLAMA_URL: http://host.docker.internal:11434/api/generate
+  PREPROCESS_HIGH_OLLAMA_MODEL: gemma3:1b
+  INTENT_EXTRACTION_OLLAMA_URL: http://host.docker.internal:11434/api/generate
+  INTENT_EXTRACTION_OLLAMA_MODEL: gemma3:1b
+
 services:
   api-gateway:
     build:
-      context: ./services/api-gateway
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
     container_name: api-gateway
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
-      - ./.env.microservices
+      - ./.env
     environment:
+      SERVICE_NAME: api-gateway
+      READINESS_CHECK_DATABASE: "false"
+      READINESS_HTTP_URLS: http://auth-service:8001/health/,http://workspace-service:8002/health/,http://report-service:8003/health/,http://voice-service:8004/health/,http://ai-service:8005/health/,http://query-service:8006/health/,http://visualization-service:8007/health/,http://subscription-service:8008/health/,http://notification-service:8010/health/
+      APP_ENV: ${APP_ENV:-development}
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8001}
       WORKSPACE_SERVICE_URL: ${WORKSPACE_SERVICE_URL:-http://workspace-service:8002}
       REPORT_SERVICE_URL: ${REPORT_SERVICE_URL:-http://report-service:8003}
@@ -39,21 +59,35 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
-
-  auth-service:
-    build:
-      context: ./services/auth-service
-    container_name: auth-service
-    ports:
-      - "8001:8001"
-    env_file:
-      - ./.env.microservices
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8001), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready/', timeout=5).read()
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: auth-service
+    ports:
+      - "127.0.0.1:8001:8001"
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: auth-service
+      APP_ENV: ${APP_ENV:-development}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -61,12 +95,17 @@ services:
 
   workspace-service:
     build:
-      context: ./services/workspace-service
+      context: .
+      dockerfile: services/workspace-service/Dockerfile
     container_name: workspace-service
     ports:
-      - "8002:8002"
+      - "127.0.0.1:8002:8002"
     env_file:
-      - ./.env.microservices
+      - ./.env
+    environment:
+      SERVICE_NAME: workspace-service
+      READINESS_HTTP_URLS: http://auth-service:8001/health/
+      APP_ENV: ${APP_ENV:-development}
     depends_on:
       auth-service:
         condition: service_healthy
@@ -75,7 +114,7 @@ services:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8002), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -83,29 +122,39 @@ services:
 
   report-service:
     build:
-      context: ./services/report-service
+      context: .
+      dockerfile: services/report-service/Dockerfile
     container_name: report-service
     ports:
-      - "8003:8003"
+      - "127.0.0.1:8003:8003"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
-      - ./.env.microservices
+      - ./.env
     environment:
+      SERVICE_NAME: report-service
+      READINESS_TCP_TARGETS: clickhouse:8123
+      READINESS_HTTP_URLS: http://etl-metadata:8000/api/ready/,http://query-service:8006/health/,http://metabase:3000/api/health
+      APP_ENV: ${APP_ENV:-development}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
+      METABASE_URL: http://metabase:3000
     depends_on:
       clickhouse:
-        condition: service_started
+        condition: service_healthy
       etl-metadata:
-        condition: service_started
+        condition: service_healthy
       query-service:
+        condition: service_healthy
+      metabase:
         condition: service_healthy
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8003), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -113,15 +162,23 @@ services:
 
   voice-service:
     build:
-      context: ./services/voice-service
+      context: .
+      dockerfile: services/voice-service/Dockerfile
     container_name: voice-service
     ports:
-      - "8004:8004"
+      - "127.0.0.1:8004:8004"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
-      - ./.env.microservices
+      - ./.env
     volumes:
+      - voice_service_media:/app/media
       - "C:/Users/massa/.cache/huggingface/hub/models--google--timesfm-2.5-200m-pytorch/snapshots/1d952420fba87f3c6dee4f240de0f1a0fbc790e3:/models/timesfm"
     environment:
+      SERVICE_NAME: voice-service
+      READINESS_TCP_TARGETS: clickhouse:8123,kafka:9092
+      READINESS_HTTP_URLS: http://ai-service:8005/health/,http://query-service:8006/health/,http://visualization-service:8007/health/,http://subscription-service:8008/health/,http://metabase:3000/api/health
+      APP_ENV: ${APP_ENV:-development}
       SMALL_WHISPER_URL: http://ai-service:8005
       SMALL_WHISPER_HEALTH_TIMEOUT_SECONDS: ${SMALL_WHISPER_HEALTH_TIMEOUT_SECONDS:-5}
       SMALL_WHISPER_CONNECT_TIMEOUT_SECONDS: ${SMALL_WHISPER_CONNECT_TIMEOUT_SECONDS:-10}
@@ -133,6 +190,7 @@ services:
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      METABASE_URL: http://metabase:3000
     depends_on:
       ai-service:
         condition: service_healthy
@@ -143,15 +201,17 @@ services:
       subscription-service:
         condition: service_healthy
       clickhouse:
-        condition: service_started
+        condition: service_healthy
       kafka:
-        condition: service_started
+        condition: service_healthy
+      metabase:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8004), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -159,46 +219,55 @@ services:
 
   ai-service:
     build:
-      context: ./services/ai-service
+      context: .
+      dockerfile: services/ai-service/Dockerfile
     container_name: ai-service
     ports:
-      - "8005:8005"
+      - "127.0.0.1:8005:8005"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - whisper_cache:/root/.cache/whisper
       - "C:/Users/massa/.cache/huggingface/hub/models--google--timesfm-2.5-200m-pytorch/snapshots/1d952420fba87f3c6dee4f240de0f1a0fbc790e3:/models/timesfm"
     env_file:
-      - ./.env.microservices
+      - ./.env
     environment:
+      <<: *ollama-docker-host-env
+      APP_ENV: ${APP_ENV:-development}
+      SERVICE_NAME: ai-service
+      READINESS_TCP_TARGETS: clickhouse:8123,redis:6379
       DJANGO_SETTINGS_MODULE: backend.settings
       PYTHONPATH: /app
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
-      WHISPER_MODEL_NAME: ${WHISPER_MODEL_NAME:-tiny}
+      WHISPER_MODEL_NAME: ${WHISPER_MODEL_NAME:-small}
       WHISPER_CACHE_DIR: ${WHISPER_CACHE_DIR:-/root/.cache/whisper}
-      WHISPER_TASK: ${WHISPER_TASK:-translate}
+      WHISPER_TASK: ${WHISPER_TASK:-transcribe}
       TRANSCRIPTION_REDIS_URL: ${TRANSCRIPTION_REDIS_URL:-redis://redis:6379/0}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-3n-e4b-it:free}
     depends_on:
-      - clickhouse
-      - redis
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8005), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
       start_period: 20s
 
   redis:
-    image: redis:7-alpine
+    image: redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065
     container_name: redis
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -210,27 +279,36 @@ services:
 
   query-service:
     build:
-      context: ./services/query-service
+      context: .
+      dockerfile: services/query-service/Dockerfile
     container_name: query-service
     ports:
-      - "8006:8006"
+      - "127.0.0.1:8006:8006"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
-      - ./.env.microservices
+      - ./.env
     environment:
+      SERVICE_NAME: query-service
+      READINESS_TCP_TARGETS: clickhouse:8123,kafka:9092
+      READINESS_HTTP_URLS: http://etl-connector:8000/api/ready/,http://etl-metadata:8000/api/ready/,http://subscription-service:8008/health/
+      APP_ENV: ${APP_ENV:-development}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ETL_SERVICE_URL: ${ETL_SERVICE_URL:-http://etl-connector:8000}
       METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
+      ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
+      INGESTION_CALLBACK_API_KEY: ${INGESTION_CALLBACK_API_KEY:?INGESTION_CALLBACK_API_KEY must be set}
     depends_on:
       clickhouse:
-        condition: service_started
+        condition: service_healthy
       kafka:
-        condition: service_started
+        condition: service_healthy
       etl-connector:
-        condition: service_started
+        condition: service_healthy
       etl-metadata:
-        condition: service_started
+        condition: service_healthy
       subscription-service:
         condition: service_healthy
     healthcheck:
@@ -238,7 +316,7 @@ services:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8006), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -246,21 +324,35 @@ services:
 
   visualization-service:
     build:
-      context: ./services/visualization-service
+      context: .
+      dockerfile: services/visualization-service/Dockerfile
     container_name: visualization-service
     ports:
-      - "8007:8007"
+      - "127.0.0.1:8007:8007"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
-      - ./.env.microservices
+      - ./.env
+    environment:
+      SERVICE_NAME: visualization-service
+      READINESS_HTTP_URLS: http://query-service:8006/health/,http://report-service:8003/health/,http://metabase:3000/api/health
+      APP_ENV: ${APP_ENV:-development}
+      VISUALIZATION_CHART_SELECTOR_OLLAMA_URL: http://host.docker.internal:11434/api/generate
+      VISUALIZATION_CHART_SELECTOR_OLLAMA_MODEL: gemma3:1b
+      METABASE_URL: http://metabase:3000
     depends_on:
+      query-service:
+        condition: service_healthy
       report-service:
+        condition: service_healthy
+      metabase:
         condition: service_healthy
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8007), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -268,12 +360,17 @@ services:
 
   subscription-service:
     build:
-      context: ./services/subscription-service
+      context: .
+      dockerfile: services/subscription-service/Dockerfile
     container_name: subscription-service
     ports:
-      - "8009:8008"
+      - "127.0.0.1:8009:8008"
     env_file:
-      - ./.env.microservices
+      - ./.env
+    environment:
+      SERVICE_NAME: subscription-service
+      READINESS_HTTP_URLS: http://workspace-service:8002/health/
+      APP_ENV: ${APP_ENV:-development}
     depends_on:
       workspace-service:
         condition: service_healthy
@@ -282,7 +379,7 @@ services:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8008), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -290,12 +387,17 @@ services:
 
   notification-service:
     build:
-      context: ./services/notification-service
+      context: .
+      dockerfile: services/notification-service/Dockerfile
     container_name: notification-service
     ports:
-      - "8010:8010"
+      - "127.0.0.1:8010:8010"
     env_file:
-      - ./.env.microservices
+      - ./.env
+    environment:
+      SERVICE_NAME: notification-service
+      READINESS_HTTP_URLS: http://voice-service:8004/health/
+      APP_ENV: ${APP_ENV:-development}
     depends_on:
       voice-service:
         condition: service_healthy
@@ -304,7 +406,7 @@ services:
         - CMD
         - python
         - -c
-        - import socket; s=socket.create_connection(('127.0.0.1', 8010), 5); s.close()
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/ready/', timeout=5).read()
       interval: 10s
       timeout: 5s
       retries: 20
@@ -312,39 +414,71 @@ services:
 
   notification-expiry-worker:
     build:
-      context: ./services/notification-service
+      context: .
+      dockerfile: services/notification-service/Dockerfile
     container_name: notification-expiry-worker
     env_file:
-      - ./.env.microservices
+      - ./.env
+    environment:
+      APP_ENV: ${APP_ENV:-development}
     command:
       - sh
       - -c
       - >
-        python manage.py migrate &&
         while true; do
+          date +%s > /tmp/notification-expiry-heartbeat;
           python manage.py send_expiry_warnings;
-          sleep ${NOTIFICATION_EXPIRY_CHECK_INTERVAL_SECONDS:-21600};
+          remaining=${NOTIFICATION_EXPIRY_CHECK_INTERVAL_SECONDS:-21600};
+          while [ "$$remaining" -gt 0 ]; do
+            date +%s > /tmp/notification-expiry-heartbeat;
+            step=30; [ "$$remaining" -lt "$$step" ] && step="$$remaining";
+            sleep "$$step"; remaining=$$((remaining-step));
+          done;
         done
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import os,time; p='/tmp/notification-expiry-heartbeat'; assert os.path.exists(p) and time.time()-os.path.getmtime(p) < 90
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       notification-service:
         condition: service_healthy
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
+    image: confluentinc/cp-zookeeper@sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
+      - "127.0.0.1:2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+      - zookeeper_secrets:/etc/zookeeper/secrets
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z -w 2 127.0.0.1 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
+    image: confluentinc/cp-kafka@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
     container_name: kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+      - kafka_secrets:/etc/kafka/secrets
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -353,46 +487,122 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server 127.0.0.1:9092 --list >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
 
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest
+    image: provectuslabs/kafka-ui@sha256:8f2ff02d64b0a7a2b71b6b3b3148b85f66d00ec20ad40c30bdcd415d46d31818
     container_name: kafka-ui
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health >/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
 
-  surrealdb:
-    image: surrealdb/surrealdb:latest
-    container_name: surrealdb
-    command: start --user root --pass root --log debug memory
-    ports:
-      - "8008:8000"
+  surrealdb-volume-init:
+    image: postgres@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["install -d -o 65532 -g 65532 -m 0700 /data/biavora && chown -R 65532:65532 /data/biavora && chmod 0700 /data/biavora"]
     volumes:
       - surreal_data:/data
+    restart: "no"
+
+  surrealdb:
+    image: surrealdb/surrealdb@sha256:849c9ad548415ddf06b80d834929ddc43fb9c482d2ef9b51113641a8e47fad63
+    container_name: surrealdb
+    command: start --user ${SURREAL_USER:?SURREAL_USER must be set} --pass ${SURREAL_PASS:?SURREAL_PASS must be set} --log info rocksdb:///data/biavora/database
+    ports:
+      - "127.0.0.1:8008:8000"
+    volumes:
+      - surreal_data:/data
+    depends_on:
+      surrealdb-volume-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://127.0.0.1:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  metabase-db:
+    image: postgres@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+    container_name: metabase-db
+    environment:
+      POSTGRES_DB: metabase_app
+      POSTGRES_USER: metabase_app
+      POSTGRES_PASSWORD: ${METABASE_APP_DB_PASSWORD:?METABASE_APP_DB_PASSWORD must be set}
+    volumes:
+      - metabase_app_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase_app -d metabase_app"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  metabase:
+    image: metabase/metabase@sha256:f8ad50bba07c555e103097218e9a8b4edbd64311e754072d148578cd54c5bd9a
+    container_name: metabase
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase_app
+      MB_DB_HOST: metabase-db
+      MB_DB_PORT: "5432"
+      MB_DB_USER: metabase_app
+      MB_DB_PASS: ${METABASE_APP_DB_PASSWORD:?METABASE_APP_DB_PASSWORD must be set}
+      MB_ENCRYPTION_SECRET_KEY: ${METABASE_ENCRYPTION_SECRET_KEY:?METABASE_ENCRYPTION_SECRET_KEY must be set}
+    depends_on:
+      metabase-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:3000/api/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server@sha256:0b2d7824347397b2ba6fcb216f0ae772568105f1f47e19f0d3247e24c79bc10a
     container_name: clickhouse
     environment:
-      CLICKHOUSE_DB: etl
-      CLICKHOUSE_USER: etl_user
-      CLICKHOUSE_PASSWORD: etl_pass123
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-etl}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query \"SELECT 1\" >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   clamav:
-    image: clamav/clamav:latest
+    image: clamav/clamav@sha256:b32e587feae9f156d660704beeec4ee69c79fcf5af092bdc0f2f93892a29b553
     container_name: clamav
     ports:
-      - "3310:3310"
+      - "127.0.0.1:3310:3310"
     volumes:
       - clamav_data:/var/lib/clamav
     environment:
@@ -410,22 +620,32 @@ services:
       dockerfile: connector-service/Dockerfile
     container_name: etl-connector
     ports:
-      - "8101:8000"
+      - "127.0.0.1:8101:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - uploaded-files:/app/uploaded_files
     environment:
+      SERVICE_NAME: etl-connector
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,etl-connector
+      READINESS_TCP_TARGETS: kafka:9092,surrealdb:8000,clickhouse:9000,clamav:3310
       PYTHONPATH: /app
+      APP_ENV: ${APP_ENV:-development}
+      DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
+      ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
+      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:?CREDENTIAL_SECRET_KEY must be set}
+      ETL_APPROVED_DESTINATION_CIDRS: ${ETL_APPROVED_DESTINATION_CIDRS:-}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
       KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
-      CLICKHOUSE_USER: etl_user
-      CLICKHOUSE_PASSWORD: etl_pass123
-      CLICKHOUSE_DATABASE: etl
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-etl}
       SURREAL_URL: http://surrealdb:8000/sql
-      SURREAL_USER: root
-      SURREAL_PASS: root
+      SURREAL_USER: ${SURREAL_USER:?SURREAL_USER must be set}
+      SURREAL_PASS: ${SURREAL_PASS:?SURREAL_PASS must be set}
       SURREAL_NS: bi_etl
       SURREAL_DB: etl_logs
       VIRUS_SCAN_ENABLED: "true"
@@ -434,10 +654,20 @@ services:
       CLAMAV_PORT: "3310"
       CLAMAV_TIMEOUT: "30"
     depends_on:
-      - kafka
-      - surrealdb
-      - clickhouse
-      - clamav
+      kafka:
+        condition: service_healthy
+      surrealdb:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready/', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   etl-detector:
     build:
@@ -445,26 +675,41 @@ services:
       dockerfile: detector-service/Dockerfile
     container_name: etl-detector
     ports:
-      - "8102:8000"
+      - "127.0.0.1:8102:8000"
     environment:
+      SERVICE_NAME: etl-detector
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,etl-detector
+      READINESS_TCP_TARGETS: kafka:9092,surrealdb:8000,clickhouse:9000
       PYTHONPATH: /app
+      APP_ENV: ${APP_ENV:-development}
+      DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
+      ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
       KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
-      CLICKHOUSE_USER: etl_user
-      CLICKHOUSE_PASSWORD: etl_pass123
-      CLICKHOUSE_DATABASE: etl
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-etl}
       SURREAL_URL: http://surrealdb:8000/sql
-      SURREAL_USER: root
-      SURREAL_PASS: root
+      SURREAL_USER: ${SURREAL_USER:?SURREAL_USER must be set}
+      SURREAL_PASS: ${SURREAL_PASS:?SURREAL_PASS must be set}
       SURREAL_NS: bi_etl
       SURREAL_DB: etl_logs
     depends_on:
-      - kafka
-      - surrealdb
-      - clickhouse
+      kafka:
+        condition: service_healthy
+      surrealdb:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready/', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   etl-extractor:
     build:
@@ -472,29 +717,48 @@ services:
       dockerfile: extractor-service/Dockerfile
     container_name: etl-extractor
     ports:
-      - "8103:8000"
+      - "127.0.0.1:8103:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - uploaded-files:/app/uploaded_files
     environment:
+      SERVICE_NAME: etl-extractor
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,etl-extractor
+      READINESS_TCP_TARGETS: kafka:9092,surrealdb:8000,clickhouse:9000
       PYTHONPATH: /app
+      APP_ENV: ${APP_ENV:-development}
+      DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
+      ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
+      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:?CREDENTIAL_SECRET_KEY must be set}
+      ETL_APPROVED_DESTINATION_CIDRS: ${ETL_APPROVED_DESTINATION_CIDRS:-}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
       KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
       EXTRACTOR_DLQ_TOPIC: errors
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
-      CLICKHOUSE_USER: etl_user
-      CLICKHOUSE_PASSWORD: etl_pass123
-      CLICKHOUSE_DATABASE: etl
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-etl}
       SURREAL_URL: http://surrealdb:8000/sql
-      SURREAL_USER: root
-      SURREAL_PASS: root
+      SURREAL_USER: ${SURREAL_USER:?SURREAL_USER must be set}
+      SURREAL_PASS: ${SURREAL_PASS:?SURREAL_PASS must be set}
       SURREAL_NS: bi_etl
       SURREAL_DB: etl_logs
     depends_on:
-      - kafka
-      - surrealdb
-      - clickhouse
+      kafka:
+        condition: service_healthy
+      surrealdb:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready/', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   etl-transformer:
     build:
@@ -502,27 +766,42 @@ services:
       dockerfile: transformer-service/Dockerfile
     container_name: etl-transformer
     ports:
-      - "8104:8000"
+      - "127.0.0.1:8104:8000"
     environment:
+      SERVICE_NAME: etl-transformer
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,etl-transformer
+      READINESS_TCP_TARGETS: kafka:9092,surrealdb:8000,clickhouse:9000
       PYTHONPATH: /app
+      APP_ENV: ${APP_ENV:-development}
+      DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
+      ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
       KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
       TRANSFORMER_DLQ_TOPIC: errors
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
-      CLICKHOUSE_USER: etl_user
-      CLICKHOUSE_PASSWORD: etl_pass123
-      CLICKHOUSE_DATABASE: etl
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-etl}
       SURREAL_URL: http://surrealdb:8000/sql
-      SURREAL_USER: root
-      SURREAL_PASS: root
+      SURREAL_USER: ${SURREAL_USER:?SURREAL_USER must be set}
+      SURREAL_PASS: ${SURREAL_PASS:?SURREAL_PASS must be set}
       SURREAL_NS: bi_etl
       SURREAL_DB: etl_logs
     depends_on:
-      - kafka
-      - surrealdb
-      - clickhouse
+      kafka:
+        condition: service_healthy
+      surrealdb:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready/', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   etl-loader:
     build:
@@ -530,27 +809,42 @@ services:
       dockerfile: loader-service/Dockerfile
     container_name: etl-loader
     ports:
-      - "8105:8000"
+      - "127.0.0.1:8105:8000"
     environment:
+      SERVICE_NAME: etl-loader
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,etl-loader
+      READINESS_TCP_TARGETS: kafka:9092,surrealdb:8000,clickhouse:9000
       PYTHONPATH: /app
+      APP_ENV: ${APP_ENV:-development}
+      DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
+      ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
       KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
       LOADER_DLQ_TOPIC: errors
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
-      CLICKHOUSE_USER: etl_user
-      CLICKHOUSE_PASSWORD: etl_pass123
-      CLICKHOUSE_DATABASE: etl
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-etl}
       SURREAL_URL: http://surrealdb:8000/sql
-      SURREAL_USER: root
-      SURREAL_PASS: root
+      SURREAL_USER: ${SURREAL_USER:?SURREAL_USER must be set}
+      SURREAL_PASS: ${SURREAL_PASS:?SURREAL_PASS must be set}
       SURREAL_NS: bi_etl
       SURREAL_DB: etl_logs
     depends_on:
-      - kafka
-      - clickhouse
-      - surrealdb
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      surrealdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready/', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   etl-metadata:
     build:
@@ -558,24 +852,54 @@ services:
       dockerfile: metadata-service/Dockerfile
     container_name: etl-metadata
     ports:
-      - "8106:8000"
+      - "127.0.0.1:8106:8000"
     environment:
+      SERVICE_NAME: etl-metadata
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,etl-metadata
+      READINESS_TCP_TARGETS: kafka:9092,surrealdb:8000,clickhouse:9000
       PYTHONPATH: /app
+      APP_ENV: ${APP_ENV:-development}
+      DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
+      ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
+      INGESTION_CALLBACK_API_KEY: ${INGESTION_CALLBACK_API_KEY:?INGESTION_CALLBACK_API_KEY must be set}
+      QUERY_SERVICE_URL: ${QUERY_SERVICE_URL:-http://query-service:8006}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
       KAFKA_REQUIRED_TOPICS: raw_data,transformed_data,load_requests,metadata_updates,errors,quarantine,connection_topic,schema_topic,extracted_rows_topic,clean_rows_topic,load_rows_topic,metadata_topic,extracted_rows_dlq,clean_rows_dlq,load_rows_dlq
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?CLICKHOUSE_USER must be set}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-etl}
       SURREAL_URL: http://surrealdb:8000/sql
-      SURREAL_USER: root
-      SURREAL_PASS: root
+      SURREAL_USER: ${SURREAL_USER:?SURREAL_USER must be set}
+      SURREAL_PASS: ${SURREAL_PASS:?SURREAL_PASS must be set}
       SURREAL_NS: bi_etl
       SURREAL_DB: etl_logs
     depends_on:
-      - kafka
-      - surrealdb
+      kafka:
+        condition: service_healthy
+      surrealdb:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready/', timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
 volumes:
   uploaded-files:
+  voice_service_media:
   surreal_data:
+  metabase_app_data:
+  kafka_data:
+  kafka_secrets:
+  zookeeper_data:
+  zookeeper_logs:
+  zookeeper_secrets:
   clickhouse_data:
   clickhouse_logs:
   clamav_data:

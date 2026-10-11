@@ -32,8 +32,6 @@ from .services.auth_client import AuthServiceError, get_auth_service_client
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-=======
 def _principal_attr(user: object, *names: str) -> str:
     for name in names:
         value = getattr(user, name, None)
@@ -359,7 +357,6 @@ class WorkspaceDetailByIdView(APIView):
         )
 
 
->>>>>>> c791036 (final update)
 class WorkspaceUpdateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -791,13 +788,27 @@ class RemovePendingInvitationView(APIView):
 class AcceptInvitationView(APIView):
     permission_classes = []
 
+    @staticmethod
+    def _authenticated_actor_matches(request, user: dict[str, Any]) -> bool:
+        principal = getattr(request, "user", None)
+        if not bool(getattr(principal, "is_authenticated", False)):
+            return False
+        principal_id = _principal_int(principal, "id", "pk")
+        principal_email = str(getattr(principal, "email", "") or "").strip().lower()
+        expected_email = str(user.get("email") or "").strip().lower()
+        try:
+            expected_id = int(user.get("id"))
+        except (TypeError, ValueError):
+            return False
+        return principal_id == expected_id and bool(principal_email) and principal_email == expected_email
+
     @transaction.atomic
     def get(self, request):
         token = str(request.query_params.get("token") or "").strip()
         if not token:
             return Response({"success": False, "message": "Invitation token is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        invitation = Invitation.objects.select_related("workspace").filter(token=token).first()
+        invitation = Invitation.objects.select_for_update().select_related("workspace").filter(token=token).first()
         if not invitation:
             return Response({"success": False, "message": "Invalid invitation link."}, status=status.HTTP_400_BAD_REQUEST)
         if invitation.status == "accepted":
@@ -825,6 +836,16 @@ class AcceptInvitationView(APIView):
                 status=status.HTTP_200_OK,
             )
 
+        if not self._authenticated_actor_matches(request, user):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Sign in as the invited account to accept this invitation.",
+                    "need_login": True,
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
         user_id = int(user.get("id"))
         WorkspaceMember.objects.update_or_create(
             workspace=workspace,
@@ -843,9 +864,6 @@ class AcceptInvitationView(APIView):
         )
         invitation.status = "accepted"
         invitation.save(update_fields=["status"])
-
-        if str(user.get("role") or "").lower() != invited_role:
-            _patch_user(user_id, {"role": invited_role})
 
         notification_client = get_notification_client()
         notification_result = notification_client.send_event(

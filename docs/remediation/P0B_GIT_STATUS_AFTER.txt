@@ -1,0 +1,323 @@
+D  .env.microservices
+ D .env.microservices.example
+ M .gitignore
+ M README.md
+ M bi_platform_shared/__pycache__/__init__.cpython-312.pyc
+ D bi_platform_shared/__pycache__/logging_utils.cpython-312.pyc
+ D bi_platform_shared/audio/__pycache__/__init__.cpython-312.pyc
+ D bi_platform_shared/audio/__pycache__/validation.cpython-312.pyc
+ M bi_platform_shared/contracts/__pycache__/__init__.cpython-312.pyc
+ M bi_platform_shared/contracts/__pycache__/chart.cpython-312.pyc
+ M bi_platform_shared/contracts/__pycache__/execution.cpython-312.pyc
+ M bi_platform_shared/contracts/__pycache__/intent.cpython-312.pyc
+ M bi_platform_shared/contracts/__pycache__/pipeline.cpython-312.pyc
+ M bi_platform_shared/contracts/__pycache__/trace.cpython-312.pyc
+ M bi_platform_shared/http/__pycache__/__init__.cpython-312.pyc
+ M bi_platform_shared/http/__pycache__/client.cpython-312.pyc
+ M bi_platform_shared/permissions/__pycache__/__init__.cpython-312.pyc
+ M bi_platform_shared/permissions/__pycache__/roles.cpython-312.pyc
+ D bi_platform_shared/predictive/__pycache__/__init__.cpython-312.pyc
+ D bi_platform_shared/predictive/__pycache__/detector.cpython-312.pyc
+ M bi_platform_shared/sql/__pycache__/__init__.cpython-312.pyc
+ M bi_platform_shared/sql/__pycache__/normalization.cpython-312.pyc
+ D debug_reports/semantic_sql_failure_report.md
+ D debug_reports/semantic_sql_fix_report.md
+ M docker-compose.yml
+ D docs/README.md
+ D docs/reports/audits/ai_service_final_system_audit.md
+ D docs/reports/audits/ai_service_full_audit.md
+ D docs/reports/audits/ai_service_full_remediation_report.md
+ D docs/reports/audits/ai_service_intent_sql_chart_forecast_fix_report.md
+ D docs/reports/audits/ai_service_post_fix_reaudit.md
+ D docs/reports/audits/full_system_end_to_end_audit.md
+ D docs/reports/audits/visualization_and_chart_pipeline_fix_report.md
+ M etl-final/Test-File/run_full_validation.py
+ M etl-final/Test-File/test_full_pipeline.py
+ M etl-final/Test-File/validate_pipeline.py
+ M etl-final/Test-File/verify_pipeline.py
+ M etl-final/connector-service/connector/connector/settings.py
+ M etl-final/connector-service/connector/etl_engine/test_api_validation.py
+ M etl-final/connector-service/connector/etl_engine/utils.py
+ M etl-final/connector-service/connector/etl_engine/views.py
+ M etl-final/detector-service/detector/core/views.py
+ M etl-final/detector-service/detector/detector/settings.py
+ M etl-final/docker-compose.yml
+ M etl-final/extractor-service/extractor/engine/views.py
+ M etl-final/extractor-service/extractor/extractor/settings.py
+ M etl-final/loader-service/loader/engine/clickhouse_client.py
+ M etl-final/loader-service/loader/engine/kafka_listener.py
+ M etl-final/loader-service/loader/engine/views.py
+ M etl-final/loader-service/loader/loader/settings.py
+ M etl-final/metadata-service/metadata/api/query_builder.py
+ M etl-final/metadata-service/metadata/api/views.py
+ M etl-final/metadata-service/metadata/metadata/settings.py
+ M etl-final/shared/utils/credential_encryption.py
+ M etl-final/shared/utils/surreal_client.py
+ M etl-final/shared/utils/test_credential_encryption.py
+ M etl-final/transformer-service/transformer/engine/views.py
+ M etl-final/transformer-service/transformer/transformer/settings.py
+ M frontend/README.md
+ M frontend/index.html
+ M frontend/package-lock.json
+ M frontend/package.json
+ M frontend/src/animations/formVariants.js
+ M frontend/src/animations/homeVariants.js
+ M frontend/src/animations/uiVariants.js
+ M frontend/src/animations/variants.js
+ M frontend/src/api/endpoints.js
+ M frontend/src/components/Badge.jsx
+ M frontend/src/components/Button.jsx
+ M frontend/src/components/Card.jsx
+ M frontend/src/components/EmptyState.jsx
+ M frontend/src/components/ErrorAlert.jsx
+ M frontend/src/components/ErrorBoundary.jsx
+ M frontend/src/components/Input.jsx
+ M frontend/src/components/LoadingSkeleton.jsx
+ M frontend/src/components/LoadingSpinner.jsx
+ M frontend/src/components/Modal.jsx
+ M frontend/src/components/Select.jsx
+ M frontend/src/components/ai-trace/AITracePanel.jsx
+ M frontend/src/components/preprocessing/SchemaUsageViewer.jsx
+ M frontend/src/components/preprocessing/TermCorrectionsList.jsx
+ M frontend/src/components/preprocessing/TextDiffViewer.jsx
+ M frontend/src/components/subscription/SubscriptionPlansPanel.jsx
+ M frontend/src/layouts/AuthLayout.jsx
+ M frontend/src/layouts/DashboardLayout.jsx
+ M frontend/src/main.jsx
+ M frontend/src/pages/Home.jsx
+ M frontend/src/pages/admin/AdminDashboard.jsx
+ M frontend/src/pages/auth/ForgotPassword.jsx
+ M frontend/src/pages/auth/Login.jsx
+ M frontend/src/pages/auth/Signup.jsx
+ M frontend/src/pages/auth/VerifyEmail.jsx
+ M frontend/src/pages/dashboard/Dashboard.jsx
+ M frontend/src/pages/dashboard/LineageExplorer.jsx
+ M frontend/src/pages/database/DatabaseManagement.jsx
+ M frontend/src/pages/profile/Profile.jsx
+ M frontend/src/pages/subscription/SubscriptionPlansPage.jsx
+ M frontend/src/pages/voice-reports/DashboardViewer.jsx
+ M frontend/src/pages/voice-reports/SQLEditor.jsx
+ M frontend/src/pages/voice-reports/VoiceReportManager.jsx
+ M frontend/src/pages/workspace/AcceptInvite.jsx
+ M frontend/src/pages/workspace/InviteMember.jsx
+ M frontend/src/pages/workspace/MembersList.jsx
+ M frontend/src/pages/workspace/WorkspaceSettings.jsx
+ M frontend/src/styles/index.css
+ M frontend/src/utils/reportStatus.js
+ M frontend/tailwind.config.js
+ M scripts/reset_all_databases.sh
+ M scripts/start_project.sh
+ M services/ai-service/Dockerfile
+ M services/ai-service/backend/settings.py
+ M services/ai-service/dagster_pipeline/assets/execution.py
+ M services/ai-service/dagster_pipeline/assets/intent_extraction.py
+ M services/ai-service/forecasting/dagster_handler.py
+ ? services/ai-service/forecasting/timesfm
+ M services/ai-service/intent_extraction/intent_extraction_task.py
+ M services/ai-service/intent_extraction/llm_extractor.py
+ M services/ai-service/intent_extraction/predictive_parser.py
+ M services/ai-service/intent_extraction/routing.py
+ M services/ai-service/intent_extraction/tests.py
+ M services/ai-service/intent_extraction/validation.py
+ M services/ai-service/llm_app/schema_provider.py
+ M services/ai-service/llm_app/views.py
+ M services/ai-service/preprocessing_high/diagnostics.py
+ M services/ai-service/preprocessing_high/llm_client.py
+ M services/ai-service/preprocessing_high/preprocess_high_task.py
+ M services/ai-service/preprocessing_high/schemas.py
+ M services/ai-service/preprocessing_low/llm_client.py
+ M services/ai-service/preprocessing_low/preprocess_task.py
+ M services/ai-service/reasoning_app/intent_classification_task.py
+ M services/ai-service/shared/chart_recommender.py
+ M services/ai-service/shared/input_classifier.py
+ M services/ai-service/shared/pipeline.py
+ M services/ai-service/shared/preprocessing_transparency.py
+ M services/ai-service/shared/query_planner.py
+ M services/ai-service/shared/sql_compiler.py
+ M services/ai-service/shared/sql_review.py
+ M services/ai-service/shared/tests_sql_review.py
+ M services/ai-service/tests/test_bi_hardening.py
+ M services/ai-service/tests/test_preprocessing_high_recovery.py
+ M services/ai-service/whisper_app/views.py
+ M services/api-gateway/Dockerfile
+ M services/api-gateway/gateway/routing.py
+ M services/api-gateway/service_config/settings.py
+ M services/auth-service/service_config/settings.py
+ M services/auth-service/users/permissions.py
+ M services/auth-service/users/serializers.py
+ M services/notification-service/service_config/settings.py
+ M services/query-service/Dockerfile
+ M services/query-service/database/migrations/0001_initial.py
+ M services/query-service/database/models.py
+ M services/query-service/database/urls.py
+ M services/query-service/database/utils.py
+ M services/query-service/database/views.py
+ M services/query-service/query_api/application/query_execution.py
+ M services/query-service/query_api/services/__init__.py
+ M services/query-service/query_api/services/clickhouse_executor.py
+ M services/query-service/query_api/services/sql_guard.py
+ M services/query-service/query_api/services/workspace_db_resolver.py
+ M services/query-service/query_api/urls.py
+ M services/query-service/query_api/views.py
+ M services/query-service/requirements.txt
+ M services/query-service/service_config/settings.py
+ M services/query-service/service_config/urls.py
+ M services/report-service/Dockerfile
+ M services/report-service/requirements.txt
+ M services/report-service/service_config/settings.py
+ M services/report-service/voice_reports/constants/chart_types.py
+ M services/report-service/voice_reports/report_urls.py
+ M services/report-service/voice_reports/services/ai_trace_service.py
+ M services/report-service/voice_reports/services/clickhouse_executor.py
+ M services/report-service/voice_reports/services/jwt_embedding.py
+ M services/report-service/voice_reports/services/metabase_service.py
+ M services/report-service/voice_reports/services/sql_guard.py
+ M services/report-service/voice_reports/utils/chart_selection.py
+ M services/report-service/voice_reports/views.py
+ M services/subscription-service/service_config/settings.py
+ M services/subscription-service/subscription/views.py
+ M services/visualization-service/Dockerfile
+ M services/visualization-service/requirements.txt
+ M services/visualization-service/service_config/settings.py
+ M services/visualization-service/visualization_api/constants/chart_types.py
+ M services/visualization-service/visualization_api/services/jwt_embedding.py
+ M services/visualization-service/visualization_api/services/metabase_service.py
+ M services/visualization-service/visualization_api/tests/test_metabase_service.py
+ M services/visualization-service/visualization_api/views.py
+ M services/voice-service/Dockerfile
+ M services/voice-service/requirements.txt
+ M services/voice-service/service_config/settings.py
+ M services/voice-service/service_config/urls.py
+ M services/voice-service/voice_reports/admin.py
+ M services/voice-service/voice_reports/application/orchestration_service.py
+ M services/voice-service/voice_reports/constants/chart_types.py
+ M services/voice-service/voice_reports/infrastructure/auth_context.py
+ M services/voice-service/voice_reports/infrastructure/workspace_client.py
+ M services/voice-service/voice_reports/models.py
+ M services/voice-service/voice_reports/services/ai_trace_service.py
+ M services/voice-service/voice_reports/services/clickhouse_executor.py
+ M services/voice-service/voice_reports/services/event_bus.py
+ M services/voice-service/voice_reports/services/jwt_embedding.py
+ M services/voice-service/voice_reports/services/metabase_service.py
+ M services/voice-service/voice_reports/services/sql_guard.py
+ M services/voice-service/voice_reports/tests_ai_trace_service.py
+ M services/voice-service/voice_reports/urls.py
+ M services/voice-service/voice_reports/utils/chart_selection.py
+ M services/voice-service/voice_reports/views.py
+ M services/voice-service/voice_reports/voice_urls.py
+ M services/workspace-service/service_config/settings.py
+ M services/workspace-service/workspace/migrations/0001_initial.py
+ M services/workspace-service/workspace/migrations/0002_alter_workspacemember_unique_together_and_more.py
+ M services/workspace-service/workspace/serializers.py
+ M services/workspace-service/workspace/urls.py
+ M services/workspace-service/workspace/views.py
+?? .dockerignore
+?? .env.example
+?? REDESIGN_PLAN.md
+?? REDESIGN_PLAN_PROFILE.md
+?? RUNTIME_CONFIGURATION_AND_STARTUP_VERIFICATION_REPORT.md
+?? SPRINT_2_IMPLEMENTATION_AND_HARDENING_REPORT.md
+?? backups/
+?? bi_platform_shared/__init__.py
+?? bi_platform_shared/audio/__init__.py
+?? bi_platform_shared/audio/validation.py
+?? bi_platform_shared/contracts/__init__.py
+?? bi_platform_shared/contracts/chart.py
+?? bi_platform_shared/contracts/execution.py
+?? bi_platform_shared/contracts/intent.py
+?? bi_platform_shared/contracts/pipeline.py
+?? bi_platform_shared/contracts/query.py
+?? bi_platform_shared/contracts/trace.py
+?? bi_platform_shared/contracts/viz.py
+?? bi_platform_shared/http/__init__.py
+?? bi_platform_shared/http/client.py
+?? bi_platform_shared/logging_utils.py
+?? bi_platform_shared/permissions/__init__.py
+?? bi_platform_shared/permissions/roles.py
+?? bi_platform_shared/predictive/__init__.py
+?? bi_platform_shared/predictive/detector.py
+?? bi_platform_shared/pyproject.toml
+?? bi_platform_shared/semantic/
+?? bi_platform_shared/sql/__init__.py
+?? bi_platform_shared/sql/guard.py
+?? bi_platform_shared/sql/normalization.py
+?? docs/audit/
+?? docs/remediation/
+?? etl-final/.dockerignore
+?? etl-final/shared/security/
+?? frontend/.env.example
+?? frontend/UI_AUDIT_HOME_SIGNUP_LOGIN_AR.md
+?? frontend/UI_AUDIT_PROFILE_AR.md
+?? frontend/src/components/ParticleBackground.jsx
+?? frontend/src/pages/dashboard/DashboardShell.jsx
+?? frontend/src/pages/dashboard/components/
+?? frontend/src/pages/dashboard/dashboardGridLayout.js
+?? frontend/src/pages/dashboard/dashboardGridLayout.test.js
+?? frontend/src/store/theme.js
+?? frontend/src/utils/embedAppearance.js
+?? frontend/src/utils/voiceWorkflowError.js
+?? frontend/src/utils/voiceWorkflowError.test.js
+?? scripts/audit_backup.py
+?? scripts/audit_container_migrations.py
+?? scripts/audit_final_storage.py
+?? scripts/audit_inventory.py
+?? scripts/audit_metabase_h2.py
+?? scripts/audit_migrations.py
+?? scripts/audit_restore_postgres.py
+?? scripts/audit_runtime.py
+?? scripts/audit_storage_detail.py
+?? scripts/audit_verify_startup.py
+?? scripts/finalize_phase0_audit.py
+?? scripts/repair-local-metabase-credentials.ps1
+?? scripts/reset-dev.ps1
+?? scripts/reset_dev.py
+?? scripts/run-migrations.ps1
+?? scripts/run-migrations.sh
+?? scripts/start-microservices.ps1
+?? scripts/verify-p0b-two-tenant.ps1
+?? scripts/verify-runtime-config.ps1
+?? scripts/write_phase0_reports.py
+?? services/ai-service/preprocessing_high/value_index.py
+?? services/ai-service/preprocessing_low/semantic_guard.py
+?? services/ai-service/shared/bi_semantic_layer.py
+?? services/ai-service/shared/bi_temporal_semantics.py
+?? services/ai-service/shared/semantic_query_plan.py
+?? services/ai-service/tests/test_bi_generalized_semantics_pipeline.py
+?? services/ai-service/tests/test_bi_semantic_layer.py
+?? services/ai-service/tests/test_bi_semantic_reasoning_integration.py
+?? services/ai-service/tests/test_bi_temporal_semantics.py
+?? services/ai-service/tests/test_preprocessing_low_semantic_guard.py
+?? services/ai-service/tests/test_tiered_resolution.py
+?? services/ai-service/tests/test_value_index.py
+?? services/api-gateway/.dockerignore
+?? services/auth-service/.dockerignore
+?? services/auth-service/users/tests_security_invitation.py
+?? services/notification-service/.dockerignore
+?? services/notification-service/notification/migrations/0002_unmanaged_foreign_model_state.py
+?? services/query-service/database/internal_authentication.py
+?? services/query-service/database/migrations/0003_database_ingestion_job_id.py
+?? services/query-service/database/migrations/0004_authorizedquerydefinition.py
+?? services/query-service/query_api/services/result_shape_analyzer.py
+?? services/query-service/tests/
+?? services/subscription-service/.dockerignore
+?? services/visualization-service/visualization_api/migrations/
+?? services/visualization-service/visualization_api/models.py
+?? services/visualization-service/visualization_api/services/chart_transformer.py
+?? services/visualization-service/visualization_api/services/chart_type_selector.py
+?? services/visualization-service/visualization_api/services/query_authorization.py
+?? services/visualization-service/visualization_api/tests/test_chart_recommendation.py
+?? services/visualization-service/visualization_api/tests/test_chart_type_selector.py
+?? services/visualization-service/visualization_api/tests/test_security_ownership_and_query_reference.py
+?? services/visualization-service/visualization_api/tests/test_visualization_spec_contract.py
+?? services/voice-service/voice_reports/dashboard_builder_views.py
+?? services/voice-service/voice_reports/migrations/0010_dashboard_builder_foundation.py
+?? services/voice-service/voice_reports/migrations/0011_backfill_dashboard_builder_seed.py
+?? services/voice-service/voice_reports/migrations/0012_add_visualization_spec.py
+?? services/voice-service/voice_reports/migrations/0013_reconcile_chart_type_state.py
+?? services/voice-service/voice_reports/serializers.py
+?? services/voice-service/voice_reports/services/dashboard_builder_service.py
+?? services/voice-service/voice_reports/tests_query_execute_metabase_fallback.py
+?? services/voice-service/voice_reports/tests_query_service_contract.py
+?? services/voice-service/voice_reports/tests_security_workspace_authorization.py
+?? services/workspace-service/.dockerignore
+?? services/workspace-service/workspace/tests_security_invitation.py

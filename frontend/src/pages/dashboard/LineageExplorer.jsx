@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-const DEFAULT_API = import.meta.env.VITE_METADATA_API_URL || 'http://localhost:8006/api'
+const DEFAULT_API = import.meta.env.VITE_METADATA_API_URL || (import.meta.env.DEV ? 'http://localhost:8006/api' : '/api')
 
 function LineageExplorer() {
   const [rowId, setRowId] = useState('')
@@ -46,7 +46,7 @@ function LineageExplorer() {
       </div>
       {error && <div className="text-red-600">{error}</div>}
       {result && (
-        <pre className="bg-gray-100 p-4 rounded text-sm overflow-auto">
+        <pre className="bg-[rgba(255,255,255,0.07)] p-4 rounded text-sm overflow-auto">
           {JSON.stringify(result, null, 2)}
         </pre>
       )}

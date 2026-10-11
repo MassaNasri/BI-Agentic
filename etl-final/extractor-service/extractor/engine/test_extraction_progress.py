@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, MagicMock, patch
 import logging
 
-from extraction_progress import (
+from .extraction_progress import (
     ExtractionProgress,
     ExtractionStatus,
     ProgressTracker

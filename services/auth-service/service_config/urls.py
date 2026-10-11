@@ -4,8 +4,11 @@ from django.contrib import admin
 from django.urls import include, path
 
 from users.views import AdminUserDetailView, AdminUsersView
+from bi_platform_shared.http.health import liveness_view, readiness_view
 
 urlpatterns = [
+    path('health/', liveness_view, name='health'),
+    path('ready/', readiness_view, name='ready'),
     path('admin/users/', AdminUsersView.as_view(), name='admin-users'),
     path('admin/users/<int:user_id>/', AdminUserDetailView.as_view(), name='admin-user-detail'),
     path('admin/', admin.site.urls),

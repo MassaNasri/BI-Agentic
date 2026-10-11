@@ -1,3 +1,4 @@
+import math
 from unittest.mock import Mock, patch
 
 from .cleaning_rules import CleaningRules
@@ -16,6 +17,22 @@ def test_infer_type_preserves_leading_zero_identifiers():
     row = {"code": "007"}
     cleaned = rules.coerce_types(row)
     assert cleaned["code"] == "007"
+
+
+def test_csv_null_sentinels_and_non_finite_numbers_are_removed():
+    rules = CleaningRules()
+
+    cleaned, warnings = rules.apply_all({
+        "none_value": None,
+        "nan_value": math.nan,
+        "infinity": math.inf,
+        "null_text": " NULL ",
+        "na_text": "N/A",
+        "valid": " kept ",
+    })
+
+    assert warnings == []
+    assert cleaned == {"valid": "kept"}
 
 
 def test_transformer_service_does_not_require_schema_contract_by_default():

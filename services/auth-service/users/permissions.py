@@ -1,65 +1,9 @@
 """
-Custom Permission Classes
+Custom permission classes for auth-service.
 
-<<<<<<< HEAD
-Role-based permissions for the BI system.
-"""
-
-from rest_framework.permissions import BasePermission
-
-
-class IsManager(BasePermission):
-    """
-    Permission class to allow only managers.
-    """
-    
-    def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.role == 'manager'
-
-
-class IsAnalyst(BasePermission):
-    """
-    Permission class to allow only analysts.
-    """
-    
-    def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.role == 'analyst'
-
-
-class IsExecutive(BasePermission):
-    """
-    Permission class to allow only executives.
-    """
-    
-    def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.role == 'executive'
-
-
-class IsManagerOrAnalyst(BasePermission):
-    """
-    Permission class to allow managers or analysts.
-    """
-    
-    def has_permission(self, request, view):
-        return (
-            request.user and 
-            request.user.is_authenticated and 
-            request.user.role in ['manager', 'analyst']
-        )
-
-
-class IsAdmin(BasePermission):
-    """
-    Permission class to allow only system admins.
-    """
-
-    def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated and request.user.role == 'admin'
-
-=======
-Prefer shared permission classes when ``bi_platform_shared`` is available.
-Fallbacks keep local service validation/runtime stable in lightweight
-environments where that package is not mounted.
+Prefer shared role permissions when ``bi_platform_shared`` is available.
+Fallback local implementations keep runtime stable when that package is not
+mounted in lightweight environments.
 """
 
 from __future__ import annotations
@@ -105,5 +49,3 @@ __all__ = [
     "IsManager",
     "IsManagerOrAnalyst",
 ]
-
->>>>>>> c791036 (final update)

@@ -202,7 +202,10 @@ class IdempotencyManager:
                     value = row[0]
                 else:
                     value = None
-                if value:
+                if len(ordered_dedup_keys) == 1 and isinstance(value, (bool, int)):
+                    if int(value) > 0:
+                        existing.add(ordered_dedup_keys[0])
+                elif value:
                     existing.add(str(value))
 
             return [unique_by_dedup[k] for k in ordered_dedup_keys if k not in existing]
@@ -301,7 +304,7 @@ class IdempotencyManager:
 
         Strategy:
         1) Insert all candidate keys with unique _row_id claim tokens.
-        2) Read winners via argMax(_row_id, _processed_at) per key.
+        2) Read the earliest deterministic winner per key.
         3) Keep only keys where winner claim token belongs to this caller.
         """
         if not keys:
@@ -349,7 +352,7 @@ class IdempotencyManager:
             winner_query = """
             SELECT
                 _dedup_key,
-                argMax(_row_id, _processed_at) AS winner_row_id
+                argMin(_row_id, tuple(_processed_at, _row_id)) AS winner_row_id
             FROM deduplication_log
             WHERE _stage = %(stage)s
               AND _dedup_key IN %(dedup_keys)s
@@ -444,7 +447,7 @@ class IdempotencyManager:
 
         Semantics:
         - Inserts candidate keys first.
-        - Resolves per-key claim winner using latest timestamp.
+        - Resolves one deterministic earliest claim winner per key.
         - Returns only keys claimed by this caller.
         """
         claims = self.claim_new_keys(keys, stage)

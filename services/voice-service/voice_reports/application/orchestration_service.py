@@ -24,6 +24,7 @@ from voice_reports.infrastructure.ai_client import get_ai_client
 from voice_reports.infrastructure.query_client import get_query_client, validate_sql_via_query_service
 from voice_reports.infrastructure.visualization_client import get_visualization_client
 from voice_reports.infrastructure.workspace_client import get_workspace_client
+from voice_reports.infrastructure.auth_context import require_authorized_workspace
 from voice_reports.infrastructure.auth_context import extract_identity_context
 from voice_reports.models import VoicePipelineJob, VoiceReport
 from voice_reports.services.ai_trace_service import build_ai_trace_payload
@@ -312,7 +313,7 @@ def _forecasting_config(forecast_dataset: dict[str, Any]) -> dict[str, Any]:
 
 
 def _visualization_chart_config(viz: dict[str, Any], chart_contract: dict[str, Any]) -> dict[str, Any]:
-    requested = str(
+    chart_hint_from_ai = str(
         chart_contract.get("type")
         or chart_contract.get("final_chart_type")
         or chart_contract.get("chart_type")
@@ -320,11 +321,17 @@ def _visualization_chart_config(viz: dict[str, Any], chart_contract: dict[str, A
         or viz.get("requested_chart_type")
         or ""
     ).strip().lower()
-    final = str(viz.get("final_chart_type") or viz.get("chart_type") or requested).strip().lower()
+    final = str(
+        viz.get("chart_type_selected_by_visualization_service")
+        or viz.get("final_chart_type")
+        or viz.get("chart_type")
+        or chart_hint_from_ai
+    ).strip().lower()
     return {
         "chart_contract": chart_contract,
-        "requested_chart_type": requested,
-        "selected_chart_type": requested,
+        "chart_hint_from_ai": chart_hint_from_ai,
+        "requested_chart_type": chart_hint_from_ai,
+        "selected_chart_type": final,
         "final_chart_type": final,
         "effective_chart_type": final,
         "fallback_used": bool(viz.get("fallback_used")),
@@ -333,6 +340,9 @@ def _visualization_chart_config(viz: dict[str, Any], chart_contract: dict[str, A
         "render_status": str(viz.get("render_status") or ("success" if str(viz.get("status") or "").lower() == "success" else "")),
         "contract_preserved": bool(viz.get("contract_preserved", True)),
         "metabase_question_id": viz.get("metabase_question_id") or viz.get("question_id"),
+        "metabase_display": viz.get("metabase_display") or viz.get("display"),
+        "metabase_visualization_settings": viz.get("metabase_visualization_settings"),
+        "chart_selection_reason": viz.get("chart_selection_reason"),
         "downgrade_reason": str(viz.get("downgrade_reason") or "").strip(),
         "visualization_trace": viz.get("trace", []),
     }
@@ -649,11 +659,11 @@ def process_pipeline_job(job_id: str) -> VoicePipelineJob:
             _append_trace(job, statuses.QUEUED, "success", {})
 
             payload = job.trace if isinstance(job.trace, dict) else {}
-            ctx = get_workspace_client().resolve(
+            ctx = require_authorized_workspace(get_workspace_client().resolve(
                 request=type("Req", (), {"META": {"HTTP_AUTHORIZATION": payload.get("authorization_header", "")}})(),
                 workspace_hint=str(job.workspace_id),
                 user_id=str(job.user_id),
-            )
+            ))
             dataset_id = str(payload.get("dataset_id") or ctx.dataset_id or "").strip()
             source_id = str(payload.get("source_id") or ctx.source_id or dataset_id or "").strip()
             table_name = str(payload.get("table_name") or ctx.table_name or "").strip()
@@ -794,18 +804,19 @@ def process_pipeline_job(job_id: str) -> VoicePipelineJob:
             )
             report.final_sql = clean_sql
             report.sql_validated = True
-            report.chart_type = str(
+            chart_hint_from_ai = str(
                 chart_recommendation.get("type")
                 or chart_recommendation.get("final_chart_type")
                 or chart_recommendation.get("chart_type")
                 or chart_recommendation.get("selected_chart_type")
-                or report.chart_type
                 or ""
             ).strip().lower()
+            report.chart_type = ""
             report.chart_config = {
                 **(report.chart_config if isinstance(report.chart_config, dict) else {}),
                 "chart_contract": chart_recommendation,
-                "requested_chart_type": chart_recommendation.get("chart_type") or chart_recommendation.get("selected_chart_type"),
+                "chart_hint_from_ai": chart_hint_from_ai,
+                "requested_chart_type": "",
             }
             report.save(update_fields=["final_sql", "sql_validated", "chart_type", "chart_config", "updated_at"])
 
@@ -834,13 +845,26 @@ def process_pipeline_job(job_id: str) -> VoicePipelineJob:
 
             rows = query_result.get("rows", []) if isinstance(query_result.get("rows"), list) else []
             columns = query_result.get("columns", []) if isinstance(query_result.get("columns"), list) else []
-            report.query_result = {"columns": columns, "rows": rows}
+            column_names = query_result.get("column_names") if isinstance(query_result.get("column_names"), list) else []
+            if not column_names:
+                column_names = [
+                    str(column.get("name") or "").strip() if isinstance(column, dict) else str(column or "").strip()
+                    for column in columns
+                    if (str(column.get("name") or "").strip() if isinstance(column, dict) else str(column or "").strip())
+                ]
+            report.query_result = {
+                "columns": columns,
+                "column_names": column_names,
+                "column_types": query_result.get("column_types") if isinstance(query_result.get("column_types"), list) else [],
+                "result_shape": query_result.get("result_shape") if isinstance(query_result.get("result_shape"), dict) else None,
+                "rows": rows,
+            }
             report.row_count = int(query_result.get("row_count") or len(rows))
             report.execution_time_ms = int(query_result.get("execution_time_ms") or 0)
             report.status = VoiceReport.STATUS_EXECUTED
             report.ai_trace = _build_report_ai_trace(report)
             report.save(update_fields=["query_result", "row_count", "execution_time_ms", "status", "ai_trace", "updated_at"])
-            job.execution_result_summary = {"row_count": report.row_count, "columns": columns}
+            job.execution_result_summary = {"row_count": report.row_count, "columns": column_names or columns}
             _append_trace(job, statuses.EXECUTING_QUERY, "success", {"row_count": report.row_count, "empty_result": bool(query_result.get("empty_result"))})
 
             requested_chart = str(chart_recommendation.get("chart_type") or chart_recommendation.get("selected_chart_type") or "").strip().lower()
@@ -1001,19 +1025,17 @@ def process_pipeline_job(job_id: str) -> VoicePipelineJob:
                 or chart_recommendation.get("selected_chart_type")
                 or ""
             ).strip().lower()
-            viz_final_chart = str(viz.get("final_chart_type") or viz.get("chart_type") or "").strip().lower()
-            if canonical_chart_type and canonical_chart_type != "table" and viz_final_chart == "table":
-                return _finalize_failure(
-                    job,
-                    report,
-                    error_code=err.VISUALIZATION_FAILED,
-                    message="Visualization contract violation: renderer downgraded canonical chart to table.",
-                )
+            viz_final_chart = str(
+                viz.get("chart_type_selected_by_visualization_service")
+                or viz.get("final_chart_type")
+                or viz.get("chart_type")
+                or ""
+            ).strip().lower()
 
             if degraded:
                 report.metabase_question_id = None
                 report.embed_url = ""
-                report.chart_type = canonical_chart_type or viz_final_chart or report.chart_type or ""
+                report.chart_type = viz_final_chart or canonical_chart_type or report.chart_type or ""
                 report.chart_config = {
                     **(report.chart_config if isinstance(report.chart_config, dict) else {}),
                     **_visualization_chart_config(viz, chart_recommendation),
@@ -1033,7 +1055,7 @@ def process_pipeline_job(job_id: str) -> VoicePipelineJob:
             else:
                 report.metabase_question_id = int(viz.get("question_id")) if str(viz.get("question_id", "")).isdigit() else report.metabase_question_id
                 report.embed_url = str(viz.get("embed_url") or "")
-                report.chart_type = canonical_chart_type or viz_final_chart or report.chart_type or ""
+                report.chart_type = viz_final_chart or canonical_chart_type or report.chart_type or ""
                 report.chart_config = {
                     **(report.chart_config if isinstance(report.chart_config, dict) else {}),
                     **_visualization_chart_config(viz, chart_recommendation),

@@ -9,9 +9,9 @@ import django.utils.timezone
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies = [
-        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-    ]
+    # User identifiers belong to auth-service. They are scalar references in
+    # the final model and must not require a local auth_user table on install.
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
@@ -31,10 +31,9 @@ class Migration(migrations.Migration):
                 ("created_at", models.DateTimeField(default=django.utils.timezone.now)),
                 (
                     "owner",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="owned_workspaces",
-                        to=settings.AUTH_USER_MODEL,
+                    models.PositiveBigIntegerField(
+                        db_column="owner_id",
+                        db_index=True,
                     ),
                 ),
             ],
@@ -59,10 +58,9 @@ class Migration(migrations.Migration):
                 ("joined_at", models.DateTimeField(default=django.utils.timezone.now)),
                 (
                     "user",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="workspace_memberships",
-                        to=settings.AUTH_USER_MODEL,
+                    models.PositiveBigIntegerField(
+                        db_column="user_id",
+                        db_index=True,
                     ),
                 ),
                 (

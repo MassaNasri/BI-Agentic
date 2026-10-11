@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Any, List, Optional, Tuple
 
 from shared.utils.idempotency_manager import IdempotencyManager
 from shared.utils.quarantine_manager import QuarantineManager, QuarantineRecord
 from shared.utils.metrics import SCHEMA_CONTRACT_ENFORCEMENT_TOTAL, SCHEMA_CONTRACT_MISS_TOTAL
+from shared.utils.metadata_schema import MetadataSchema
 from shared.utils.schema_contract_store import SchemaContractStore, NullSchemaContractStore
 from shared.models import SchemaValidator, SchemaContract
 from shared.models.rules_engine import RulesEngine
@@ -277,7 +278,7 @@ class TransformerService:
 
             transformed_dedup_key = self._generate_row_hash(transformed_row)
 
-            cleaned_at = datetime.utcnow().isoformat()
+            cleaned_at = datetime.now(timezone.utc).isoformat()
             clean_message = {
                 "source": source,
                 "source_id": source,
@@ -299,6 +300,7 @@ class TransformerService:
                 "warnings": warnings,
                 "errors": errors,
                 "_applied_rules": transformation_result.applied_rules,
+                **MetadataSchema.scope_fields(message),
             }
 
             if "table" in message:

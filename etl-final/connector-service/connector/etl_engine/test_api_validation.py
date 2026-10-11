@@ -7,7 +7,21 @@ Tests the validation framework integration with Django REST Framework views.
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework import status
+from django.conf import settings
 import json
+
+
+def internal_client():
+    settings.ETL_INTERNAL_API_KEY = "etl-test-internal-key"
+    client = APIClient()
+    client.credentials(
+        HTTP_X_INTERNAL_SERVICE="query-service",
+        HTTP_X_INTERNAL_API_KEY="etl-test-internal-key",
+        HTTP_X_WORKSPACE_ID="23",
+        HTTP_X_DATASET_ID="dataset-91",
+        HTTP_X_INGESTION_JOB_ID="7d429d28-e064-4d0f-b0bb-c6667a911b8f",
+    )
+    return client
 
 
 class TestConnectDBViewValidation(TestCase):
@@ -15,7 +29,7 @@ class TestConnectDBViewValidation(TestCase):
     
     def setUp(self):
         """Set up test client."""
-        self.client = APIClient()
+        self.client = internal_client()
         self.url = '/api/connect-db/'
     
     def test_valid_mysql_connection(self):
@@ -237,7 +251,7 @@ class TestUploadFileViewValidation(TestCase):
     
     def setUp(self):
         """Set up test client."""
-        self.client = APIClient()
+        self.client = internal_client()
         self.url = '/api/upload/'
     
     def test_missing_file(self):
@@ -260,7 +274,7 @@ class TestValidationFrameworkIntegration(TestCase):
     
     def test_sanitization_prevents_null_bytes(self):
         """Test that sanitization removes null bytes from inputs."""
-        client = APIClient()
+        client = internal_client()
         url = '/api/connect-db/'
         
         data = {
@@ -281,7 +295,7 @@ class TestValidationFrameworkIntegration(TestCase):
     
     def test_multiple_validation_errors_reported(self):
         """Test that multiple validation errors are reported together."""
-        client = APIClient()
+        client = internal_client()
         url = '/api/connect-db/'
         
         data = {

@@ -10,6 +10,10 @@ if TYPE_CHECKING:
 else:
     LoadedUserSchema = Any  # type: ignore[assignment]
 
+from shared.bi_semantic_layer import schema_diagnostic_ignore_tokens
+
+from preprocessing_high.value_index import normalize_value
+
 
 _TIME_TERMS = {
     "year",
@@ -107,8 +111,14 @@ _STOP_WORDS = {
     "overall",
     "compare",
     "comparison",
-    "vs",
+    "compared",
+    "comparing",
+    "exceed",
+    "exceeded",
+    "exceeds",
+    "exceeding",
     "versus",
+    "vs",
     "highest",
     "lowest",
     "largest",
@@ -125,6 +135,8 @@ _STOP_WORDS = {
     "over",
     "greater",
     "less",
+    "least",
+    "most",
     "equal",
     "equals",
     "where",
@@ -205,6 +217,18 @@ _ANALYTICAL_LANGUAGE_TERMS = {
     "evolving",
     "trend",
     "trends",
+    "growth",
+    "increase",
+    "increases",
+    "decrease",
+    "decreases",
+    "generated",
+    "produced",
+    "performing",
+    "highest",
+    "lowest",
+    "best",
+    "worst",
     "variance",
     "variation",
     "value",
@@ -260,6 +284,93 @@ def _safe_plural_forms(value: str) -> list[str]:
 def _normalize_phrase(value: str) -> str:
     normalized = str(value or "").strip().lower().replace("_", " ")
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _value_index_candidates(
+    *,
+    value_index: dict[str, list[dict[str, Any]]] | None,
+    term: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value_index, dict) or not value_index:
+        return []
+    normalized = normalize_value(term)
+    if not normalized:
+        return []
+    candidates = value_index.get(normalized, [])
+    if not isinstance(candidates, list):
+        return []
+    return [candidate for candidate in candidates if isinstance(candidate, dict)]
+
+
+def _value_match_columns(candidates: list[dict[str, Any]]) -> list[str]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        column = str(candidate.get("column") or candidate.get("matched_column") or "").strip()
+        if not column:
+            continue
+        normalized = column.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        columns.append(column)
+    return columns
+
+
+def _extract_value_matches(
+    *,
+    query_text: str,
+    value_index: dict[str, list[dict[str, Any]]] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(value_index, dict) or not value_index:
+        return []
+
+    normalized_query = f" {normalize_value(query_text)} "
+    if not normalized_query.strip():
+        return []
+
+    matches: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    sorted_values = sorted(value_index.keys(), key=lambda value: (len(str(value).split()), len(str(value))), reverse=True)
+    for normalized_value in sorted_values:
+        term = normalize_value(normalized_value)
+        if not term or len(term) <= 1:
+            continue
+        if len(term.split()) == 1 and term in _STOP_WORDS:
+            continue
+        if f" {term} " not in normalized_query:
+            continue
+
+        candidates = _value_index_candidates(value_index=value_index, term=term)
+        if not candidates:
+            continue
+        deduped_candidates: list[dict[str, Any]] = []
+        for candidate in candidates:
+            key = (
+                str(candidate.get("table") or "").strip().lower(),
+                str(candidate.get("column") or "").strip().lower(),
+                str(candidate.get("value") or "").strip().casefold(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_candidates.append(candidate)
+        if not deduped_candidates:
+            continue
+        columns = _value_match_columns(deduped_candidates)
+        matches.append(
+            {
+                "term": term,
+                "resolution_status": "value_reference",
+                "classification": "value_reference",
+                "matched_column": columns[0] if columns else "",
+                "matched_columns": columns,
+                "value_matches": deduped_candidates,
+                "must_preserve_for_intent": True,
+                "reason": "Matched an indexed low-cardinality schema value.",
+            }
+        )
+    return matches
 
 
 def _schema_tables(loaded_schema: LoadedUserSchema) -> list[str]:
@@ -537,6 +648,7 @@ def build_schema_resolution_diagnostics(
     loaded_schema: LoadedUserSchema,
     validation_result: dict[str, Any] | None,
     ignored_terms: set[str] | None = None,
+    value_index: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     validation_payload = validation_result or {}
     mappings = validation_payload.get("mappings", []) if isinstance(validation_payload.get("mappings", []), list) else []
@@ -554,7 +666,17 @@ def build_schema_resolution_diagnostics(
     alias_lookup = _column_alias_lookup(columns_by_table)
 
     explicit_matches = _extract_explicit_column_matches(query_text=original_query, alias_lookup=alias_lookup)
+    value_matches = _extract_value_matches(query_text=original_query, value_index=value_index)
+    value_matched_terms = {
+        token
+        for match in value_matches
+        for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(match.get("term") or "").lower())
+        if token
+    }
     supported_temporal_terms = _supported_temporal_phrase_terms(original_query)
+    nl_schema_ignores = schema_diagnostic_ignore_tokens(original_query) | schema_diagnostic_ignore_tokens(
+        corrected_query
+    )
     residual_terms = _extract_residual_terms(
         query_text=original_query,
         explicit_matches=explicit_matches,
@@ -562,6 +684,8 @@ def build_schema_resolution_diagnostics(
             _extract_literal_filter_terms(original_query)
             | set(ignored_terms or set())
             | supported_temporal_terms
+            | nl_schema_ignores
+            | value_matched_terms
         ),
     )
 
@@ -582,6 +706,10 @@ def build_schema_resolution_diagnostics(
             }
         )
         matched_columns.append(explicit["matched_column"])
+
+    for value_match in value_matches:
+        term_resolutions.append(value_match)
+        matched_columns.extend(_value_match_columns(value_match.get("value_matches", [])))
 
     for term in residual_terms:
         normalized_term = _normalize_phrase(term)
@@ -702,6 +830,24 @@ def build_schema_resolution_diagnostics(
             matched_columns.append(matched_column)
             continue
 
+        value_candidates = _value_index_candidates(value_index=value_index, term=term)
+        if value_candidates:
+            value_columns = _value_match_columns(value_candidates)
+            term_resolutions.append(
+                {
+                    "term": term,
+                    "resolution_status": "value_reference",
+                    "classification": "value_reference",
+                    "matched_column": value_columns[0] if value_columns else "",
+                    "matched_columns": value_columns,
+                    "value_matches": value_candidates,
+                    "must_preserve_for_intent": True,
+                    "reason": "Matched an indexed low-cardinality schema value.",
+                }
+            )
+            matched_columns.extend(value_columns)
+            continue
+
         semantic_candidates = column_token_lookup.get(normalized_term, [])
         if semantic_candidates:
             distinct_columns = sorted(
@@ -762,9 +908,11 @@ def build_schema_resolution_diagnostics(
         term_resolutions.append(
             {
                 "term": term,
-                "resolution_status": "unresolved_schema_reference",
+                "classification": "uncertain",
+                "resolution_status": "unresolved",
                 "matched_column": "",
-                "reason": "No valid schema column matches this term.",
+                "must_preserve_for_intent": True,
+                "reason": "No deterministic schema or value match; preserved for downstream intent-aware validation.",
             }
         )
 
@@ -774,13 +922,62 @@ def build_schema_resolution_diagnostics(
         matched_columns=matched_columns,
     )
 
-    schema_validation_status = "valid"
+    unique_value_matches: list[dict[str, Any]] = []
+    seen_value_match_keys: set[tuple[str, str, str]] = set()
+    for resolution in term_resolutions:
+        if str(resolution.get("resolution_status") or "") != "value_reference":
+            continue
+        for candidate in resolution.get("value_matches", []) or []:
+            if not isinstance(candidate, dict):
+                continue
+            key = (
+                str(candidate.get("table") or "").strip().lower(),
+                str(candidate.get("column") or "").strip().lower(),
+                normalize_value(candidate.get("value")),
+            )
+            if key in seen_value_match_keys:
+                continue
+            seen_value_match_keys.add(key)
+            unique_value_matches.append(candidate)
+
+    legacy_schema_validation_status = "valid"
     if unresolved_schema_terms:
-        schema_validation_status = "invalid_unresolved_terms"
+        legacy_schema_validation_status = "invalid_unresolved_terms"
     elif unsupported_terms:
-        schema_validation_status = "invalid_unsupported_terms"
+        legacy_schema_validation_status = "invalid_unsupported_terms"
     elif not validation_payload.get("is_valid", True):
-        schema_validation_status = "invalid_unresolved_terms"
+        legacy_schema_validation_status = "invalid_unresolved_terms"
+
+    schema_validation_status = "valid"
+    if unsupported_terms:
+        schema_validation_status = "invalid_structural"
+    elif unique_value_matches and not unresolved_schema_terms:
+        schema_validation_status = "valid_with_value_matches"
+    elif unresolved_schema_terms or not validation_payload.get("is_valid", True):
+        schema_validation_status = "degraded_uncertain"
+    elif any(
+        str(mapping.get("status", "")).strip().lower() == "mapped"
+        for mapping in mappings
+        if isinstance(mapping, dict)
+    ):
+        schema_validation_status = "valid_with_llm_assist"
+
+    preprocessing_warnings: list[dict[str, str]] = []
+    for term in sorted(set(unresolved_schema_terms)):
+        preprocessing_warnings.append(
+            {
+                "type": "unresolved_term_preserved",
+                "term": term,
+                "message": "Unresolved business term was preserved for downstream intent-aware validation.",
+            }
+        )
+    if unique_value_matches:
+        preprocessing_warnings.append(
+            {
+                "type": "value_matches_detected",
+                "message": "One or more query terms matched indexed schema values.",
+            }
+        )
 
     return {
         "original_terms": residual_terms,
@@ -794,6 +991,8 @@ def build_schema_resolution_diagnostics(
                 _extract_literal_filter_terms(corrected_query)
                 | set(ignored_terms or set())
                 | _supported_temporal_phrase_terms(corrected_query)
+                | nl_schema_ignores
+                | value_matched_terms
             ),
         ),
         "unresolved_terms": sorted(set(unresolved_schema_terms)),
@@ -808,4 +1007,8 @@ def build_schema_resolution_diagnostics(
         "selected_table_match_score": table_scores.get(selected_table, 0) if selected_table else 0,
         "schema_adjustments": mappings,
         "schema_validation_status": schema_validation_status,
+        "legacy_schema_validation_status": legacy_schema_validation_status,
+        "value_matches": unique_value_matches,
+        "terms": term_resolutions,
+        "preprocessing_warnings": preprocessing_warnings,
     }

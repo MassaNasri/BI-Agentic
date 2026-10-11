@@ -13,12 +13,6 @@ import pytest
 import json
 from datetime import datetime, timedelta
 from uuid import UUID
-import sys
-from pathlib import Path
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from shared.models.rule_versioning import (
     ChangeType,
     RuleVersion,

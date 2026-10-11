@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { XCircle, AlertCircle, X } from 'lucide-react'
 
@@ -11,6 +11,13 @@ function ErrorAlert({
 }) {
   const [isVisible, setIsVisible] = useState(true)
 
+  const handleClose = useCallback(() => {
+    setIsVisible(false)
+    setTimeout(() => {
+      if (onClose) onClose()
+    }, 300)
+  }, [onClose])
+
   useEffect(() => {
     if (autoDismiss && message) {
       const timer = setTimeout(() => {
@@ -18,14 +25,7 @@ function ErrorAlert({
       }, duration)
       return () => clearTimeout(timer)
     }
-  }, [message, autoDismiss, duration])
-
-  const handleClose = () => {
-    setIsVisible(false)
-    setTimeout(() => {
-      if (onClose) onClose()
-    }, 300)
-  }
+  }, [message, autoDismiss, duration, handleClose])
 
   if (!message) return null
 
@@ -47,19 +47,19 @@ function ErrorAlert({
         }
       case 'warning':
         return {
-          bg: 'bg-yellow-50',
-          border: 'border-yellow-200',
-          text: 'text-yellow-800',
+          bg: 'bg-amber-500/15',
+          border: 'border-amber-500/30',
+          text: 'text-amber-400',
           icon: AlertCircle,
-          iconColor: 'text-yellow-600'
+          iconColor: 'text-amber-500'
         }
       case 'info':
         return {
-          bg: 'bg-blue-50',
-          border: 'border-blue-200',
-          text: 'text-blue-800',
+          bg: 'bg-brand-900/30',
+          border: 'border-brand-700/40',
+          text: 'text-brand-200',
           icon: AlertCircle,
-          iconColor: 'text-blue-600'
+          iconColor: 'text-brand-500'
         }
       default:
         return {

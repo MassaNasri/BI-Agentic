@@ -6,17 +6,11 @@ This test suite validates task 2.1.3: Implement table partitioning by extraction
 """
 import pytest
 import os
-import sys
 from datetime import datetime, timedelta
 from clickhouse_driver import Client
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from models.bronze_schema import BronzeTableSchema, BronzeRow, BronzeBatch
-
-# Import from current directory
-sys.path.insert(0, os.path.dirname(__file__))
-from create_bronze_tables import BronzeTableCreator
+from shared.models.bronze_schema import BronzeTableSchema, BronzeRow, BronzeBatch
+from shared.utils.create_bronze_tables import BronzeTableCreator
 
 
 class TestBronzeTablePartitioning:

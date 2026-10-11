@@ -96,6 +96,26 @@ export const workspaceAPI = {
 // ============================================================================
 
 export const databaseAPI = {
+  getSourceCapabilities: () => apiClient.get('/database/sources/capabilities/'),
+  testSourceConnection: (engine, configuration) =>
+    apiClient.post('/database/sources/test/', { engine, configuration }),
+  discoverSource: (engine, configuration, schema = null, table = null) =>
+    apiClient.post('/database/sources/discover/', { engine, configuration, schema, table }),
+  startSnapshot: (engine, configuration, tables, chunkSize = 1000) =>
+    apiClient.post('/database/sources/snapshot/', {
+      engine,
+      configuration,
+      tables,
+      chunk_size: chunkSize,
+    }),
+  prepareSQLite: (file, onUploadProgress) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiClient.post('/database/sources/sqlite/prepare/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress,
+    })
+  },
   // Upload database file
   uploadDatabase: (file, onUploadProgress) => {
     const formData = new FormData()
@@ -113,7 +133,12 @@ export const databaseAPI = {
   getDatabaseInfo: () => apiClient.get('/database/'),
   
   // Get database preview (first 5 rows)
-  getDatabasePreview: () => apiClient.get('/database/preview/'),
+  getDatabasePreview: (tableId = null) => apiClient.get('/database/preview/', {
+    params: tableId ? { table: tableId } : {},
+  }),
+  getDatabaseSchema: (tableId = null) => apiClient.get('/database/schema/', {
+    params: tableId ? { table: tableId } : {},
+  }),
   
   // Delete manager's database
   deleteDatabase: () => apiClient.delete('/database/'),
@@ -154,13 +179,19 @@ export const voiceReportsAPI = {
   editSQL: (reportId, sql) => apiClient.put(`/voice-reports/${reportId}/sql/`, { sql }),
   
   // List all reports
-  listReports: () => apiClient.get('/voice-reports/reports/'),
+  listReports: (params = {}) => apiClient.get('/voice-reports/reports/', { params }),
   
   // Get report details
   getReport: (reportId) => apiClient.get(`/voice-reports/${reportId}/`),
 
   // Get normalized AI explainability trace
   getAITrace: (reportId) => apiClient.get(`/voice-reports/${reportId}/ai-trace/`),
+
+  // Chart type capabilities and manual chart switching
+  getReportChartTypeCapabilities: (reportId) =>
+    apiClient.get(`/voice-reports/${reportId}/chart-types/capabilities/`),
+  switchReportChartType: (reportId, chartType) =>
+    apiClient.post(`/voice-reports/${reportId}/chart-types/switch/`, { chart_type: chartType }),
   
   // Delete report (Manager only)
   deleteReport: (reportId) => apiClient.delete(`/voice-reports/${reportId}/`),
@@ -170,6 +201,23 @@ export const voiceReportsAPI = {
 
   // Dashboard aggregate counters
   getDashboardStats: () => apiClient.get('/voice-reports/dashboard/stats/'),
+
+  // Dashboard builder pages/widgets (Phase 1 foundation)
+  listDashboardPages: (params = {}) => apiClient.get('/voice-reports/pages/', { params }),
+  getDashboardPage: (pageId) => apiClient.get(`/voice-reports/pages/${pageId}/`),
+  createDashboardPage: (data) => apiClient.post('/voice-reports/pages/', data),
+  updateDashboardPage: (pageId, data) => apiClient.patch(`/voice-reports/pages/${pageId}/`, data),
+  deleteDashboardPage: (pageId) => apiClient.delete(`/voice-reports/pages/${pageId}/`),
+  listDashboardPageWidgets: (pageId, params = {}) =>
+    apiClient.get(`/voice-reports/pages/${pageId}/widgets/`, { params }),
+  createDashboardWidget: (pageId, data) =>
+    apiClient.post(`/voice-reports/pages/${pageId}/widgets/`, data),
+  updateDashboardWidget: (widgetId, data) =>
+    apiClient.patch(`/voice-reports/widgets/${widgetId}/`, data),
+  deleteDashboardWidget: (widgetId) =>
+    apiClient.delete(`/voice-reports/widgets/${widgetId}/`),
+  batchUpdateDashboardWidgets: (data) =>
+    apiClient.post('/voice-reports/widgets/batch-layout/', data),
 }
 
 // ============================================================================

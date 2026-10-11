@@ -12,21 +12,16 @@ Tests cover:
 - Rule validation
 """
 import pytest
-import sys
-import os
 from datetime import datetime
 from uuid import uuid4
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-
-from transformation_rule import (
+from .transformation_rule import (
     RuleType,
     TransformationRule,
     TransformationResult,
     RuleExecutionContext
 )
-from rules_engine import RulesEngine
+from .rules_engine import RulesEngine
 
 
 class TestRulesEngineBasics:
@@ -437,8 +432,8 @@ class TestErrorHandling:
         assert "working_rule" in result.applied_rules
         assert result.transformed_row["processed"] is True
     
-    def test_condition_exception_captured_in_warnings(self):
-        """Test that exceptions in condition evaluation are captured as warnings."""
+    def test_condition_exception_captured_in_errors(self):
+        """Test that exceptions in condition evaluation are captured as rule errors."""
         rule = TransformationRule(
             rule_id="bad_condition_rule",
             rule_type=RuleType.TRANSFORM,
@@ -451,9 +446,9 @@ class TestErrorHandling:
         result = RulesEngine.apply_rules(row, [rule])
         
         # Should not raise exception
-        assert len(result.warnings) == 1
-        assert "bad_condition_rule" in result.warnings[0]
-        assert "condition evaluation failed" in result.warnings[0]
+        assert len(result.errors) == 1
+        assert "bad_condition_rule" in result.errors[0]
+        assert "failed" in result.errors[0]
         assert "bad_condition_rule" not in result.applied_rules
         assert "processed" not in result.transformed_row
     
@@ -478,8 +473,8 @@ class TestErrorHandling:
         row = {"name": "John"}
         result = RulesEngine.apply_rules(row, [rule1, rule2])
         
-        assert len(result.warnings) == 1
-        assert "bad_condition" in result.warnings[0]
+        assert len(result.errors) == 1
+        assert "bad_condition" in result.errors[0]
         assert "good_rule" in result.applied_rules
         assert result.transformed_row["rule2"] is True
         assert "rule1" not in result.transformed_row
@@ -505,9 +500,9 @@ class TestErrorHandling:
         row = {"name": "John"}
         result = RulesEngine.apply_rules(row, [rule1, rule2])
         
-        assert len(result.warnings) == 2
-        assert any("bad_condition_1" in w for w in result.warnings)
-        assert any("bad_condition_2" in w for w in result.warnings)
+        assert len(result.errors) == 2
+        assert any("bad_condition_1" in error for error in result.errors)
+        assert any("bad_condition_2" in error for error in result.errors)
         assert len(result.applied_rules) == 0
 
 

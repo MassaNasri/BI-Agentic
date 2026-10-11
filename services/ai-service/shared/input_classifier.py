@@ -67,6 +67,101 @@ _ANALYTICAL_HINTS = (
     "revenue",
     "profit",
     "margin",
+    "highest",
+    "lowest",
+    "top",
+    "bottom",
+    "best",
+    "worst",
+)
+
+_METRIC_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "all",
+        "and",
+        "or",
+        "of",
+        "for",
+        "in",
+        "on",
+        "to",
+        "by",
+        "per",
+        "with",
+        "without",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "being",
+        "been",
+        "show",
+        "list",
+        "display",
+        "give",
+        "get",
+        "what",
+        "which",
+        "how",
+        "me",
+        "us",
+        "my",
+        "your",
+        "our",
+        "this",
+        "that",
+        "these",
+        "those",
+        "rows",
+        "records",
+        "data",
+        "table",
+        "dataset",
+        "report",
+        "dashboard",
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+        "hourly",
+        "annually",
+    }
+)
+
+_TEMPORAL_GROUPING_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, flags=re.IGNORECASE)
+    for pattern in (
+        r"\b(?:by|per|group(?:ed)?\s+by|for\s+each|in\s+each)\s+(?:hour|day|week|month|quarter|year)s?\b",
+        r"\b(?:hourly|daily|weekly|monthly|quarterly|yearly|annually)\b",
+        r"\bover\s+time\b",
+        r"\btime\s+series\b",
+        r"\btimeline\b",
+    )
+)
+
+_TEMPORAL_SUBJECT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, flags=re.IGNORECASE)
+    for pattern in (
+        r"\b([a-z_][a-z0-9_ ]{0,80}?)\s+(?:by|per)\s+(?:hour|day|week|month|quarter|year)s?\b",
+        r"^\s*([a-z_][a-z0-9_ ]{0,80}?)\s+(?:hourly|daily|weekly|monthly|quarterly|yearly|annually)\b",
+        r"\b(?:compare|show|list|display|give)\s+([a-z_][a-z0-9_ ]{0,80}?)\s+over\s+time\b",
+    )
+)
+
+_NUMERIC_THRESHOLD_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, flags=re.IGNORECASE)
+    for pattern in (
+        r"\b([a-z_][a-z0-9_ ]{0,80}?)\s*(?:>=|<=|!=|>|<|=)\s*(-?\d+(?:\.\d+)?)\b",
+        r"\b([a-z_][a-z0-9_ ]{0,80}?)\s+(?:is\s+)?"
+        r"(?:above|below|under|over|greater than|less than|more than|fewer than|higher than|lower than|"
+        r"at least|at most|no less than|no more than)\s+(-?\d+(?:\.\d+)?)\b",
+        r"\b([a-z_][a-z0-9_ ]{0,80}?)\s+between\s+(-?\d+(?:\.\d+)?)\s+and\s+(-?\d+(?:\.\d+)?)\b",
+    )
 )
 
 
@@ -132,6 +227,72 @@ def _is_noise_like(text: str) -> bool:
         or bool(re.fullmatch(r"(?:uh+|um+|erm+|hmm+|mmm+|ah+|eh+|mm+)", token))
         for token in tokens
     )
+
+
+def _metric_like_tokens(phrase: str) -> list[str]:
+    tokens = [token for token in re.findall(r"[a-z0-9_]+", str(phrase or "").lower()) if token]
+    return [
+        token
+        for token in tokens
+        if token not in _METRIC_STOPWORDS and not token.isdigit()
+    ]
+
+
+def _has_metric_like_phrase(phrase: str) -> bool:
+    return bool(_metric_like_tokens(phrase))
+
+
+def detect_filter_threshold_semantics(text: str) -> dict[str, Any]:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return {"detected": False, "metric_hint": "", "pattern": ""}
+    for pattern in _NUMERIC_THRESHOLD_PATTERNS:
+        match = pattern.search(normalized)
+        if not match:
+            continue
+        metric_hint = str(match.group(1) or "").strip()
+        if not _has_metric_like_phrase(metric_hint):
+            continue
+        return {
+            "detected": True,
+            "metric_hint": metric_hint,
+            "pattern": pattern.pattern,
+        }
+    return {"detected": False, "metric_hint": "", "pattern": ""}
+
+
+def detect_temporal_grouping_semantics(text: str) -> dict[str, Any]:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return {"detected": False, "metric_hint": "", "pattern": ""}
+
+    if not any(pattern.search(normalized) for pattern in _TEMPORAL_GROUPING_PATTERNS):
+        return {"detected": False, "metric_hint": "", "pattern": ""}
+
+    for pattern in _TEMPORAL_SUBJECT_PATTERNS:
+        match = pattern.search(normalized)
+        if not match:
+            continue
+        metric_hint = str(match.group(1) or "").strip()
+        if not _has_metric_like_phrase(metric_hint):
+            continue
+        return {
+            "detected": True,
+            "metric_hint": metric_hint,
+            "pattern": pattern.pattern,
+        }
+
+    return {"detected": False, "metric_hint": "", "pattern": ""}
+
+
+def detect_shortform_analytical_semantics(text: str) -> dict[str, Any]:
+    filter_semantics = detect_filter_threshold_semantics(text)
+    temporal_semantics = detect_temporal_grouping_semantics(text)
+    return {
+        "detected": bool(filter_semantics.get("detected") or temporal_semantics.get("detected")),
+        "filter_threshold": filter_semantics,
+        "temporal_grouping": temporal_semantics,
+    }
 
 
 def classify_input(
@@ -272,6 +433,21 @@ def classify_input(
             "source": source,
             "route": "proceed",
             "flags": ["analytical"],
+        }
+
+    shortform_semantics = detect_shortform_analytical_semantics(lowered)
+    if shortform_semantics.get("detected"):
+        if shortform_semantics.get("filter_threshold", {}).get("detected"):
+            reason = "filter_threshold_semantics_detected"
+        else:
+            reason = "temporal_grouping_semantics_detected"
+        return {
+            "classification": "analytical",
+            "confidence": 0.9,
+            "reason": reason,
+            "source": source,
+            "route": "proceed",
+            "flags": ["analytical", "shortform_semantics"],
         }
 
     if any(_contains_hint(lowered, token) for token in _ANALYTICAL_HINTS):

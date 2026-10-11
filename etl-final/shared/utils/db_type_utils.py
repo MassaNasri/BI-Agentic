@@ -8,7 +8,7 @@ from typing import Optional
 
 _DB_TYPE_ALIASES = {
     "mysql": "mysql",
-    "mariadb": "mysql",
+    "mariadb": "mariadb",
     "postgres": "postgres",
     "postgresql": "postgres",
     "psql": "postgres",
@@ -18,9 +18,11 @@ _DB_TYPE_ALIASES = {
     "sqlserver": "mssql",
     "sql_server": "mssql",
     "oracle": "oracle",
+    "clickhouse": "clickhouse",
+    "click_house": "clickhouse",
 }
 
-_CANONICAL_DB_TYPES = ("mysql", "postgres", "sqlite", "mssql", "oracle")
+_CANONICAL_DB_TYPES = ("postgres", "mysql", "mariadb", "mssql", "oracle", "sqlite", "clickhouse")
 
 
 def canonical_db_types() -> tuple[str, ...]:
@@ -42,4 +44,3 @@ def normalize_db_type(db_type: Optional[str]) -> Optional[str]:
     if not normalized:
         return None
     return _DB_TYPE_ALIASES.get(normalized)
-

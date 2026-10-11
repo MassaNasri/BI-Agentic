@@ -1,0 +1,59 @@
+{
+  "timestamp_utc": "2026-09-13T15:53:41.656928+00:00",
+  "results": [
+    {
+      "service": "auth-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, sessions, token_blacklist, users\nRunning migrations:\n  No migrations to apply.\n\ntime=\"2026-09-13T18:51:36+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\n  from pkg_resources import DistributionNotFound, get_distribution\n"
+    },
+    {
+      "service": "workspace-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, sessions, token_blacklist, workspace\nRunning migrations:\n  No migrations to apply.\n\ntime=\"2026-09-13T18:51:50+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\n  from pkg_resources import DistributionNotFound, get_distribution\n"
+    },
+    {
+      "service": "subscription-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, sessions, subscription, token_blacklist\nRunning migrations:\n  No migrations to apply.\n\ntime=\"2026-09-13T18:52:01+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\n  from pkg_resources import DistributionNotFound, get_distribution\n"
+    },
+    {
+      "service": "notification-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, notification, sessions\nRunning migrations:\n  No migrations to apply.\n  Your models in app(s): 'notification' have changes that are not yet reflected in a migration, and so won't be applied.\n  Run 'manage.py makemigrations' to make new migrations, and then re-run 'manage.py migrate' to apply them.\n\ntime=\"2026-09-13T18:52:13+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n"
+    },
+    {
+      "service": "voice-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, sessions, token_blacklist, voice_reports\nRunning migrations:\n  No migrations to apply.\n  Your models in app(s): 'voice_reports' have changes that are not yet reflected in a migration, and so won't be applied.\n  Run 'manage.py makemigrations' to make new migrations, and then re-run 'manage.py migrate' to apply them.\n\ntime=\"2026-09-13T18:52:25+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\n  from pkg_resources import DistributionNotFound, get_distribution\n"
+    },
+    {
+      "service": "query-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, database, sessions, token_blacklist\nRunning migrations:\n  No migrations to apply.\n\ntime=\"2026-09-13T18:52:39+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\n  from pkg_resources import DistributionNotFound, get_distribution\n"
+    },
+    {
+      "service": "visualization-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, sessions, token_blacklist\nRunning migrations:\n  No migrations to apply.\n\ntime=\"2026-09-13T18:52:53+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\n  from pkg_resources import DistributionNotFound, get_distribution\n"
+    },
+    {
+      "service": "report-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, sessions, token_blacklist\nRunning migrations:\n  No migrations to apply.\n\ntime=\"2026-09-13T18:53:04+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/rest_framework_simplejwt/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.\n  from pkg_resources import DistributionNotFound, get_distribution\n"
+    },
+    {
+      "service": "ai-service",
+      "exit_code": 0,
+      "status": "PASS",
+      "output": "Operations to perform:\n  Apply all migrations: admin, auth, contenttypes, sessions\nRunning migrations:\n  Applying contenttypes.0001_initial... OK\n  Applying auth.0001_initial... OK\n  Applying admin.0001_initial... OK\n  Applying admin.0002_logentry_remove_auto_add... OK\n  Applying admin.0003_logentry_add_action_flag_choices... OK\n  Applying contenttypes.0002_remove_content_type_name... OK\n  Applying auth.0002_alter_permission_name_max_length... OK\n  Applying auth.0003_alter_user_email_max_length... OK\n  Applying auth.0004_alter_user_username_opts... OK\n  Applying auth.0005_alter_user_last_login_null... OK\n  Applying auth.0006_require_contenttypes_0002... OK\n  Applying auth.0007_alter_validators_add_error_messages... OK\n  Applying auth.0008_alter_user_username_max_length... OK\n  Applying auth.0009_alter_user_last_name_max_length... OK\n  Applying auth.0010_alter_group_name_max_length... OK\n  Applying auth.0011_update_proxy_permissions... OK\n  Applying auth.0012_alter_user_first_name_max_length... OK\n  Applying sessions.0001_initial... OK\n\ntime=\"2026-09-13T18:53:15+03:00\" level=warning msg=\"Found orphan containers ([voice-service-worker]) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.\"\n/usr/local/lib/python3.11/site-packages/langgraph/cache/base/__init__.py:8: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.\n  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer\n"
+    }
+  ]
+}

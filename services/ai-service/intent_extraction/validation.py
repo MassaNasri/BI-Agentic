@@ -388,8 +388,18 @@ def validate_structured_intent(
         "limit": normalized_limit,
         "time_granularity": time_granularity,
         "time_column": time_column,
-        "time_grouping_detected": bool(time_granularity in {"hour", "day", "week", "month", "year"}),
+        "time_grouping_detected": bool(time_granularity in {"hour", "day", "week", "month", "quarter", "year"}),
         "ranking": normalized_ranking,
         "operations": operations,
         "ambiguities": intent.get("ambiguities") if isinstance(intent.get("ambiguities"), list) else [],
+        "semantic_filters": intent.get("semantic_filters") if isinstance(intent.get("semantic_filters"), list) else [],
+        "analytical_semantics": intent.get("analytical_semantics")
+        if isinstance(intent.get("analytical_semantics"), list)
+        else [],
+        "analytical_semantic_hints": intent.get("analytical_semantic_hints")
+        if isinstance(intent.get("analytical_semantic_hints"), dict)
+        else {},
+        "semantic_reasoning": intent.get("semantic_reasoning")
+        if isinstance(intent.get("semantic_reasoning"), dict)
+        else {},
     }

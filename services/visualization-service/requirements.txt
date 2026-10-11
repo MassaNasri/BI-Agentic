@@ -6,7 +6,7 @@ psycopg2-binary==2.9.9
 
 # Django REST Framework
 djangorestframework==3.14.0
-
+pydantic>=2.0
 # JWT Authentication
 djangorestframework-simplejwt==5.3.0
 

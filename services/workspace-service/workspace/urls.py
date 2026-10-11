@@ -1,8 +1,5 @@
 from django.urls import path
 from .views import (
-<<<<<<< HEAD
-    WorkspaceUpdateView, 
-=======
     InternalActivateUserMembershipsView,
     InternalAttachUserToInvitationView,
     InternalCreateManagerWorkspaceView,
@@ -10,7 +7,6 @@ from .views import (
     InternalUserWorkspacesView,
     WorkspaceUpdateView,
     WorkspaceDetailByIdView,
->>>>>>> c791036 (final update)
     WorkspaceMembersView,
     InvitationView,
     RoleAssignmentView,
@@ -25,6 +21,7 @@ app_name = 'workspace'
 
 urlpatterns = [
     path('', WorkspaceUpdateView.as_view(), name='workspace-update'),
+    path('<int:workspace_id>/', WorkspaceDetailByIdView.as_view(), name='workspace-detail'),
     path('members/', WorkspaceMembersView.as_view(), name='workspace-members'),
     path('invite/', InvitationView.as_view(), name='workspace-invite'),
     path('accept-invite/', AcceptInvitationView.as_view(), name='accept-invite'),

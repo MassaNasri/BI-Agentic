@@ -11,11 +11,7 @@ from datetime import datetime
 from enum import Enum
 import logging
 
-# Add parent directory to path for imports
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from models.silver_schema import DataType
+from shared.models.silver_schema import DataType
 from .ch_identifiers import quote_columns, quote_table_name, sanitize_identifier_map
 
 logger = logging.getLogger(__name__)

@@ -5,6 +5,7 @@ Consumes metadata from multiple topics and stores in SurrealDB
 import logging
 import time
 import os
+import requests
 from typing import Dict, Any
 from shared.utils.kafka_consumer import KafkaMessageConsumer
 from shared.utils.surreal_client import SurrealClient
@@ -42,6 +43,63 @@ class MetadataListener:
         self.metadata_count = 0
         self.load_status_count = 0
         self.error_count = 0
+
+    def _notify_query_service_failure(self, message: Dict[str, Any]) -> bool:
+        """Deliver a terminal loader failure through the durable status consumer."""
+        workspace_id = message.get("workspace_id")
+        dataset_id = message.get("dataset_id")
+        job_id = message.get("ingestion_job_id")
+        if workspace_id in (None, "") or dataset_id in (None, "") or not job_id:
+            logger.warning("[METADATA] Legacy load failure has no complete ingestion scope; callback skipped")
+            return True
+        try:
+            workspace_id = int(workspace_id)
+            dataset_id = int(dataset_id)
+        except (TypeError, ValueError):
+            logger.error("[METADATA] Invalid ingestion scope on load failure; callback skipped as non-retriable")
+            return True
+
+        base_url = str(os.getenv("QUERY_SERVICE_URL", "http://query-service:8006")).rstrip("/")
+        api_key = str(os.getenv("INGESTION_CALLBACK_API_KEY", ""))
+        if not api_key:
+            logger.error("[METADATA] INGESTION_CALLBACK_API_KEY is not configured")
+            return False
+        payload = {
+            "dataset_id": dataset_id,
+            "workspace_id": workspace_id,
+            "expected_state": "processing",
+            "etl_status": "failed",
+            "etl_message": (
+                "ETL loading failed after extraction and cleaning. "
+                f"{str(message.get('error') or 'The loader rejected the batch.')[:1000]}"
+            ),
+        }
+        try:
+            response = requests.post(
+                f"{base_url}/internal/v1/ingestion/jobs/{job_id}/dataset-status",
+                json=payload,
+                headers={
+                    "X-Internal-Service": "etl-metadata",
+                    "X-Internal-API-Key": api_key,
+                },
+                timeout=5,
+            )
+        except requests.RequestException as exc:
+            logger.warning("[METADATA] Ingestion failure callback unavailable: %s", exc)
+            return False
+        if response.status_code != 200:
+            logger.warning(
+                "[METADATA] Ingestion failure callback rejected status=%s body=%s",
+                response.status_code,
+                response.text[:500],
+            )
+            if 400 <= response.status_code < 500:
+                # A malformed or stale scope will never become valid by
+                # replaying the same Kafka record. The query-side timeout is
+                # the fallback for these non-retriable events.
+                return True
+            return False
+        return True
 
     def process_metadata(self, message: Dict[str, Any]) -> bool:
         """
@@ -115,6 +173,9 @@ class MetadataListener:
             # Add row count if present
             if "row_count" in message:
                 metadata_record["row_count"] = message["row_count"]
+
+            if status == "error" and not self._notify_query_service_failure(message):
+                return False
             
             # Insert into SurrealDB load_status table
             result = self.surreal.insert("load_status", metadata_record)
@@ -152,6 +213,8 @@ class MetadataListener:
                     self.metadata_consumer.commit(record)
                 else:
                     logger.warning("[METADATA] Metadata processing failed, offset not committed")
+                    self.metadata_consumer.rewind(record)
+                    time.sleep(max(0.0, float(os.getenv("KAFKA_PROCESSING_RETRY_SECONDS", "2"))))
         except Exception as e:
             logger.error(f"[METADATA] Error in metadata listener: {e}")
             import traceback
@@ -167,6 +230,8 @@ class MetadataListener:
                     self.load_status_consumer.commit(record)
                 else:
                     logger.warning("[METADATA] Load status processing failed, offset not committed")
+                    self.load_status_consumer.rewind(record)
+                    time.sleep(max(0.0, float(os.getenv("KAFKA_PROCESSING_RETRY_SECONDS", "2"))))
         except Exception as e:
             logger.error(f"[METADATA] Error in load status listener: {e}")
             import traceback

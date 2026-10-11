@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, MagicMock, patch
 import json
 
-from extraction_checkpoint import (
+from .extraction_checkpoint import (
     ExtractionCheckpoint,
     CheckpointManager,
     CheckpointStatus

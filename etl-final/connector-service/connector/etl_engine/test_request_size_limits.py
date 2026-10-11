@@ -9,6 +9,7 @@ Tests cover:
 - Configuration options
 """
 
+import json
 import unittest
 from unittest.mock import Mock, patch
 from django.test import TestCase, RequestFactory, override_settings
@@ -57,7 +58,7 @@ class RequestSizeLimitTest(TestCase):
         self.assertEqual(response.status_code, 413)
         
         # Should have error message
-        response_data = response.json()
+        response_data = json.loads(response.content)
         self.assertFalse(response_data['success'])
         self.assertIn('exceeds maximum allowed size', response_data['message'])
     
@@ -131,7 +132,7 @@ class RequestSizeLimitTest(TestCase):
         
         response = middleware(request)
         
-        response_data = response.json()
+        response_data = json.loads(response.content)
         message = response_data['message']
         
         # Should show sizes in MB
@@ -150,7 +151,7 @@ class RequestSizeLimitTest(TestCase):
         response = middleware(request)
         
         # Should have correlation ID in response
-        response_data = response.json()
+        response_data = json.loads(response.content)
         self.assertIn('correlation_id', response_data)
         self.assertIsNotNone(response_data['correlation_id'])
         

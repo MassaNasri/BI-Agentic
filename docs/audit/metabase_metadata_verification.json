@@ -1,0 +1,9 @@
+{
+  "exit_code": 0,
+  "offline": true,
+  "query": "card/dashboard/collection counts and source engine/name only",
+  "output": "CARDS\n484\n(1 row, 49 ms)\nDASHBOARDS\n16\n(1 row, 3 ms)\nCOLLECTIONS\n4\n(1 row, 3 ms)\nID | NAME            | ENGINE\n1  | Sample Database | h2\n2  | ClickHouse      | clickhouse\n(2 rows, 5 ms)\n",
+  "error_type": null,
+  "diagnostic": "",
+  "original_backup_unchanged": true
+}

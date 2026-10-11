@@ -225,12 +225,45 @@ def _validate_sql_against_intent(sql: str, validated_intent: dict[str, Any] | No
             notes.append(f"Reviewed SQL is missing metric reference '{column}'.")
 
     filters = validated_intent.get("filters") or []
+    where_match = re.search(
+        r"\bWHERE\b(?P<body>.*?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|;|$)",
+        sql_upper,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    where_body = where_match.group("body") if where_match else ""
+    if filters and not where_body.strip():
+        notes.append("Reviewed SQL dropped WHERE clause required by filters.")
+
     for filter_item in filters:
         if not isinstance(filter_item, dict):
             continue
         column = str(filter_item.get("column", "")).strip()
+        operator = str(filter_item.get("operator", "=")).strip().upper()
         if column and not _sql_mentions_token(sql_upper, column):
             notes.append(f"Reviewed SQL is missing filter reference '{column}'.")
+            continue
+        if column and where_body:
+            if not _sql_mentions_token(where_body, column):
+                notes.append(f"Reviewed SQL filter for '{column}' is not present in WHERE clause.")
+                continue
+            if operator == "BETWEEN":
+                between_pattern = re.compile(rf"\b{re.escape(column.upper())}\b[\s\w().]*\bBETWEEN\b", flags=re.IGNORECASE)
+                if not between_pattern.search(where_body):
+                    notes.append(f"Reviewed SQL dropped BETWEEN predicate for filter '{column}'.")
+            elif operator in {"IN", "LIKE"}:
+                keyword_pattern = re.compile(
+                    rf"\b{re.escape(column.upper())}\b[\s\w().]*\b{re.escape(operator)}\b",
+                    flags=re.IGNORECASE,
+                )
+                if not keyword_pattern.search(where_body):
+                    notes.append(f"Reviewed SQL dropped {operator} predicate for filter '{column}'.")
+            elif operator in {"=", "!=", ">", "<", ">=", "<="}:
+                comparison_pattern = re.compile(
+                    rf"\b{re.escape(column.upper())}\b[\s\w().]*{re.escape(operator)}",
+                    flags=re.IGNORECASE,
+                )
+                if not comparison_pattern.search(where_body):
+                    notes.append(f"Reviewed SQL dropped comparison predicate '{column} {operator} ...'.")
 
     dimensions = [str(dim).strip() for dim in (validated_intent.get("dimensions") or []) if str(dim).strip()]
     has_aggregated_metric = any(

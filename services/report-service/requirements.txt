@@ -3,7 +3,8 @@ Django==4.2.7
 
 # PostgreSQL Database Adapter
 psycopg2-binary==2.9.9
-
+pydantic>=2.0
+sqlglot>=25.17.0
 # Django REST Framework
 djangorestframework==3.14.0
 

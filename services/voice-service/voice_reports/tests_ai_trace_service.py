@@ -51,6 +51,8 @@ class AITraceServiceTests(unittest.TestCase):
         self.assertFalse(bool(trace["classification"]["error"]))
         self.assertIn("term_corrections", trace["preprocessing_high"])
         self.assertTrue(trace["preprocessing_high"]["term_corrections"])
+        self.assertIn("final_chart_type", trace["visualization"])
+        self.assertIn("final_chart_type", trace["diagnostics"])
 
     def test_classification_error_is_cleared_when_preprocessing_high_is_degraded(self):
         trace = build_ai_trace_payload(
@@ -84,11 +86,26 @@ class AITraceServiceTests(unittest.TestCase):
             metabase_question_id=2,
             metabase_dashboard_id=3,
             embed_url="",
-            chart_config={},
+            chart_config={
+                "chart_hint_from_ai": "bar",
+                "chart_type_selected_by_visualization_service": "line",
+                "chart_selection_reason": "result_shape_time_single_metric_line",
+                "metabase_display": "line",
+                "metabase_visualization_settings": {
+                    "graph.dimensions": ["period"],
+                    "graph.metrics": ["sum_total_sales"],
+                },
+            },
             error_message="",
         )
 
         self.assertFalse(bool(trace["classification"]["error"]))
+        self.assertEqual(trace["intent_extraction"]["time_grain"], "day")
+        self.assertIn(trace["intent_extraction"]["time_grain_source"], {"default", "explicit", "inferred"})
+        self.assertIn("detected_time_phrase", trace["intent_extraction"])
+        self.assertEqual(trace["visualization"]["final_chart_type"], "line")
+        self.assertEqual(trace["diagnostics"]["final_chart_type"], "line")
+        self.assertEqual(trace["diagnostics"]["metabase_display"], "line")
 
 
 if __name__ == "__main__":

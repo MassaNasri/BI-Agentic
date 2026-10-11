@@ -1,0 +1,10 @@
+[
+  {
+    "service": "voice-service",
+    "output": "Migrations for 'voice_reports':\n  voice_reports/migrations/0013_rename_dashboard_p_workspa_0dd780_idx_dashboard_p_workspa_11b48a_idx_and_more.py\n    - Rename index dashboard_p_workspa_0dd780_idx on dashboardpage to dashboard_p_workspa_11b48a_idx\n    - Rename index report_page_page_id_8a980a_idx on reportpageassignment to report_page_page_id_7f390f_idx\n    - Alter field chart_type on voicereport\n"
+  },
+  {
+    "service": "notification-service",
+    "output": "Migrations for 'notification':\n  notification/migrations/0002_planrecord_subscriptionrecord_userrecord_and_more.py\n    - Create model PlanRecord\n    - Create model SubscriptionRecord\n    - Create model UserRecord\n    - Create model WorkspaceMemberRecord\n    - Create model WorkspaceRecord\n"
+  }
+]

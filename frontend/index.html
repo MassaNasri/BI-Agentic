@@ -1,9 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      ;(function () {
+        try {
+          var storedTheme = window.localStorage.getItem('bi-theme')
+          var theme = storedTheme === 'light' || storedTheme === 'dark' ? storedTheme : 'dark'
+          document.documentElement.setAttribute('data-theme', theme)
+        } catch (error) {
+          document.documentElement.setAttribute('data-theme', 'dark')
+        }
+      })()
+    </script>
     <title>BI Voice Agent</title>
   </head>
   <body>

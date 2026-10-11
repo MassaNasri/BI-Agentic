@@ -22,6 +22,9 @@ class _FakeLineageTracker:
     def record_transformation(self, *_args, **_kwargs):
         return None
 
+    def record_transformations(self, records):
+        return len(records)
+
 
 class TestExtractorRemediation(unittest.TestCase):
     def _build_listener(self):
@@ -57,7 +60,17 @@ class TestExtractorRemediation(unittest.TestCase):
         mock_cursor.fetchall.side_effect = fetchall
         mock_cursor.description = [("id",)]
         mock_connection.cursor.return_value = mock_cursor
-        listener.db_connector.connect = Mock(return_value=mock_connection)
+        fake_connector = Mock(key="mysql")
+        fake_connector.validate_configuration.return_value = {"database": "demo"}
+        fake_connector.connect.return_value = mock_connection
+        fake_connector.list_tables.return_value = [
+            {"schema": "demo", "name": "table_a", "type": "BASE TABLE"},
+            {"schema": "demo", "name": "table_b", "type": "BASE TABLE"},
+        ]
+        fake_connector.inspect_table.return_value = {
+            "columns": [{"column_name": "id"}], "primary_key": ["id"]
+        }
+        listener.db_connector.get_connector = Mock(return_value=fake_connector)
         listener.database_strategy.detect_primary_key = Mock(return_value="id")
 
         def extract_batch(config, offset, limit):
@@ -189,7 +202,7 @@ class TestExtractorRemediation(unittest.TestCase):
         listener = self._build_listener()
         listener.idempotency_manager = None
         listener.lineage_tracker = Mock()
-        listener.lineage_tracker.record_transformation.side_effect = Exception("lineage down")
+        listener.lineage_tracker.record_transformations.side_effect = Exception("lineage down")
         listener.csv_strategy.iter_batches = Mock(return_value=iter([[{"id": 1}]]))
         listener._send_batch = Mock(return_value=True)
 
@@ -197,6 +210,21 @@ class TestExtractorRemediation(unittest.TestCase):
             ok = listener.process_file({"filename": "lineage.csv", "path": "lineage.csv"})
 
         self.assertTrue(ok)
+
+    def test_file_lineage_is_written_once_per_batch(self):
+        listener = self._build_listener()
+        listener.idempotency_manager = None
+        listener.lineage_tracker = Mock()
+        listener.batch_size = 100
+        listener.csv_strategy.iter_batches = Mock(return_value=iter([[{"id": 1}, {"id": 2}]]))
+        listener._send_batch = Mock(return_value=True)
+
+        with patch.object(kl.pd, "read_csv", return_value=pd.DataFrame([{"id": 1}])):
+            ok = listener.process_file({"filename": "lineage.csv", "path": "lineage.csv"})
+
+        self.assertTrue(ok)
+        listener.lineage_tracker.record_transformations.assert_called_once()
+        self.assertEqual(len(listener.lineage_tracker.record_transformations.call_args.args[0]), 2)
 
     def test_extraction_strategy_has_single_enrich_rows_method(self):
         strategy_path = Path(__file__).with_name("extraction_strategy.py")

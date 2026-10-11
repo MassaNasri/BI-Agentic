@@ -148,30 +148,29 @@ class KafkaSchemaValidator:
                 'db_type': {
                     'type': 'string',
                     'required_if': {'type': 'database'},
-                    'constraints': {'enum': ['mysql', 'postgres', 'sqlite', 'mssql', 'oracle']}
+                    'constraints': {'enum': ['postgres', 'mysql', 'mariadb', 'mssql', 'oracle', 'sqlite', 'clickhouse']}
+                },
+                'configuration': {
+                    'type': 'dict',
+                    'required': False
                 },
                 'host': {
                     'type': 'string',
-                    'required_if': {'type': 'database'},
                     'constraints': {'not_empty': True}
                 },
                 'user': {
                     'type': 'string',
-                    'required_if': {'type': 'database'},
                     'constraints': {'not_empty': True}
                 },
                 'password': {
-                    'type': 'string',
-                    'required_if': {'type': 'database'}
+                    'type': 'string'
                 },
                 'database': {
                     'type': 'string',
-                    'required_if': {'type': 'database'},
                     'constraints': {'not_empty': True}
                 },
                 'port': {
                     'type': 'integer',
-                    'required_if': {'type': 'database'},
                     'constraints': {'min': 1, 'max': 65535}
                 }
             }
@@ -236,6 +235,15 @@ class KafkaSchemaValidator:
                     'required': False,
                     'constraints': {'not_empty': True}
                 },
+                'schema_only': {
+                    'type': 'boolean',
+                    'required': False
+                },
+                'columns': {
+                    'type': 'list',
+                    'required': False,
+                    'constraints': {'not_empty': True}
+                },
                 'batch_id': {
                     'type': 'string',
                     'required': False
@@ -281,6 +289,15 @@ class KafkaSchemaValidator:
                     'constraints': {'not_empty': True}
                 },
                 'rows': {
+                    'type': 'list',
+                    'required': False,
+                    'constraints': {'not_empty': True}
+                },
+                'schema_only': {
+                    'type': 'boolean',
+                    'required': False
+                },
+                'columns': {
                     'type': 'list',
                     'required': False,
                     'constraints': {'not_empty': True}
@@ -427,6 +444,12 @@ class KafkaSchemaValidator:
             
             # Validate constraints
             constraints = field_def.get('constraints', {})
+            if (
+                normalized_topic in ("extracted_rows_topic", "clean_rows_topic")
+                and message.get("schema_only") is True
+                and field_name in ("rows", "row_count")
+            ):
+                constraints = {}
             is_valid, error = FieldValidator.validate_constraints(field_value, constraints)
             if not is_valid:
                 return False, f"Field '{field_name}': {error}"
@@ -435,6 +458,11 @@ class KafkaSchemaValidator:
         if normalized_topic in ("extracted_rows_topic", "clean_rows_topic"):
             if "data" not in message and "rows" not in message:
                 return False, "Missing required field: data or rows"
+            if message.get("schema_only") is True:
+                if message.get("rows") != [] or message.get("row_count") != 0:
+                    return False, "Schema-only messages must declare zero rows"
+                if not message.get("columns"):
+                    return False, "Schema-only messages require columns"
         if normalized_topic == "metadata_topic":
             has_event_type = bool(str(message.get("event_type") or "").strip())
             has_metadata_type = bool(str(message.get("metadata_type") or "").strip())

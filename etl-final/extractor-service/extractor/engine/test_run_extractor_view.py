@@ -1,6 +1,7 @@
 from unittest.mock import Mock, patch
 
 from django.test import TestCase
+from django.conf import settings
 from rest_framework.test import APIClient
 
 from shared.utils.kafka_schema_validator import KafkaSchemaValidator
@@ -8,7 +9,15 @@ from shared.utils.kafka_schema_validator import KafkaSchemaValidator
 
 class TestRunExtractorView(TestCase):
     def setUp(self):
+        settings.ETL_INTERNAL_API_KEY = "p0c-test-only-internal-key"
         self.client = APIClient()
+        self.client.credentials(
+            HTTP_X_INTERNAL_SERVICE="query-service",
+            HTTP_X_INTERNAL_API_KEY="p0c-test-only-internal-key",
+            HTTP_X_WORKSPACE_ID="23",
+            HTTP_X_DATASET_ID="dataset-91",
+            HTTP_X_INGESTION_JOB_ID="7d429d28-e064-4d0f-b0bb-c6667a911b8f",
+        )
         self.url = "/api/run/"
 
     @patch("engine.views.SurrealClient")
@@ -41,7 +50,7 @@ class TestRunExtractorView(TestCase):
         payload = {
             "config": {
                 "db_type": "postgresql",
-                "host": "localhost",
+                "host": "8.8.8.8",
                 "user": "postgres",
                 "password": "secret",
                 "database": "analytics",

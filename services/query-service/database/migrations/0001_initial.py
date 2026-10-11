@@ -9,9 +9,10 @@ import django.utils.timezone
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies = [
-        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-    ]
+    # The manager identifier is owned by auth-service. Keeping the original
+    # swappable-user dependency made a clean shared-database install depend on
+    # an auth_user table that this deployment does not own or create.
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
@@ -95,11 +96,9 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "manager",
-                    models.OneToOneField(
-                        limit_choices_to={"role": "manager"},
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="database",
-                        to=settings.AUTH_USER_MODEL,
+                    models.PositiveBigIntegerField(
+                        db_column="manager_id",
+                        unique=True,
                     ),
                 ),
             ],

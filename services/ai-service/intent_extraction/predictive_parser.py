@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from shared.bi_semantic_layer import predictive_metric_columns_from_query
 from shared.pipeline_guards import is_technical_column_name
 from shared.schema_utils import is_date_type, is_numeric_type
 
@@ -188,31 +189,40 @@ def parse_predictive_intent(*, query: str, schema: dict[str, list[dict[str, Any]
     table = _best_table(schema, query)
     columns = schema.get(table, [])
     time_column = _best_time_column(columns)
-    metric = _best_metric_column(columns, query)
+    metric_candidates = predictive_metric_columns_from_query(query, columns, max_metrics=4)
+    primary_metric = metric_candidates[0] if metric_candidates else _best_metric_column(columns, query)
     horizon, granularity = _resolve_horizon_and_granularity(query)
 
     if not time_column:
         raise ValueError("No Date/DateTime column found for predictive intent.")
-    if not metric:
+    if not primary_metric:
         raise ValueError("No numeric metric column found for predictive intent.")
+
+    metrics_list = metric_candidates if len(metric_candidates) >= 2 else [primary_metric]
+    metric_specs = [
+        {"column": name, "aggregation": "SUM", "alias": "value" if len(metrics_list) == 1 else f"value_{idx}"}
+        for idx, name in enumerate(metrics_list)
+    ]
 
     return {
         "intent_type": "predictive",
         "intent": "forecast",
-        "metrics": [metric],
-        "metric_specs": [{"column": metric, "aggregation": "SUM", "alias": "value"}],
+        "metrics": metrics_list,
+        "metric_specs": metric_specs,
         "dimensions": [time_column],
         "filters": [],
         "time_range": "all_time",
         "aggregation": "SUM",
-        "target_column": metric,
+        "target_column": primary_metric,
         "table": table,
         "order_by": [{"column": time_column, "direction": "ASC"}],
         "limit": None,
         "ranking": {"direction": None, "requested": False, "source": "predictive_parser"},
-        "operations": ["projection", "forecasting"],
+        "operations": (
+            ["projection", "forecasting", "multi_metric"] if len(metrics_list) > 1 else ["projection", "forecasting"]
+        ),
         "ambiguities": [],
-        "metric": metric,
+        "metric": primary_metric,
         "time_column": time_column,
         "forecast_horizon": horizon,
         "horizon": horizon,

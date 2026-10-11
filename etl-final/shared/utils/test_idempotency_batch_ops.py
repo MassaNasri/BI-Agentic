@@ -9,7 +9,7 @@ def test_claim_new_keys_inserts_before_reading_winners():
 
     def _execute(query, params=None):
         calls.append((query, params))
-        if "argMax" in query:
+        if "argMin" in query:
             # Winner is the claim inserted by current call for h2 only.
             inserted_payload = calls[0][1]
             winner_h2 = None
@@ -21,6 +21,8 @@ def test_claim_new_keys_inserts_before_reading_winners():
 
     client.execute.side_effect = _execute
     manager = IdempotencyManager(client)
+    calls.clear()
+    client.execute.reset_mock()
     keys = [
         IdempotencyKey(source_id="src", batch_id="b", row_hash="h1"),
         IdempotencyKey(source_id="src", batch_id="b", row_hash="h2"),
@@ -31,14 +33,14 @@ def test_claim_new_keys_inserts_before_reading_winners():
     assert len(claims) == 1
     assert claims[0].key.row_hash == "h2"
     assert "INSERT INTO deduplication_log" in calls[0][0]
-    assert "argMax" in calls[1][0]
+    assert "argMin" in calls[1][0]
 
 
 def test_check_and_mark_batch_uses_claims_and_returns_only_new():
     client = Mock()
 
     def _execute(query, params=None):
-        if "argMax" in query:
+        if "argMin" in query:
             inserted_payload = client.execute.call_args_list[0][0][1]
             winner = inserted_payload[0]["_row_id"]
             return [("src:b:h1", winner)]
@@ -46,6 +48,7 @@ def test_check_and_mark_batch_uses_claims_and_returns_only_new():
 
     client.execute.side_effect = _execute
     manager = IdempotencyManager(client)
+    client.execute.reset_mock()
 
     keys = [IdempotencyKey(source_id="src", batch_id="b", row_hash="h1")]
     new_keys = manager.check_and_mark_batch(keys, PipelineStage.LOAD)
@@ -57,11 +60,12 @@ def test_check_and_mark_batch_uses_claims_and_returns_only_new():
 def test_rollback_claims_deletes_by_claim_row_ids():
     client = Mock()
     manager = IdempotencyManager(client)
+    client.execute.reset_mock()
     keys = [IdempotencyKey(source_id="src", batch_id="b", row_hash="h1")]
 
     # Make claim query select itself as winner.
     def _execute(query, params=None):
-        if "argMax" in query:
+        if "argMin" in query:
             inserted_payload = client.execute.call_args_list[0][0][1]
             return [("src:b:h1", inserted_payload[0]["_row_id"])]
         return None

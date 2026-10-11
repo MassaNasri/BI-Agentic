@@ -21,13 +21,9 @@ import os
 from datetime import datetime, timezone
 from uuid import uuid4
 from typing import List
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'shared'))
-
-from models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
-from utils.bronze_writer import BronzeWriter
-from utils.idempotency_manager import IdempotencyManager
+from shared.models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
+from shared.utils.bronze_writer import BronzeWriter
+from shared.utils.idempotency_manager import IdempotencyManager
 from clickhouse_driver import Client
 
 

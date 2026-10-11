@@ -205,8 +205,8 @@ class ClickHouseExecutor:
         """Initialize ClickHouse executor with environment configuration."""
         host = os.getenv('CLICKHOUSE_HOST', 'localhost')
         port_raw = os.getenv('CLICKHOUSE_PORT', '8123')
-        username = os.getenv('CLICKHOUSE_USER', 'user_etl')
-        password = os.getenv('CLICKHOUSE_PASSWORD', 'etl_pass123')
+        username = os.getenv('CLICKHOUSE_USER', '')
+        password = os.getenv('CLICKHOUSE_PASSWORD', '')
         database = os.getenv('CLICKHOUSE_DATABASE', 'default')
 
         try:

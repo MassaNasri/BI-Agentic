@@ -26,11 +26,16 @@ def configure_tracing(service_name: str) -> None:
         return
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(
-        endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"),
-        insecure=True,
-    )
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    if endpoint:
+        configured_insecure = os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "").strip().lower()
+        insecure = (
+            configured_insecure in {"1", "true", "yes", "on"}
+            if configured_insecure
+            else endpoint.startswith("http://")
+        )
+        exporter = OTLPSpanExporter(endpoint=endpoint, insecure=insecure)
+        provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 
 

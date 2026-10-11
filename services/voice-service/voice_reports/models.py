@@ -13,41 +13,27 @@ class VoiceReport(models.Model):
     """
 
     CHART_CHOICES = [
-<<<<<<< HEAD
         (ChartType.LINE, 'Line Chart'),
+        (ChartType.LINE_MULTI, 'Multi-Series Line Chart'),
+        (ChartType.CUMULATIVE_LINE, 'Cumulative Line Chart'),
         (ChartType.BAR, 'Bar Chart'),
+        (ChartType.BAR_GROUPED, 'Grouped Bar Chart'),
+        (ChartType.BAR_STACKED, 'Stacked Bar Chart'),
+        (ChartType.PIE, 'Pie Chart'),
+        (ChartType.AREA, 'Area Chart'),
         (ChartType.CARD, 'Card'),
         (ChartType.TABLE, 'Table'),
         (ChartType.SCATTER, 'Scatter Plot'),
         (ChartType.HISTOGRAM, 'Histogram'),
+        (ChartType.COMBO_LINE_BAR, 'Combo Line-Bar Chart'),
+        (ChartType.MAP, 'Map Chart'),
+        (ChartType.HEATMAP, 'Heatmap'),
         # Legacy chart values kept for backward compatibility with old rows.
         ('kpi', 'Legacy KPI'),
         ('pie', 'Legacy Pie'),
         ('number', 'Legacy Number/KPI'),
         ('scalar', 'Legacy Scalar'),
         ('grouped_bar', 'Legacy Grouped Bar'),
-=======
-        (ChartType.LINE, "Line Chart"),
-        (ChartType.LINE_MULTI, "Multi-Line Chart"),
-        (ChartType.BAR, "Bar Chart"),
-        (ChartType.BAR_GROUPED, "Grouped Bar Chart"),
-        (ChartType.BAR_STACKED, "Stacked Bar Chart"),
-        (ChartType.PIE, "Pie Chart"),
-        (ChartType.AREA, "Area Chart"),
-        (ChartType.MAP, "Map"),
-        (ChartType.COMBO_LINE_BAR, "Combo Line/Bar Chart"),
-        (ChartType.CARD, "Card"),
-        (ChartType.TABLE, "Table"),
-        (ChartType.SCATTER, "Scatter Plot"),
-        (ChartType.HISTOGRAM, "Histogram"),
-        # Legacy chart values kept for backward compatibility with old rows.
-        ("kpi", "Legacy KPI"),
-        ("number", "Legacy Number/KPI"),
-        ("scalar", "Legacy Scalar"),
-        ("grouped_bar", "Legacy Grouped Bar"),
-        ("stacked_bar", "Legacy Stacked Bar"),
-        ("combo", "Legacy Combo"),
->>>>>>> c791036 (final update)
     ]
 
     STATUS_UPLOADED = "uploaded"
@@ -136,6 +122,11 @@ class VoiceReport(models.Model):
     # Visualization
     chart_type = models.CharField(max_length=20, choices=CHART_CHOICES, blank=True)
     chart_config = models.JSONField(null=True, blank=True, help_text="Chart configuration")
+    visualization_spec = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Complete VisualizationSpec contract for rendering and chart switching",
+    )
 
     # Metabase Integration
     metabase_question_id = models.IntegerField(null=True, blank=True)
@@ -229,6 +220,12 @@ class DashboardPage(models.Model):
         verbose_name_plural = "Dashboard Pages"
         ordering = ["workspace_id", "order"]
         unique_together = [["workspace_id", "name"]]
+        indexes = [
+            models.Index(
+                fields=["workspace_id", "order"],
+                name="dashboard_p_workspa_0dd780_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} - workspace:{self.workspace_id}"
@@ -241,7 +238,14 @@ class ReportPageAssignment(models.Model):
 
     report = models.ForeignKey(VoiceReport, on_delete=models.CASCADE, related_name="page_assignments")
     page = models.ForeignKey(DashboardPage, on_delete=models.CASCADE, related_name="report_assignments")
+    widget_type = models.CharField(max_length=32, default="report")
     order = models.IntegerField(default=0)
+    x = models.IntegerField(default=0)
+    y = models.IntegerField(default=0)
+    width = models.PositiveIntegerField(default=6)
+    height = models.PositiveIntegerField(default=4)
+    layout_metadata = models.JSONField(default=dict, blank=True)
+    widget_config = models.JSONField(default=dict, blank=True)
 
     added_at = models.DateTimeField(default=timezone.now)
     added_by_id = models.CharField(max_length=64, db_index=True)
@@ -253,12 +257,16 @@ class ReportPageAssignment(models.Model):
         verbose_name_plural = "Report Page Assignments"
         ordering = ["page", "order"]
         unique_together = [["report", "page"]]
+        indexes = [
+            models.Index(
+                fields=["page", "order"],
+                name="report_page_page_id_8a980a_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.report} -> {self.page}"
 
-<<<<<<< HEAD
-=======
 
 class VoicePipelineJob(models.Model):
     STATUS_PENDING = "PENDING"
@@ -325,4 +333,3 @@ class VoicePipelineJob(models.Model):
 
     def __str__(self):
         return f"{self.job_id} ({self.status})"
->>>>>>> c791036 (final update)

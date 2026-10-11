@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+import uuid
 
 
 class Database(models.Model):
@@ -22,11 +23,21 @@ class Database(models.Model):
         db_index=True,
         help_text="Workspace identifier from workspace-service.",
     )
+    ingestion_job_id = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_index=True,
+        help_text="Immutable query-service-owned ingestion job identifier.",
+    )
     
     # File metadata
     filename = models.CharField(max_length=255)
     file_size = models.BigIntegerField(help_text="File size in bytes")
     file_path = models.CharField(max_length=500, help_text="Path to file in ETL system")
+    source_kind = models.CharField(max_length=20, default='file')
+    source_engine = models.CharField(max_length=32, blank=True, default='')
+    source_tables = models.JSONField(default=list, blank=True)
     
     # Data metadata
     row_count = models.IntegerField(default=0, help_text="Number of rows in the dataset")
@@ -80,4 +91,28 @@ class Database(models.Model):
         """
         # TODO: Implement ClickHouse query
         return []
+
+
+class AuthorizedQueryDefinition(models.Model):
+    """Query-service-owned proof that SQL passed tenant/dataset authorization."""
+
+    import uuid
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace_id = models.PositiveBigIntegerField(db_index=True)
+    dataset_id = models.PositiveBigIntegerField(db_index=True)
+    normalized_sql = models.TextField()
+    creator_id = models.CharField(max_length=128)
+    validation_status = models.CharField(max_length=20, default='approved')
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = 'authorized_query_definitions'
+        indexes = [
+            models.Index(
+                fields=['workspace_id', 'dataset_id', 'validation_status'],
+                name='authorized__workspa_af5518_idx',
+            )
+        ]
 

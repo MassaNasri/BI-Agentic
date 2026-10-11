@@ -4,14 +4,6 @@ from .models import Invitation, Workspace, WorkspaceMember
 
 
 class WorkspaceSerializer(serializers.ModelSerializer):
-<<<<<<< HEAD
-    """Serializer for workspace basic information."""
-    
-    class Meta:
-        model = Workspace
-        fields = ['id', 'name', 'description', 'company_number', 'company_address', 'created_at']
-        read_only_fields = ['id', 'created_at']
-=======
     owner_id = serializers.IntegerField(source="owner", read_only=True)
 
     class Meta:
@@ -28,7 +20,6 @@ class WorkspaceSerializer(serializers.ModelSerializer):
             "owner_email",
         ]
         read_only_fields = fields
->>>>>>> c791036 (final update)
 
 
 class WorkspaceUpdateSerializer(serializers.Serializer):

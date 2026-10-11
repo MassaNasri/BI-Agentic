@@ -40,11 +40,11 @@ function InviteMember() {
       <div className="max-w-2xl mx-auto">
         <Card>
           <div className="text-center py-8">
-            <UserPlus className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            <UserPlus className="w-16 h-16 text-brand-300/60 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-2">
               Access Denied
             </h2>
-            <p className="text-gray-600">
+            <p className="text-[var(--c-muted)]">
               Only workspace owners (managers) can invite members.
             </p>
           </div>
@@ -169,22 +169,22 @@ function InviteMember() {
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Invite Team Member</h1>
-          <p className="text-gray-600 mt-1">Send an invitation to join your workspace</p>
+          <h1 className="text-3xl font-bold text-white">Invite Team Member</h1>
+          <p className="text-[var(--c-muted)] mt-1">Send an invitation to join your workspace</p>
         </div>
       </div>
 
       {!inviteSent ? (
         <Card>
           <div className="flex items-center space-x-3 pb-6 border-b mb-6">
-            <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
-              <UserPlus className="w-6 h-6 text-primary-600" />
+            <div className="w-12 h-12 bg-brand-700/30 rounded-lg flex items-center justify-center">
+              <UserPlus className="w-6 h-6 text-brand-500" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">
+              <h3 className="text-lg font-semibold text-white">
                 Invitation Details
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-[var(--c-muted)]">
                 Enter the email address and role for the new member
               </p>
             </div>
@@ -211,10 +211,10 @@ function InviteMember() {
               options={roleOptions}
             />
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="bg-brand-900/30 border border-brand-700/40 rounded-lg p-4">
               <div className="flex items-start space-x-3">
-                <Shield className="w-5 h-5 text-blue-600 mt-0.5" />
-                <div className="text-sm text-blue-800">
+                <Shield className="w-5 h-5 text-brand-500 mt-0.5" />
+                <div className="text-sm text-brand-200">
                   <p className="font-medium mb-1">About Roles:</p>
                   <ul className="space-y-1 text-xs">
                     <li>
@@ -231,10 +231,10 @@ function InviteMember() {
               </div>
             </div>
 
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <div className="bg-amber-500/15 border border-amber-500/30 rounded-lg p-4">
               <div className="flex items-start space-x-3">
-                <Mail className="w-5 h-5 text-yellow-600 mt-0.5" />
-                <div className="text-sm text-yellow-800">
+                <Mail className="w-5 h-5 text-amber-500 mt-0.5" />
+                <div className="text-sm text-amber-400">
                   <p className="font-medium mb-1">Invitation Process:</p>
                   <ol className="list-decimal list-inside space-y-1 text-xs">
                     <li>An invitation email will be sent to the provided address</li>
@@ -274,10 +274,10 @@ function InviteMember() {
             <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-3">
+            <h2 className="text-2xl font-bold text-white mb-3">
               Invitation Sent!
             </h2>
-            <p className="text-gray-600 mb-6">
+            <p className="text-[var(--c-muted)] mb-6">
               An invitation has been sent to <strong>{formData.email}</strong>
             </p>
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
@@ -307,10 +307,10 @@ function InviteMember() {
       <Card>
         <div className="flex items-center justify-between pb-4 border-b mb-6">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
+            <h3 className="text-lg font-semibold text-white">
               Workspace Members & Invitations
             </h3>
-            <p className="text-sm text-gray-600 mt-1">
+            <p className="text-sm text-[var(--c-muted)] mt-1">
               Overview of all members and pending invitations
             </p>
           </div>
@@ -326,26 +326,26 @@ function InviteMember() {
             {invitedMembers.length > 0 && (
               <div>
                 <div className="flex items-center space-x-2 mb-3">
-                  <Clock className="w-5 h-5 text-blue-500" />
-                  <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                  <Clock className="w-5 h-5 text-brand-400" />
+                  <h4 className="text-sm font-semibold text-brand-300 uppercase tracking-wide">
                     Pending Registration ({invitedMembers.length})
                   </h4>
                 </div>
-                <div className="bg-blue-50 rounded-lg overflow-hidden">
+                <div className="bg-brand-900/30 rounded-lg overflow-hidden">
                   <table className="w-full">
-                    <thead className="bg-blue-100">
+                    <thead className="bg-brand-700/30">
                       <tr>
-                        <th className="text-left py-2 px-4 text-xs font-semibold text-blue-900">Email</th>
-                        <th className="text-left py-2 px-4 text-xs font-semibold text-blue-900">Role</th>
-                        <th className="text-left py-2 px-4 text-xs font-semibold text-blue-900">Status</th>
-                        <th className="text-right py-2 px-4 text-xs font-semibold text-blue-900">Action</th>
+                        <th className="text-left py-2 px-4 text-xs font-semibold text-brand-100">Email</th>
+                        <th className="text-left py-2 px-4 text-xs font-semibold text-brand-100">Role</th>
+                        <th className="text-left py-2 px-4 text-xs font-semibold text-brand-100">Status</th>
+                        <th className="text-right py-2 px-4 text-xs font-semibold text-brand-100">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {invitedMembers.map((member, index) => (
-                        <tr key={index} className="border-t border-blue-200">
-                          <td className="py-3 px-4 text-sm text-gray-900">{member.email}</td>
-                          <td className="py-3 px-4 text-sm text-gray-700 capitalize">{member.role}</td>
+                        <tr key={index} className="border-t border-brand-700/40">
+                          <td className="py-3 px-4 text-sm text-white">{member.email}</td>
+                          <td className="py-3 px-4 text-sm text-brand-300 capitalize">{member.role}</td>
                           <td className="py-3 px-4">{getStatusBadge(member.status)}</td>
                           <td className="py-3 px-4 text-right">
                             <button
@@ -368,28 +368,28 @@ function InviteMember() {
             {pendingMembers.length > 0 && (
               <div>
                 <div className="flex items-center space-x-2 mb-3">
-                  <Mail className="w-5 h-5 text-yellow-500" />
-                  <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                  <Mail className="w-5 h-5 text-amber-500" />
+                  <h4 className="text-sm font-semibold text-brand-300 uppercase tracking-wide">
                     Pending Acceptance ({pendingMembers.length})
                   </h4>
                 </div>
-                <div className="bg-yellow-50 rounded-lg overflow-hidden">
+                <div className="bg-amber-500/15 rounded-lg overflow-hidden">
                   <table className="w-full">
-                    <thead className="bg-yellow-100">
+                    <thead className="bg-amber-500/20">
                       <tr>
-                        <th className="text-left py-2 px-4 text-xs font-semibold text-yellow-900">Name</th>
-                        <th className="text-left py-2 px-4 text-xs font-semibold text-yellow-900">Email</th>
-                        <th className="text-left py-2 px-4 text-xs font-semibold text-yellow-900">Role</th>
-                        <th className="text-left py-2 px-4 text-xs font-semibold text-yellow-900">Status</th>
-                        <th className="text-right py-2 px-4 text-xs font-semibold text-yellow-900">Action</th>
+                        <th className="text-left py-2 px-4 text-xs font-semibold text-amber-400">Name</th>
+                        <th className="text-left py-2 px-4 text-xs font-semibold text-amber-400">Email</th>
+                        <th className="text-left py-2 px-4 text-xs font-semibold text-amber-400">Role</th>
+                        <th className="text-left py-2 px-4 text-xs font-semibold text-amber-400">Status</th>
+                        <th className="text-right py-2 px-4 text-xs font-semibold text-amber-400">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {pendingMembers.map((member, index) => (
-                        <tr key={index} className="border-t border-yellow-200">
-                          <td className="py-3 px-4 text-sm text-gray-900">{member.name}</td>
-                          <td className="py-3 px-4 text-sm text-gray-900">{member.email}</td>
-                          <td className="py-3 px-4 text-sm text-gray-700 capitalize">{member.role}</td>
+                        <tr key={index} className="border-t border-amber-500/30">
+                          <td className="py-3 px-4 text-sm text-white">{member.name}</td>
+                          <td className="py-3 px-4 text-sm text-white">{member.email}</td>
+                          <td className="py-3 px-4 text-sm text-brand-300 capitalize">{member.role}</td>
                           <td className="py-3 px-4">{getStatusBadge(member.status)}</td>
                           <td className="py-3 px-4 text-right">
                             <button
@@ -414,7 +414,7 @@ function InviteMember() {
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center space-x-2">
                     <UserCheck className="w-5 h-5 text-green-500" />
-                    <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                    <h4 className="text-sm font-semibold text-brand-300 uppercase tracking-wide">
                       Active Members ({acceptedMembers.length})
                     </h4>
                   </div>
@@ -436,8 +436,8 @@ function InviteMember() {
             )}
 
             {invitedMembers.length === 0 && pendingMembers.length === 0 && acceptedMembers.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                <Users className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+              <div className="text-center py-8 text-brand-300/80">
+                <Users className="w-12 h-12 mx-auto mb-3 text-brand-300/60" />
                 <p>No members or invitations yet</p>
               </div>
             )}

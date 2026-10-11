@@ -4,6 +4,12 @@ Checks all components of the ETL pipeline
 """
 import requests
 import json
+import os
+
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+if not CLICKHOUSE_USER or not CLICKHOUSE_PASSWORD:
+    raise RuntimeError("CLICKHOUSE_USER and CLICKHOUSE_PASSWORD are required")
 
 print("=" * 60)
 print("ETL PIPELINE VERIFICATION")
@@ -27,7 +33,7 @@ try:
     import subprocess
     result = subprocess.run(
         ['docker', 'exec', 'clickhouse', 'clickhouse-client', 
-         '-u', 'etl_user', '--password', 'etl_pass123', '-d', 'etl',
+         '-u', CLICKHOUSE_USER, '--password', CLICKHOUSE_PASSWORD, '-d', 'etl',
          '--query', 'SHOW TABLES'],
         capture_output=True,
         text=True,
@@ -42,7 +48,7 @@ try:
             if table:
                 count_result = subprocess.run(
                     ['docker', 'exec', 'clickhouse', 'clickhouse-client',
-                     '-u', 'etl_user', '--password', 'etl_pass123', '-d', 'etl',
+                     '-u', CLICKHOUSE_USER, '--password', CLICKHOUSE_PASSWORD, '-d', 'etl',
                      '--query', f'SELECT count() FROM {table}'],
                     capture_output=True,
                     text=True,

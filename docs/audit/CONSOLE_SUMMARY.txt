@@ -1,0 +1,58 @@
+BIAVORA PHASE 0 AUDIT COMPLETE
+Phase 0 acceptance: PARTIAL
+
+environment: LOCAL DEVELOPMENT
+data_cleanup: PARTIAL overall; active application data PASS
+backup: PASS file verification; PostgreSQL/Metabase scoped recovery PASS; full DR PARTIAL
+services_discovered: 24 Compose entries + frontend, PostgreSQL, Ollama, Metabase = 28 runtime roles
+database_inventory: 6 data engine families (PostgreSQL, ClickHouse, SurrealDB, Redis, H2, SQLite); Kafka/ZooKeeper additional state stores
+issues: {'CRITICAL': 8, 'HIGH': 23, 'MEDIUM': 6, 'LOW': 1}
+cross_service_db_violations: 4 grouped: shared PostgreSQL identity; notification foreign ORM (5 tables); multi-owner ClickHouse; multi-owner SurrealDB
+non_http_business_paths: 6 grouped: 5 ETL Kafka workflow paths + shared uploaded files; voice events UNDECIDED
+services_without_proper_health_checks: 17 application/worker entries: 16 TCP-only + one missing; ZooKeeper also uses TCP-only infrastructure probe
+production_blockers: 31
+blocker_definition: unresolved CRITICAL + HIGH findings; do not add overlapping category counts
+production_readiness: NOT READY
+microservices_architecture: NOT COMPLIANT
+database_per_service: NOT COMPLIANT
+http_only_business_communication: NOT COMPLIANT
+tests: {'passed': 411, 'failed': 46, 'additional_passing_subtests': 17, 'collection_errors': 'separate; see TEST_EXECUTION.md'}
+startup: PASS: 24 Compose containers running, 14 HTTP probes, bootstrap login and authorized route
+migrations: Existing commands PASS; voice/notification model-state parity FAIL
+
+TOP 10 BLOCKERS
+1. Retained exposed credentials
+2. Voice workspace fail-open
+3. Unowned dataset binding mutation
+4. Unscoped Metabase object access
+5. Visualization raw-SQL bypass
+6. Public ETL / SSRF / fallback encryption / exposed ports
+7. Existing-account invitation password mutation
+8. Surreal, Metabase and media durability
+9. Shared databases and non-HTTP workflows
+10. Migration drift, failing tests and weak readiness
+
+THE EXACT FIRST 10 TASKS
+1. Rotate all exposed credentials and verify revocation
+2. Make voice workspace authorization fail closed
+3. Authorize ingestion callbacks and harden physical dataset identifiers
+4. Enforce tenant ownership for Metabase cards/dashboard embeds
+5. Replace arbitrary visualization SQL with authorized query IDs
+6. Authenticate/isolate ETL and restrict connectors/secrets
+7. Require existing-user authentication for invitation acceptance
+8. Persist and restore-test metadata, Metabase and media
+9. Review and reconcile voice/notification migrations
+10. Repair test/lint baseline, implement readiness and gate CI
+
+Reports:
+docs/audit/PRE_DEVELOPMENT_SYSTEM_AUDIT.md
+docs/audit/SECURITY_AUDIT.md
+docs/audit/DATA_STORAGE_AND_WIPE_REPORT.md
+docs/audit/CURRENT_ARCHITECTURE.md
+docs/audit/TARGET_MICROSERVICES_ARCHITECTURE.md
+docs/audit/MICROSERVICES_RESTRUCTURING_PLAN.md
+docs/audit/DATABASE_OWNERSHIP_MATRIX.md
+docs/audit/SERVICE_COMMUNICATION_MATRIX.md
+docs/audit/PRODUCTION_READINESS_REPORT.md
+docs/audit/PRE_DEVELOPMENT_ACTION_PLAN.md
+docs/audit/issues.json

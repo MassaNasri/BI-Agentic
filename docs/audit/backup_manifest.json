@@ -1,0 +1,345 @@
+{
+  "status": "FILES VERIFIED; POSTGRESQL RESTORE AND METABASE RESTORED-COPY STARTUP PASS; OTHER FULL RESTORE DRILLS NOT VERIFIED",
+  "backup_directory": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z",
+  "entries": [
+    {
+      "resource": "postgres:bi_voice_agent",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\bi_voice_agent.dump",
+      "bytes": 4672736,
+      "sha256": "89458c319fffd1c87e1713380491d1d168c503f0cbef7efdc5464153ea4fee1b",
+      "verification": "pg_restore --list and isolated restore/count parity PASS"
+    },
+    {
+      "resource": "metabase:H2",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\metabase.db\\metabase.db.mv.db",
+      "bytes": 19910656,
+      "sha256": "09e1805de256d71358ef67be71fb68b7ea2161f3a99cc5848cb33e5bf06e4780",
+      "verification": "offline copy/hash PASS; H2 database copy opens and same-image application startup PASS"
+    },
+    {
+      "resource": "metabase:H2",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\metabase.db\\metabase.db.trace.db",
+      "bytes": 51504,
+      "sha256": "8921f62729d84a10657be4588edadea382eaf6786462bef9bdb5b5d53528ce98",
+      "verification": "offline copy/hash PASS; H2 database copy opens and same-image application startup PASS"
+    },
+    {
+      "resource": "docker-volume:69b0510de7b60ca65a6491807445dfe7d3040d6524260de5bd8b0852869c7243",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\69b0510de7b60ca65a6491807445dfe7d3040d6524260de5bd8b0852869c7243\\archive.tar",
+      "bytes": 134225920,
+      "sha256": "3209fdcc930367980c3615cc59d4ef7a7f453dc493a3cd3d3d37c66520fa9934",
+      "verification": "tar directory readable; 4 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:9321bb1a97078e6cbeb9b82495ca22babd685f50f3aa24547910b0d86d11c243",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\9321bb1a97078e6cbeb9b82495ca22babd685f50f3aa24547910b0d86d11c243\\archive.tar",
+      "bytes": 40960,
+      "sha256": "eb465b1fd392ddf5616aebcd39a52c513d4bfdcf7ccaa66e94d94f224f35ffbd",
+      "verification": "tar directory readable; 4 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:9946052f701f1a33cfd151ef64a313e0081205f25f6c21f321039c45285963fa",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\9946052f701f1a33cfd151ef64a313e0081205f25f6c21f321039c45285963fa\\archive.tar",
+      "bytes": 1363855360,
+      "sha256": "7e6690621e61c281cdc8bcc0c4e0af1ef5e5e802abee3ea8a521a241985737e6",
+      "verification": "tar directory readable; 402 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:a68c594c8e5721956f205b2be92e57a9202b8f5c5bf9c592171a303b15267ea1",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\a68c594c8e5721956f205b2be92e57a9202b8f5c5bf9c592171a303b15267ea1\\archive.tar",
+      "bytes": 10240,
+      "sha256": "d5e047b4bb107aceeeb5a9e2669df9b93ccb046df6e20081bd49e83135404b6f",
+      "verification": "tar directory readable; 1 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_clickhouse_data",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\bi-voice-agent_clickhouse_data\\archive.tar",
+      "bytes": 2844436480,
+      "sha256": "e4c70496dfb8960a864c5f9d175a0ecfa2584eaf99563e86c9213a6e08b27e74",
+      "verification": "tar directory readable; 54254 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_clickhouse_logs",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\bi-voice-agent_clickhouse_logs\\archive.tar",
+      "bytes": 570869760,
+      "sha256": "98c77d5d0cc572a4b0fbdf12f25dcd0f9ec0a5eae0b3322d51a21e33825ca476",
+      "verification": "tar directory readable; 5 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_redis_data",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\bi-voice-agent_redis_data\\archive.tar",
+      "bytes": 2805760,
+      "sha256": "8cf4c6a52c6b874a2d4948466fd8c18e2dfaf67195f6c98432b1cc1d691905e0",
+      "verification": "tar directory readable; 6 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_surreal_data",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\bi-voice-agent_surreal_data\\archive.tar",
+      "bytes": 10240,
+      "sha256": "d5e047b4bb107aceeeb5a9e2669df9b93ccb046df6e20081bd49e83135404b6f",
+      "verification": "tar directory readable; 1 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_uploaded-files",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\bi-voice-agent_uploaded-files\\archive.tar",
+      "bytes": 40960,
+      "sha256": "e0989380a738cafbd493c28cc4b5d80c940ec360876ab5633a36095c4abcc285",
+      "verification": "tar directory readable; 10 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_voice_service_media",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\bi-voice-agent_voice_service_media\\archive.tar",
+      "bytes": 2396160,
+      "sha256": "35221e3ed4d51952d96a6d7d4e03a2e847d0e13104662aae0f9b749ae718a05b",
+      "verification": "tar directory readable; 31 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse-data",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\etl-final_clickhouse-data\\archive.tar",
+      "bytes": 546990080,
+      "sha256": "c3f25228a3b1d5af120721a298000e36c469b37eca256f051f39f1fce81e9b01",
+      "verification": "tar directory readable; 11939 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse-logs",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\etl-final_clickhouse-logs\\archive.tar",
+      "bytes": 77086720,
+      "sha256": "93aa74fc90e709bff6cbcd11b782a3095d5ecd0cf9866621265c9658d9997aaa",
+      "verification": "tar directory readable; 3 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse_data",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\etl-final_clickhouse_data\\archive.tar",
+      "bytes": 382832640,
+      "sha256": "8f687a61a3179d3a79ff6bb6fb0e1ad5cafb14eb430e94fe95df373cd5e6b08e",
+      "verification": "tar directory readable; 22070 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse_logs",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\etl-final_clickhouse_logs\\archive.tar",
+      "bytes": 227768320,
+      "sha256": "9572936973d95d01ffce247f4930c3e0ab9f8dc7b319efaaf5675a3ae1ede725",
+      "verification": "tar directory readable; 3 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:etl-final_surreal_data",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\etl-final_surreal_data\\archive.tar",
+      "bytes": 10240,
+      "sha256": "d5e047b4bb107aceeeb5a9e2669df9b93ccb046df6e20081bd49e83135404b6f",
+      "verification": "tar directory readable; 1 members; application restore pending"
+    },
+    {
+      "resource": "docker-volume:etl-final_uploaded-files",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\etl-final_uploaded-files\\archive.tar",
+      "bytes": 1198080,
+      "sha256": "ba484b34f95a3a59c4f2f38b36915ca5c0c0e365dbb1c96595c3a06a3f43aeb9",
+      "verification": "tar directory readable; 8 members; application restore pending"
+    },
+    {
+      "resource": "container:voice-service/app/media",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\container-files\\voice-service\\media\\workspaces\\2026\\05\\07\\text-input\\d98d4d5e-e32e-4ff6-abec-b01a23de8cc6.txt",
+      "bytes": 23,
+      "sha256": "7de8d856759cecceb82a9022a116a28d25ebfe90cb8fdb61ea38210fd711fadf",
+      "verification": "offline copy"
+    },
+    {
+      "resource": "container:voice-service/app/media",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\container-files\\voice-service\\media\\workspaces\\ws-1\\audio\\96c2b0f7-e640-4bed-b9f9-73cf1a264780_sample.wav",
+      "bytes": 16,
+      "sha256": "aeb852048e35be4391685af966e670f32bb52a5064ce93030911a087d7f115f7",
+      "verification": "offline copy"
+    },
+    {
+      "resource": "local:media",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\local-media.tar",
+      "bytes": 20480,
+      "sha256": "815b9143800c07a24d77cff10b994ae10c0dcb8ebe1e83c6e68902437fe9829d",
+      "verification": "tar directory readable; 9 members"
+    },
+    {
+      "resource": "local:etl-final/etl-infra/clickhouse/data",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\local-etl-final_etl-infra_clickhouse_data.tar",
+      "bytes": 67328000,
+      "sha256": "8a9011d44161b0835e37d0832597513bdf74271dca95f1595bcf1ad47b30df46",
+      "verification": "tar directory readable; 4922 members"
+    },
+    {
+      "resource": "container:ai-service/app/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\ai-service\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:etl-connector/app/connector-service/connector/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\etl-connector\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:etl-extractor/app/extractor-service/extractor/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\etl-extractor\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:etl-loader/app/loader-service/loader/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\etl-loader\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:etl-detector/app/detector-service/detector/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\etl-detector\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:etl-metadata/app/metadata-service/metadata/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\etl-metadata\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:etl-transformer/app/transformer-service/transformer/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\etl-transformer\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:extractor-service/app/extractor-service/extractor/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\extractor-service\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:connector-service/app/connector-service/connector/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\connector-service\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:loader-service/app/loader-service/loader/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\loader-service\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:metadata-service/app/metadata-service/metadata/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\metadata-service\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:transformer-service/app/transformer-service/transformer/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\transformer-service\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "container:detector-service/app/detector-service/detector/db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\sqlite\\detector-service\\db.sqlite3",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    },
+    {
+      "resource": "local:etl-final\\connector-service\\connector\\db.sqlite3",
+      "path": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z\\local-sqlite\\etl-final\\connector-service\\connector\\db.sqlite3",
+      "bytes": 4096,
+      "sha256": "ac7fbf4732ec6b1a11c3af81cea48005c158e39d9043800a4d7895506a32b5b5",
+      "verification": "offline file copy; SQLite integrity checked separately"
+    }
+  ],
+  "errors": [],
+  "no_deletions": true,
+  "paths_not_copied": [
+    {
+      "container": "report-service",
+      "path": "/app/media",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "query-service",
+      "path": "/app/media",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "etl-connector",
+      "path": "/app/connector/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "etl-extractor",
+      "path": "/app/extractor/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "etl-loader",
+      "path": "/app/loader/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "etl-detector",
+      "path": "/app/detector/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "etl-metadata",
+      "path": "/app/metadata/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "etl-transformer",
+      "path": "/app/transformer/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "extractor-service",
+      "path": "/app/extractor/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "connector-service",
+      "path": "/app/connector/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "loader-service",
+      "path": "/app/loader/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "metadata-service",
+      "path": "/app/metadata/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "transformer-service",
+      "path": "/app/transformer/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    },
+    {
+      "container": "detector-service",
+      "path": "/app/detector/db.sqlite3",
+      "status": "path unavailable; absence or layout mismatch requires verification"
+    }
+  ],
+  "final_sha256_verification": "All 37 original entries match after startup; final_storage_verification.json",
+  "restore_evidence": [
+    "postgres_restore_verification.json",
+    "metabase_metadata_verification.json",
+    "startup_verification.json"
+  ]
+}

@@ -1,15 +1,11 @@
 """
 Unit tests for rule action helpers.
 """
-import os
-import sys
 from datetime import date
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-
-from rule_actions import (
+from .rule_actions import (
     trim_strings,
     trim_field,
     uppercase_strings,

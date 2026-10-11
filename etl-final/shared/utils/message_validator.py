@@ -45,12 +45,17 @@ class MessageValidator:
                     return False, f"Missing required field for file type: {field}"
         
         elif message["type"] == "database":
-            required = ["db_type", "host", "user", "password", "database", "port"]
+            required = ["db_type"]
             for field in required:
                 if field not in message:
                     return False, f"Missing required field for database type: {field}"
             if normalize_db_type(message.get("db_type")) is None:
                 return False, "Unsupported db_type"
+            if "configuration" not in message:
+                legacy = ["host", "user", "password", "database", "port"]
+                for field in legacy:
+                    if field not in message:
+                        return False, f"Missing required field for database type: {field}"
         
         return True, None
     

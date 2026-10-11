@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 import requests
@@ -21,6 +22,47 @@ class WorkspaceContext:
     dataset_id: str
     source_id: str
     table_name: str
+
+
+class WorkspaceResolutionStatus(str, Enum):
+    AUTHORIZED = "authorized"
+    DENIED = "denied"
+    NOT_FOUND = "not_found"
+    DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
+    INVALID_RESPONSE = "invalid_response"
+
+
+@dataclass(frozen=True)
+class WorkspaceResolution:
+    status: WorkspaceResolutionStatus
+    context: WorkspaceContext | None = None
+    detail: str = ""
+
+    @property
+    def authorized(self) -> bool:
+        return self.status is WorkspaceResolutionStatus.AUTHORIZED and self.context is not None
+
+    # Compatibility properties deliberately return empty values unless the
+    # workspace service positively authorized the resource.
+    @property
+    def workspace_id(self) -> str:
+        return self.context.workspace_id if self.authorized else ""
+
+    @property
+    def manager_id(self) -> str:
+        return self.context.manager_id if self.authorized else ""
+
+    @property
+    def dataset_id(self) -> str:
+        return self.context.dataset_id if self.authorized else ""
+
+    @property
+    def source_id(self) -> str:
+        return self.context.source_id if self.authorized else ""
+
+    @property
+    def table_name(self) -> str:
+        return self.context.table_name if self.authorized else ""
 
 
 class WorkspaceClient:
@@ -57,37 +99,58 @@ class WorkspaceClient:
         workspace_id: str,
         authorization_header: str,
         fallback_manager_id: str,
-    ) -> tuple[str, str]:
+    ) -> WorkspaceResolution:
         if not workspace_id:
-            return "", fallback_manager_id
-        response = self._get(
-            f"{self.base_url}/workspace/{workspace_id}/",
-            headers=self._headers(authorization_header),
-            timeout=10,
-        )
+            return WorkspaceResolution(WorkspaceResolutionStatus.INVALID_RESPONSE, detail="workspace_id is required")
+        try:
+            response = self._get(
+                f"{self.base_url}/workspace/{workspace_id}/",
+                headers=self._headers(authorization_header),
+                timeout=10,
+            )
+        except Exception:
+            return WorkspaceResolution(WorkspaceResolutionStatus.DEPENDENCY_UNAVAILABLE)
         if response.status_code != 200:
-            return "", fallback_manager_id
+            if response.status_code in {401, 403}:
+                return WorkspaceResolution(WorkspaceResolutionStatus.DENIED)
+            if response.status_code == 404:
+                return WorkspaceResolution(WorkspaceResolutionStatus.NOT_FOUND)
+            return WorkspaceResolution(WorkspaceResolutionStatus.DEPENDENCY_UNAVAILABLE)
         payload = self._json_payload(response)
         nested = payload.get("workspace") if isinstance(payload.get("workspace"), dict) else {}
-        resolved_workspace_id = str(payload.get("id") or nested.get("id") or workspace_id or "").strip()
+        resolved_workspace_id = str(payload.get("id") or nested.get("id") or "").strip()
+        if not resolved_workspace_id or resolved_workspace_id != str(workspace_id).strip():
+            return WorkspaceResolution(WorkspaceResolutionStatus.INVALID_RESPONSE)
         manager_id = str(payload.get("manager_id") or nested.get("owner_id") or fallback_manager_id or "").strip()
-        return resolved_workspace_id, manager_id
+        return WorkspaceResolution(
+            WorkspaceResolutionStatus.AUTHORIZED,
+            WorkspaceContext(resolved_workspace_id, manager_id, "", "", ""),
+        )
 
     def _resolve_from_workspace_members(
         self,
         *,
         authorization_header: str,
         fallback_manager_id: str,
-    ) -> tuple[str, str]:
-        response = self._get(
-            f"{self.base_url}/workspace/members/",
-            headers=self._headers(authorization_header),
-            timeout=10,
-        )
+    ) -> WorkspaceResolution:
+        try:
+            response = self._get(
+                f"{self.base_url}/workspace/members/",
+                headers=self._headers(authorization_header),
+                timeout=10,
+            )
+        except Exception:
+            return WorkspaceResolution(WorkspaceResolutionStatus.DEPENDENCY_UNAVAILABLE)
         if response.status_code != 200:
-            return "", fallback_manager_id
+            if response.status_code in {401, 403}:
+                return WorkspaceResolution(WorkspaceResolutionStatus.DENIED)
+            if response.status_code == 404:
+                return WorkspaceResolution(WorkspaceResolutionStatus.NOT_FOUND)
+            return WorkspaceResolution(WorkspaceResolutionStatus.DEPENDENCY_UNAVAILABLE)
         payload = self._json_payload(response)
         workspace_id = str(payload.get("workspace_id") or "").strip()
+        if not workspace_id:
+            return WorkspaceResolution(WorkspaceResolutionStatus.INVALID_RESPONSE)
         manager_id = str(fallback_manager_id or "").strip()
 
         accepted_members = payload.get("accepted_members")
@@ -101,79 +164,60 @@ class WorkspaceClient:
                     manager_id = candidate_id
                     break
 
-        return workspace_id, manager_id
+        return WorkspaceResolution(
+            WorkspaceResolutionStatus.AUTHORIZED,
+            WorkspaceContext(workspace_id, manager_id, "", "", ""),
+        )
 
     def _resolve_from_workspace_me(
         self,
         *,
         authorization_header: str,
         fallback_manager_id: str,
-    ) -> tuple[str, str]:
-        response = self._get(
-            f"{self.base_url}/workspace/",
-            headers=self._headers(authorization_header),
-            timeout=10,
-        )
+    ) -> WorkspaceResolution:
+        try:
+            response = self._get(
+                f"{self.base_url}/workspace/",
+                headers=self._headers(authorization_header),
+                timeout=10,
+            )
+        except Exception:
+            return WorkspaceResolution(WorkspaceResolutionStatus.DEPENDENCY_UNAVAILABLE)
         if response.status_code != 200:
-            return "", fallback_manager_id
+            if response.status_code in {401, 403}:
+                return WorkspaceResolution(WorkspaceResolutionStatus.DENIED)
+            if response.status_code == 404:
+                return WorkspaceResolution(WorkspaceResolutionStatus.NOT_FOUND)
+            return WorkspaceResolution(WorkspaceResolutionStatus.DEPENDENCY_UNAVAILABLE)
         payload = self._json_payload(response)
         nested = payload.get("workspace") if isinstance(payload.get("workspace"), dict) else {}
         workspace_id = str(payload.get("id") or nested.get("id") or "").strip()
+        if not workspace_id:
+            return WorkspaceResolution(WorkspaceResolutionStatus.INVALID_RESPONSE)
         manager_id = str(payload.get("manager_id") or nested.get("owner_id") or fallback_manager_id or "").strip()
-        return workspace_id, manager_id
+        return WorkspaceResolution(
+            WorkspaceResolutionStatus.AUTHORIZED,
+            WorkspaceContext(workspace_id, manager_id, "", "", ""),
+        )
 
-    def resolve(self, *, request, workspace_hint: str, user_id: str) -> WorkspaceContext:
-        workspace_id = str(workspace_hint or "").strip()
+    def resolve(self, *, request, workspace_hint: str, user_id: str) -> WorkspaceResolution:
+        requested_workspace_id = str(workspace_hint or "").strip()
         manager_id = str(user_id or "").strip()
         authorization_header = str(request.META.get("HTTP_AUTHORIZATION") or "")
 
-        if workspace_id:
-            try:
-                resolved_workspace_id, resolved_manager_id = self._resolve_from_workspace_id(
-                    workspace_id=workspace_id,
-                    authorization_header=authorization_header,
-                    fallback_manager_id=manager_id,
-                )
-                if resolved_workspace_id:
-                    workspace_id = resolved_workspace_id
-                manager_id = resolved_manager_id or manager_id
-            except (HttpClientError, requests.RequestException, Exception):
-                pass
+        if requested_workspace_id:
+            return self._resolve_from_workspace_id(
+                workspace_id=requested_workspace_id,
+                authorization_header=authorization_header,
+                fallback_manager_id=manager_id,
+            )
 
-        if not workspace_id:
-            try:
-                resolved_workspace_id, resolved_manager_id = self._resolve_from_workspace_members(
-                    authorization_header=authorization_header,
-                    fallback_manager_id=manager_id,
-                )
-                if resolved_workspace_id:
-                    workspace_id = resolved_workspace_id
-                manager_id = resolved_manager_id or manager_id
-            except (HttpClientError, requests.RequestException, Exception):
-                pass
-
-        if not workspace_id:
-            try:
-                resolved_workspace_id, resolved_manager_id = self._resolve_from_workspace_me(
-                    authorization_header=authorization_header,
-                    fallback_manager_id=manager_id,
-                )
-                if resolved_workspace_id:
-                    workspace_id = resolved_workspace_id
-                manager_id = resolved_manager_id or manager_id
-            except (HttpClientError, requests.RequestException, Exception):
-                pass
-
-        # Phase 13 / GAP-08: do not call query-service ``/database/`` to guess a
-        # default dataset. Callers pass ``dataset_id`` / ``table_name`` on the
-        # request (stored on the pipeline job trace) or leave them empty.
-
-        return WorkspaceContext(
-            workspace_id=str(workspace_id or "").strip(),
-            manager_id=str(manager_id or "").strip(),
-            dataset_id="",
-            source_id="",
-            table_name="",
+        # With no requested ID, resolve a membership-owned workspace. A denied,
+        # malformed, or unavailable response is final; it must not fall through
+        # to a different endpoint and accidentally broaden authorization.
+        return self._resolve_from_workspace_members(
+            authorization_header=authorization_header,
+            fallback_manager_id=manager_id,
         )
 
 

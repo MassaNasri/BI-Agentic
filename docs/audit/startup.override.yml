@@ -1,0 +1,11 @@
+# Local Phase 0 verification: do not send email during startup/smoke tests.
+services:
+  auth-service:
+    environment:
+      EMAIL_BACKEND: django.core.mail.backends.dummy.EmailBackend
+  notification-service:
+    environment:
+      EMAIL_BACKEND: django.core.mail.backends.dummy.EmailBackend
+  notification-expiry-worker:
+    environment:
+      EMAIL_BACKEND: django.core.mail.backends.dummy.EmailBackend

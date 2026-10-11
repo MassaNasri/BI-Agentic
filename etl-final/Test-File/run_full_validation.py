@@ -7,7 +7,15 @@ import json
 import time
 import requests
 import io
+import os
 from datetime import datetime
+
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+SURREAL_USER = os.environ.get("SURREAL_USER", "")
+SURREAL_PASS = os.environ.get("SURREAL_PASS", "")
+if not all((CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, SURREAL_USER, SURREAL_PASS)):
+    raise RuntimeError("External datastore credentials are required")
 
 def exec_docker(cmd_list):
     """Execute docker command"""
@@ -81,16 +89,16 @@ print("-"*70)
 
 # ClickHouse
 success, stdout, stderr = exec_docker([
-    "exec", "clickhouse", "clickhouse-client", "-u", "etl_user", 
-    "--password", "etl_pass123", "-d", "etl", "--query", "SELECT 1"
+    "exec", "clickhouse", "clickhouse-client", "-u", CLICKHOUSE_USER,
+    "--password", CLICKHOUSE_PASSWORD, "-d", "etl", "--query", "SELECT 1"
 ])
 ch_connected = success
 print(f"{'✅' if ch_connected else '❌'} ClickHouse: {'Connected' if ch_connected else 'Failed'}")
 
 if ch_connected:
     success2, tables, _ = exec_docker([
-        "exec", "clickhouse", "clickhouse-client", "-u", "etl_user",
-        "--password", "etl_pass123", "-d", "etl", "--query", "SHOW TABLES"
+        "exec", "clickhouse", "clickhouse-client", "-u", CLICKHOUSE_USER,
+        "--password", CLICKHOUSE_PASSWORD, "-d", "etl", "--query", "SHOW TABLES"
     ])
     if success2:
         table_list = [t.strip() for t in tables.split('\n') if t.strip()]
@@ -100,7 +108,7 @@ if ch_connected:
 try:
     resp = requests.post(
         "http://localhost:8000/sql",
-        auth=("root", "root"),
+        auth=(SURREAL_USER, SURREAL_PASS),
         headers={"Content-Type": "text/plain"},
         data="USE NS bi_etl; USE DB etl_logs; SELECT 1;",
         timeout=5

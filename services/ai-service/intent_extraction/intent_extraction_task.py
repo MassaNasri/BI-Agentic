@@ -64,6 +64,7 @@ def _extract_and_validate(
     schema: dict[str, list[dict[str, Any]]],
     config: IntentExtractionConfig,
     logger: logging.Logger,
+    preprocessing_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], str, dict[str, Any]]:
     _log_event(
         logger,
@@ -80,6 +81,7 @@ def _extract_and_validate(
         logger=logger,
         log_event=_log_event,
         include_debug=True,
+        preprocessing_context=preprocessing_context,
     )
     if isinstance(extracted_result, tuple):
         extracted_intent, llm_debug = extracted_result
@@ -112,10 +114,23 @@ def _fallback_extract_and_validate(
     query: str,
     schema: dict[str, list[dict[str, Any]]],
     logger: logging.Logger,
+    preprocessing_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], str, dict[str, Any]]:
+    fallback_raw_intent = {
+        "semantic_filters": (
+            preprocessing_context.get("semantic_filters", [])
+            if isinstance(preprocessing_context, dict)
+            else []
+        ),
+        "selected_columns_preprocessing_high": (
+            preprocessing_context.get("selected_columns", [])
+            if isinstance(preprocessing_context, dict)
+            else []
+        ),
+    }
     normalized_intent = normalize_analytical_intent(
         question=query,
-        raw_intent={},
+        raw_intent=fallback_raw_intent,
         schema=schema,
     )
     fallback_metrics = [
@@ -186,7 +201,12 @@ def _fallback_extract_and_validate(
     )
 
 
-def run_intent_extraction_stage(query: str, schema: dict, route: str = "analytical") -> dict[str, Any]:
+def run_intent_extraction_stage(
+    query: str,
+    schema: dict,
+    route: str = "analytical",
+    preprocessing_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Stage runtime for:
     1) extracting structured intent
@@ -266,6 +286,7 @@ def run_intent_extraction_stage(query: str, schema: dict, route: str = "analytic
                 schema=normalized_schema,
                 config=config,
                 logger=logger,
+                preprocessing_context=preprocessing_context,
             )
             attempts.append(
                 make_attempt(
@@ -305,6 +326,7 @@ def run_intent_extraction_stage(query: str, schema: dict, route: str = "analytic
                 "debug_metadata": {
                     "llm_provider": config.llm_provider,
                     "route": normalized_route,
+                    "preprocessing_context": preprocessing_context or {},
                     "llm_prompt": llm_debug.get("prompt"),
                     "llm_raw_output": llm_debug.get("raw_output"),
                     "llm_parsed_payload": llm_debug.get("parsed_payload"),
@@ -332,6 +354,7 @@ def run_intent_extraction_stage(query: str, schema: dict, route: str = "analytic
                         query=normalized_query_for_fallback,
                         schema=normalized_schema_for_fallback,
                         logger=logger,
+                        preprocessing_context=preprocessing_context,
                     )
                     attempts.append(
                         make_attempt(
@@ -385,6 +408,7 @@ def run_intent_extraction_stage(query: str, schema: dict, route: str = "analytic
                         "debug_metadata": {
                             "llm_provider": config.llm_provider,
                             "route": normalized_route,
+                            "preprocessing_context": preprocessing_context or {},
                             "llm_prompt": llm_debug.get("prompt"),
                             "llm_raw_output": llm_debug.get("raw_output"),
                             "llm_parsed_payload": llm_debug.get("parsed_payload"),

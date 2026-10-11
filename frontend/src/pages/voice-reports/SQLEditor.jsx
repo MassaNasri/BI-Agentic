@@ -27,6 +27,7 @@ import {
   getReportStatusBadgeClass,
   formatReportStatus,
 } from '../../utils/reportStatus'
+import { withNightEmbedAppearance } from '../../utils/embedAppearance'
 
 function SQLEditor() {
   const { user, workspace } = useAuthStore()
@@ -69,7 +70,7 @@ function SQLEditor() {
 
   const loadReports = async () => {
     try {
-      const response = await voiceReportsAPI.listReports()
+      const response = await voiceReportsAPI.listReports({ lite: true })
       if (response.data.success) {
         setReports(response.data.reports || [])
       }
@@ -225,10 +226,10 @@ function SQLEditor() {
       <div className="space-y-6">
         {/* Header */}
         <motion.div variants={fadeIn}>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-3xl font-bold text-white dark:text-white">
             📝 SQL Editor
           </h1>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">
+          <p className="mt-2 text-[var(--c-muted)] dark:text-brand-300/60">
             Edit and optimize SQL queries for voice reports
           </p>
         </motion.div>
@@ -237,14 +238,14 @@ function SQLEditor() {
           {/* Reports List */}
           <motion.div variants={slideInBottom} className="lg:col-span-1">
             <Card>
-              <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+              <h2 className="text-lg font-semibold mb-4 text-white dark:text-white">
                 All Reports
               </h2>
 
               {reports.length === 0 ? (
                 <div className="text-center py-8">
-                  <Code className="w-12 h-12 mx-auto text-gray-400 mb-3" />
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <Code className="w-12 h-12 mx-auto text-brand-300/60 mb-3" />
+                  <p className="text-sm text-brand-300/80 dark:text-brand-300/60">
                     No reports available
                   </p>
                 </div>
@@ -257,13 +258,13 @@ function SQLEditor() {
                       className={`
                         p-3 rounded-lg cursor-pointer transition-colors
                         ${selectedReport?.id === report.id 
-                          ? 'bg-blue-100 dark:bg-blue-900/30 border-2 border-blue-500' 
-                          : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          ? 'bg-brand-700/30 dark:bg-brand-100/30 border-2 border-brand-400' 
+                          : 'bg-[rgba(255,255,255,0.04)] dark:bg-brand-900 hover:bg-[rgba(255,255,255,0.07)] dark:hover:bg-brand-800/70'
                         }
                       `}
                     >
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-sm text-gray-900 dark:text-white">
+                        <span className="font-medium text-sm text-white dark:text-white">
                           Report #{report.id}
                         </span>
                         <span className={`
@@ -273,7 +274,7 @@ function SQLEditor() {
                           {formatReportStatus(report.status)}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
+                      <p className="text-xs text-[var(--c-muted)] dark:text-brand-300/60 line-clamp-2">
                         {report.transcription}
                       </p>
                     </div>
@@ -288,11 +289,11 @@ function SQLEditor() {
             {!selectedReport ? (
               <Card>
                 <div className="text-center py-20">
-                  <Code className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                  <Code className="w-16 h-16 mx-auto text-brand-300/60 mb-4" />
+                  <h3 className="text-lg font-medium text-white dark:text-white mb-2">
                     No Report Selected
                   </h3>
-                  <p className="text-gray-500 dark:text-gray-400">
+                  <p className="text-brand-300/80 dark:text-brand-300/60">
                     Select a report from the list to edit its SQL query
                   </p>
                 </div>
@@ -303,10 +304,10 @@ function SQLEditor() {
                 <Card>
                   <div className="flex items-start justify-between mb-4">
                     <div>
-                      <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                      <h2 className="text-xl font-semibold text-white dark:text-white">
                         Report #{selectedReport.id}
                       </h2>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      <p className="text-sm text-[var(--c-muted)] dark:text-brand-300/60 mt-1">
                         {selectedReport.transcription}
                       </p>
                     </div>
@@ -323,7 +324,7 @@ function SQLEditor() {
                   {/* SQL Editor */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      <label className="text-sm font-medium text-brand-300 dark:text-brand-200/70">
                         SQL Query
                       </label>
                       {hasChanges && (
@@ -337,7 +338,7 @@ function SQLEditor() {
                     <textarea
                       value={editedSQL}
                       onChange={(e) => handleSQLChange(e.target.value)}
-                      className="w-full h-64 p-4 bg-gray-900 text-green-400 font-mono text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full h-64 p-4 bg-brand-950 text-green-400 font-mono text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-400"
                       placeholder="SELECT * FROM table WHERE condition"
                       spellCheck={false}
                     />
@@ -405,7 +406,7 @@ function SQLEditor() {
                 {/* Execution Results */}
                 {isReportCompleted(selectedReport.status) && selectedReport.row_count && (
                   <Card>
-                    <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+                    <h3 className="text-lg font-semibold mb-4 text-white dark:text-white">
                       Execution Results
                     </h3>
 
@@ -416,27 +417,27 @@ function SQLEditor() {
                           <Database className="w-4 h-4" />
                           <span className="text-sm font-medium">Rows</span>
                         </div>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                        <p className="text-2xl font-bold text-white dark:text-white">
                           {selectedReport.row_count?.toLocaleString() || 0}
                         </p>
                       </div>
 
-                      <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                        <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 mb-1">
+                      <div className="p-4 bg-brand-900/30 dark:bg-brand-100/20 rounded-lg">
+                        <div className="flex items-center gap-2 text-brand-500 dark:text-brand-300 mb-1">
                           <Clock className="w-4 h-4" />
                           <span className="text-sm font-medium">Time</span>
                         </div>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                        <p className="text-2xl font-bold text-white dark:text-white">
                           {selectedReport.execution_time_ms}ms
                         </p>
                       </div>
 
-                      <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                        <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 mb-1">
+                      <div className="p-4 bg-brand-900/30 dark:bg-brand-100/20 rounded-lg">
+                        <div className="flex items-center gap-2 text-brand-500 dark:text-brand-300 mb-1">
                           <BarChart3 className="w-4 h-4" />
                           <span className="text-sm font-medium">Chart</span>
                         </div>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-white capitalize">
+                        <p className="text-2xl font-bold text-white dark:text-white capitalize">
                           {selectedReport.chart_type}
                         </p>
                       </div>
@@ -445,17 +446,18 @@ function SQLEditor() {
                     {/* Embedded Visualization */}
                     {selectedReport.embed_url && (
                       <div>
-                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <h4 className="text-sm font-medium text-brand-300 dark:text-brand-200/70 mb-2">
                           Visualization
                         </h4>
-                        <div className="border-2 border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                        <div className="rounded-xl border border-brand-600/40 bg-[var(--c-report-bg)] overflow-hidden shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
                           <iframe
-                            src={selectedReport.embed_url}
+                            src={withNightEmbedAppearance(selectedReport.embed_url)}
                             width="100%"
                             height="500"
                             frameBorder="0"
-                            className="bg-white"
+                            className="bg-[var(--c-report-bg)]"
                             title="Data Visualization"
+                            loading="lazy"
                           />
                         </div>
                       </div>

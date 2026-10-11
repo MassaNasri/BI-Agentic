@@ -39,7 +39,7 @@ def run_forecasting_handler(payload: dict[str, Any]) -> dict[str, Any]:
             else []
         )
         visualization_payload = {
-            "chart_type": "line",
+            "chart_type": "",
             "mode": visualization_mode,
             "series": result.get("rows", []),
             "series_type_field": "series_type",
@@ -47,11 +47,7 @@ def run_forecasting_handler(payload: dict[str, Any]) -> dict[str, Any]:
             "preferred_color_role_field": "preferred_color_role",
             "chart_series_config": chart_series_config,
             "message": "" if forecast_available else "Forecast unavailable",
-            "reason_chart_selected": (
-                "Forecast line chart with actual vs forecast"
-                if forecast_available
-                else "Historical-only chart because forecast is unavailable"
-            ),
+            "reason_chart_selected": "deferred_to_visualization_service_chart_type_selector",
             "reason_chart_not_generated": "",
             "forecast_available": forecast_available,
             "fallback_reason": fallback_reason,
@@ -116,7 +112,7 @@ def run_forecasting_handler(payload: dict[str, Any]) -> dict[str, Any]:
             },
             "visualization_mode": "historical_only",
             "visualization_payload": {
-                "chart_type": "line",
+                "chart_type": "",
                 "mode": "historical_only",
                 "series": fallback_rows,
                 "series_type_field": "series_type",
@@ -124,7 +120,7 @@ def run_forecasting_handler(payload: dict[str, Any]) -> dict[str, Any]:
                 "preferred_color_role_field": "preferred_color_role",
                 "chart_series_config": chart_series_config,
                 "message": "Forecast unavailable",
-                "reason_chart_selected": "Historical-only chart because forecast failed",
+                "reason_chart_selected": "deferred_to_visualization_service_chart_type_selector",
                 "reason_chart_not_generated": "",
                 "forecast_available": False,
                 "fallback_reason": exc.code,

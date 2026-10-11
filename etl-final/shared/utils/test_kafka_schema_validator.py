@@ -305,6 +305,8 @@ class TestExtractedRowsTopicValidation:
         """Test valid extracted row message."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1,
             "data": {"id": 1, "name": "John", "email": "john@example.com"}
         }
@@ -316,6 +318,8 @@ class TestExtractedRowsTopicValidation:
         """Test valid extracted row with batch metadata."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1,
             "data": {"id": 1, "name": "John"},
             "batch_id": "batch_123",
@@ -328,6 +332,8 @@ class TestExtractedRowsTopicValidation:
     def test_missing_source(self):
         """Test extracted row missing source field."""
         message = {
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1,
             "data": {"id": 1}
         }
@@ -339,16 +345,20 @@ class TestExtractedRowsTopicValidation:
         """Test extracted row missing data field."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1
         }
         is_valid, error = KafkaSchemaValidator.validate_message("extracted_rows_topic", message)
         assert is_valid is False
-        assert "Missing required field: data" in error
+        assert "Missing required field: data or rows" in error
     
     def test_empty_data_dict(self):
         """Test extracted row with empty data dict."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1,
             "data": {}  # Empty dict
         }
@@ -360,12 +370,26 @@ class TestExtractedRowsTopicValidation:
         """Test extracted row with non-dict data."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1,
             "data": "not a dict"
         }
         is_valid, error = KafkaSchemaValidator.validate_message("extracted_rows_topic", message)
         assert is_valid is False
         assert "Expected dict" in error
+
+    def test_empty_schema_only_batch_is_valid(self):
+        message = {
+            "source": "empty_table",
+            "source_id": "source-1",
+            "schema_version": "1",
+            "schema_only": True,
+            "columns": [{"column_name": "id", "data_type": "bigint"}],
+            "rows": [],
+            "row_count": 0,
+        }
+        assert KafkaSchemaValidator.validate_message("extracted_rows_topic", message) == (True, None)
 
 
 class TestCleanRowsTopicValidation:
@@ -375,6 +399,8 @@ class TestCleanRowsTopicValidation:
         """Test valid clean row message."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1,
             "data": {"id": 1, "name": "John", "email": "john@example.com"}
         }
@@ -386,6 +412,8 @@ class TestCleanRowsTopicValidation:
         """Test valid clean row with quality metadata."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": 1,
             "data": {"id": 1, "name": "John"},
             "batch_id": "batch_123",
@@ -401,6 +429,8 @@ class TestCleanRowsTopicValidation:
         """Test clean row with quality score out of range."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "data": {"id": 1},
             "quality_score": 1.5  # > 1.0
         }
@@ -412,11 +442,39 @@ class TestCleanRowsTopicValidation:
         """Test clean row with empty data is rejected."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "data": {}
         }
         is_valid, error = KafkaSchemaValidator.validate_message("clean_rows_topic", message)
         assert is_valid is False
         assert "cannot be empty" in error
+
+    def test_empty_schema_only_batch_is_valid(self):
+        message = {
+            "source": "empty_table",
+            "source_id": "source-1",
+            "schema_version": "1",
+            "schema_only": True,
+            "columns": [{"column_name": "id", "data_type": "bigint"}],
+            "rows": [],
+            "row_count": 0,
+        }
+        assert KafkaSchemaValidator.validate_message("clean_rows_topic", message) == (True, None)
+
+    def test_schema_only_batch_cannot_hide_rows(self):
+        message = {
+            "source": "empty_table",
+            "source_id": "source-1",
+            "schema_version": "1",
+            "schema_only": True,
+            "columns": [{"column_name": "id", "data_type": "bigint"}],
+            "rows": [{"id": 1}],
+            "row_count": 1,
+        }
+        is_valid, error = KafkaSchemaValidator.validate_message("clean_rows_topic", message)
+        assert is_valid is False
+        assert "zero rows" in error
 
 
 class TestLoadRowsTopicValidation:
@@ -556,6 +614,8 @@ class TestEdgeCases:
         """Test that None values are allowed in optional fields."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "row_id": None,  # Optional field with None
             "data": {"id": 1}
         }
@@ -566,6 +626,8 @@ class TestEdgeCases:
         """Test that None values are rejected in required fields."""
         message = {
             "source": None,  # Required field with None
+            "source_id": "source-1",
+            "schema_version": "1",
             "data": {"id": 1}
         }
         is_valid, error = KafkaSchemaValidator.validate_message("extracted_rows_topic", message)
@@ -576,6 +638,8 @@ class TestEdgeCases:
         """Test that extra fields not in schema are allowed."""
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "data": {"id": 1},
             "extra_field": "extra_value",  # Not in schema
             "another_extra": 123
@@ -618,6 +682,8 @@ class TestEdgeCases:
         # Minimum valid score
         message = {
             "source": "test.csv",
+            "source_id": "source-1",
+            "schema_version": "1",
             "data": {"id": 1},
             "quality_score": 0.0
         }

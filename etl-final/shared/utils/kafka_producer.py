@@ -12,6 +12,19 @@ from typing import Dict, Any, Optional, Tuple
 # Configure logging
 logger = logging.getLogger(__name__)
 
+_SECRET_KEYS = {"password", "secret", "token", "ssl_key", "wallet_password", "_password_encrypted"}
+
+
+def redact_message_secrets(value):
+    if isinstance(value, dict):
+        return {
+            key: ("[REDACTED]" if str(key).lower() in _SECRET_KEYS else redact_message_secrets(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_message_secrets(item) for item in value]
+    return value
+
 from .logging_utils import get_correlation_id, set_correlation_id
 from .tracing import inject_trace_headers
 from .kafka_validation import validate_message as _validate_kafka_message
@@ -106,7 +119,10 @@ class KafkaMessageProducer:
             is_valid, error = self._validate_message(resolved_topic, message)
             if not is_valid:
                 logger.error(f"[Kafka Producer] Invalid message for {topic} (resolved={resolved_topic}): {error}")
-                logger.error(f"[Kafka Producer] Message: {json.dumps(message, indent=2)}")
+                logger.error(
+                    "[Kafka Producer] Message: %s",
+                    json.dumps(redact_message_secrets(message), indent=2, default=str),
+                )
                 return False
         
         try:

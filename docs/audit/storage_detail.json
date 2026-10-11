@@ -1,0 +1,203 @@
+{
+  "timestamp": "2026-09-13T14:49:29.090543+00:00",
+  "errors": [
+    {
+      "store": "redis",
+      "type": "ModuleNotFoundError"
+    }
+  ],
+  "sqlite": [
+    {
+      "container": "ai-service",
+      "path": "/app/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "etl-connector",
+      "path": "/app/connector-service/connector/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "etl-extractor",
+      "path": "/app/extractor-service/extractor/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "etl-loader",
+      "path": "/app/loader-service/loader/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "etl-detector",
+      "path": "/app/detector-service/detector/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "etl-metadata",
+      "path": "/app/metadata-service/metadata/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "etl-transformer",
+      "path": "/app/transformer-service/transformer/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "extractor-service",
+      "path": "/app/extractor-service/extractor/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "connector-service",
+      "path": "/app/connector-service/connector/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "loader-service",
+      "path": "/app/loader-service/loader/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "metadata-service",
+      "path": "/app/metadata-service/metadata/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "transformer-service",
+      "path": "/app/transformer-service/transformer/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "container": "detector-service",
+      "path": "/app/detector-service/detector/db.sqlite3",
+      "integrity": "ok",
+      "tables": [],
+      "rows": {}
+    },
+    {
+      "local_path": "etl-final\\connector-service\\connector\\db.sqlite3",
+      "integrity": "ok",
+      "tables": []
+    }
+  ],
+  "clickhouse": {
+    "databases": [
+      {
+        "name": "INFORMATION_SCHEMA"
+      },
+      {
+        "name": "default"
+      },
+      {
+        "name": "etl"
+      },
+      {
+        "name": "information_schema"
+      },
+      {
+        "name": "system"
+      }
+    ],
+    "tables": [
+      {
+        "database": "etl",
+        "name": "deduplication_log",
+        "engine": "ReplacingMergeTree",
+        "total_rows": 540,
+        "total_bytes": 51218,
+        "partition_key": "toYYYYMM(_processed_at)",
+        "sorting_key": "_dedup_key, _stage",
+        "create_table_query": "CREATE TABLE etl.deduplication_log (`_dedup_key` String, `_batch_id` String, `_stage` String, `_processed_at` DateTime64(3), `_row_id` UUID) ENGINE = ReplacingMergeTree(_processed_at) PARTITION BY toYYYYMM(_processed_at) ORDER BY (_dedup_key, _stage) SETTINGS index_granularity = 8192"
+      },
+      {
+        "database": "etl",
+        "name": "quality_anomalies",
+        "engine": "MergeTree",
+        "total_rows": 0,
+        "total_bytes": 0,
+        "partition_key": "toYYYYMM(_detected_at)",
+        "sorting_key": "_detected_at, _source_id, _batch_id",
+        "create_table_query": "CREATE TABLE etl.quality_anomalies (`_anomaly_id` UUID DEFAULT generateUUIDv4(), `_batch_id` String, `_source_id` String, `_detected_at` DateTime64(3), `_metric` String, `_value` Float32, `_baseline` Float32, `_stddev` Float32, `_zscore` Float32) ENGINE = MergeTree PARTITION BY toYYYYMM(_detected_at) ORDER BY (_detected_at, _source_id, _batch_id) SETTINGS index_granularity = 8192"
+      },
+      {
+        "database": "etl",
+        "name": "quality_metrics",
+        "engine": "MergeTree",
+        "total_rows": 2,
+        "total_bytes": 2624,
+        "partition_key": "toYYYYMM(_calculated_at)",
+        "sorting_key": "_calculated_at, _source_id, _batch_id",
+        "create_table_query": "CREATE TABLE etl.quality_metrics (`_metric_id` UUID DEFAULT generateUUIDv4(), `_batch_id` String, `_source_id` String, `_calculated_at` DateTime64(3), `_row_count` UInt64, `_completeness_score` Float32, `_validity_score` Float32, `_consistency_score` Float32, `_quality_score` Float32) ENGINE = MergeTree PARTITION BY toYYYYMM(_calculated_at) ORDER BY (_calculated_at, _source_id, _batch_id) SETTINGS index_granularity = 8192"
+      },
+      {
+        "database": "etl",
+        "name": "quarantine",
+        "engine": "MergeTree",
+        "total_rows": 0,
+        "total_bytes": 0,
+        "partition_key": "toYYYYMM(_quarantined_at)",
+        "sorting_key": "_quarantined_at, _quarantine_id",
+        "create_table_query": "CREATE TABLE etl.quarantine (`_quarantine_id` UUID DEFAULT generateUUIDv4(), `_row_id` UUID, `_batch_id` String, `_source_id` String, `_quarantined_at` DateTime64(3), `_quarantine_reason` String, `_validation_errors` Array(String), `_original_row` String, `_reprocessed` Bool DEFAULT false) ENGINE = MergeTree PARTITION BY toYYYYMM(_quarantined_at) ORDER BY (_quarantined_at, _quarantine_id) SETTINGS index_granularity = 8192"
+      },
+      {
+        "database": "etl",
+        "name": "sales_3months_realistic_csv",
+        "engine": "ReplacingMergeTree",
+        "total_rows": 180,
+        "total_bytes": 25681,
+        "partition_key": "toYYYYMM(_loaded_at)",
+        "sorting_key": "_transformed_dedup_key",
+        "create_table_query": "CREATE TABLE etl.sales_3months_realistic_csv (`ds` String, `total_sales` Int64, `orders` Int64, `customers` Int64, `_original_dedup_key` String, `_transformed_dedup_key` String, `_batch_id` String, `_schema_version` String, `_extracted_at` DateTime64(3), `_cleaned_at` DateTime64(3), `_loaded_at` DateTime64(3)) ENGINE = ReplacingMergeTree(_loaded_at) PARTITION BY toYYYYMM(_loaded_at) ORDER BY _transformed_dedup_key SETTINGS index_granularity = 8192"
+      },
+      {
+        "database": "etl",
+        "name": "schema_contract_registry",
+        "engine": "ReplacingMergeTree",
+        "total_rows": 0,
+        "total_bytes": 0,
+        "partition_key": "toYYYYMM(updated_at)",
+        "sorting_key": "source_id, schema_version, schema_id",
+        "create_table_query": "CREATE TABLE etl.schema_contract_registry (`source_id` String, `schema_version` String, `schema_id` String, `contract_json` String, `updated_at` DateTime64(3)) ENGINE = ReplacingMergeTree(updated_at) PARTITION BY toYYYYMM(updated_at) ORDER BY (source_id, schema_version, schema_id) SETTINGS index_granularity = 8192"
+      }
+    ],
+    "users": [
+      {
+        "name": "etl_user",
+        "storage": "users_xml"
+      }
+    ],
+    "row_policies": []
+  },
+  "kafka": {
+    "exit_code": 0,
+    "topics": "",
+    "retention": "per-topic configs in describe; broker defaults require inspection"
+  },
+  "surrealdb": {
+    "http_status": 200
+  }
+}

@@ -1,0 +1,15 @@
+# P0-A secret rotation checklist
+
+No external credential has been claimed as rotated. Repository controls now require externally supplied values, but provider/admin rotation and revocation remain manual operations.
+
+| Credential type | Services using it | Expected configuration | Rotation required | Manual/provider action | Post-rotation verification | Invalidation consequence |
+| --- | --- | --- | --- | --- | --- | --- |
+| OpenRouter/API provider key | AI Service | `OPENROUTER_API_KEY` in the deployment secret store | Yes | Revoke historical key at provider, issue a least-privilege replacement | Run one bounded AI request; confirm old key is rejected | In-flight/provider requests using the old key fail |
+| Bootstrap/admin credential | Auth bootstrap/admin workflow | `ADMIN_EMAIL`, `ADMIN_PASSWORD` in one-time bootstrap secret storage | Yes | Change the administrator password and remove reusable bootstrap material | Authenticate with replacement; verify old password fails | Existing admin sessions should be revoked |
+| Internal service credentials | Gateway, AI, Notification, Query, ETL | `INTERNAL_SERVICE_TOKEN`, `AI_SERVICE_INTERNAL_API_KEY`, `NOTIFICATION_SERVICE_API_KEY`, `ETL_INTERNAL_API_KEY`, `INGESTION_CALLBACK_API_KEY` | Yes | Generate independent high-entropy values and roll callers/receivers in a coordinated window | Positive service call succeeds; old credential and frontend JWT fail | Old service sessions/requests become unauthorized |
+| Metabase embedding/API credentials | Visualization, Voice, Report, Metabase | `METABASE_SECRET_KEY`, Metabase API/session credentials | Yes | Rotate embedding secret and Metabase admin/API credential in Metabase and deployment store | New embed works for a mapped object; old signed embed/token fails | Existing signed embeds and sessions are invalidated |
+| JWT/Django signing credentials | All Django services | `DJANGO_SECRET_KEY` or service-specific secret-store injection | Yes | Generate strong unique deployment values and redeploy consistently where token verification is shared | New login/token works; old signed tokens fail according to policy | Sessions, password-reset links, and signed tokens may be invalidated |
+| PostgreSQL credentials | Django services/PostgreSQL | `DB_USER`, `DB_PASSWORD` | Yes | Rotate database role password; review grants and active connections | Each service starts and performs a health/readiness query; old password fails | Existing pooled connections may drop |
+| ClickHouse/SurrealDB/BI credentials | Query, Report, Voice, ETL, Metadata, Visualization | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `SURREAL_USER`, `SURREAL_PASS`, Metabase database credential | Yes | Rotate datastore users/passwords and update Metabase database connection | ETL write, Query read, metadata read, and Metabase chart succeed; old values fail | Pools/jobs may reconnect or fail during rollout |
+
+For every rotation, record the operator, provider change identifier, timestamp, affected deployment, verification evidence, and rollback owner in the operational change system. Never copy the old or new value into this repository or the evidence report.

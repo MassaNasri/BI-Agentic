@@ -10,7 +10,7 @@ Tests cover:
 """
 
 import pytest
-from extraction_strategy import (
+from .extraction_strategy import (
     ExtractionStrategy,
     Batch,
     ExtractionConfig,

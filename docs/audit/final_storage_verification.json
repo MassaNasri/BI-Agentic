@@ -1,0 +1,204 @@
+{
+  "timestamp_utc": "2026-09-13T16:37:08.850327+00:00",
+  "clickhouse_after_startup": {
+    "deduplication_log": 0,
+    "quality_anomalies": 0,
+    "quality_metrics": 0,
+    "quarantine": 0,
+    "sales_3months_realistic_csv": 0,
+    "schema_contract_registry": 0
+  },
+  "redis_keyspace": "# Keyspace",
+  "kafka_offsets": "__consumer_offsets:0:0\n__consumer_offsets:1:6\n__consumer_offsets:2:9\n__consumer_offsets:3:0\n__consumer_offsets:4:0\n__consumer_offsets:5:0\n__consumer_offsets:6:0\n__consumer_offsets:7:0\n__consumer_offsets:8:0\n__consumer_offsets:9:0\n__consumer_offsets:10:0\n__consumer_offsets:11:0\n__consumer_offsets:12:0\n__consumer_offsets:13:0\n__consumer_offsets:14:0\n__consumer_offsets:15:9\n__consumer_offsets:16:6\n__consumer_offsets:17:8\n__consumer_offsets:18:0\n__consumer_offsets:19:0\n__consumer_offsets:20:0\n__consumer_offsets:21:0\n__consumer_offsets:22:0\n__consumer_offsets:23:0\n__consumer_offsets:24:0\n__consumer_offsets:25:0\n__consumer_offsets:26:0\n__consumer_offsets:27:0\n__consumer_offsets:28:0\n__consumer_offsets:29:0\n__consumer_offsets:30:0\n__consumer_offsets:31:0\n__consumer_offsets:32:0\n__consumer_offsets:33:0\n__consumer_offsets:34:0\n__consumer_offsets:35:0\n__consumer_offsets:36:0\n__consumer_offsets:37:0\n__consumer_offsets:38:0\n__consumer_offsets:39:0\n__consumer_offsets:40:0\n__consumer_offsets:41:0\n__consumer_offsets:42:0\n__consumer_offsets:43:0\n__consumer_offsets:44:0\n__consumer_offsets:45:0\n__consumer_offsets:46:0\n__consumer_offsets:47:0\n__consumer_offsets:48:0\n__consumer_offsets:49:0\nclean_rows_dlq:0:0\nclean_rows_topic:0:0\nconnection_topic:0:0\nerrors:0:0\nextracted_rows_dlq:0:0\nextracted_rows_topic:0:0\nload_requests:0:0\nload_rows_dlq:0:0\nload_rows_topic:0:0\nmetadata_topic:0:0\nmetadata_updates:0:0\nquarantine:0:0\nraw_data:0:0\nschema_topic:0:0\ntransformed_data:0:0",
+  "current_voice_media_files": "0",
+  "current_upload_files": "0",
+  "backup_checks": [
+    {
+      "resource": "postgres:bi_voice_agent",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "metabase:H2",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "metabase:H2",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:69b0510de7b60ca65a6491807445dfe7d3040d6524260de5bd8b0852869c7243",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:9321bb1a97078e6cbeb9b82495ca22babd685f50f3aa24547910b0d86d11c243",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:9946052f701f1a33cfd151ef64a313e0081205f25f6c21f321039c45285963fa",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:a68c594c8e5721956f205b2be92e57a9202b8f5c5bf9c592171a303b15267ea1",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_clickhouse_data",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_clickhouse_logs",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_redis_data",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_surreal_data",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_uploaded-files",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:bi-voice-agent_voice_service_media",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse-data",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse-logs",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse_data",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:etl-final_clickhouse_logs",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:etl-final_surreal_data",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "docker-volume:etl-final_uploaded-files",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:voice-service/app/media",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:voice-service/app/media",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "local:media",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "local:etl-final/etl-infra/clickhouse/data",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:ai-service/app/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:etl-connector/app/connector-service/connector/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:etl-extractor/app/extractor-service/extractor/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:etl-loader/app/loader-service/loader/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:etl-detector/app/detector-service/detector/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:etl-metadata/app/metadata-service/metadata/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:etl-transformer/app/transformer-service/transformer/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:extractor-service/app/extractor-service/extractor/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:connector-service/app/connector-service/connector/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:loader-service/app/loader-service/loader/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:metadata-service/app/metadata-service/metadata/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:transformer-service/app/transformer-service/transformer/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "container:detector-service/app/detector-service/detector/db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    },
+    {
+      "resource": "local:etl-final\\connector-service\\connector\\db.sqlite3",
+      "sha256_matches": true,
+      "size_matches": true
+    }
+  ],
+  "backup_files_status": "PASS",
+  "active_file_stores_empty": true
+}

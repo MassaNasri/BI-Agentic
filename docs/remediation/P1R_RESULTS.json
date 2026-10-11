@@ -1,0 +1,238 @@
+{
+  "phase": "P1R_MULTI_DATABASE_ACCEPTANCE",
+  "date": "2026-10-11",
+  "status": "GREEN",
+  "scope": "one_time_on_demand_snapshot_only",
+  "csv": {
+    "manual": "PASS",
+    "automated": "PASS",
+    "tests_passed": 24,
+    "empty_input": "NOT_RUN"
+  },
+  "engines": {
+    "postgresql": {
+      "implementation": "PASS",
+      "live": "PASS",
+      "full_e2e": "PASS",
+      "dataset_status": "completed",
+      "aggregate_rows": 2512,
+      "tables": {
+        "customers": 8,
+        "empty_table": 0,
+        "large_events": 2500,
+        "Sales Data": 4
+      },
+      "large_events_unique_ids": 2500,
+      "failure_tests": "PASS",
+      "cleanup": "PASS",
+      "status": "PASS"
+    },
+    "mysql": {
+      "implementation": "PASS",
+      "live": "PASS",
+      "full_e2e": "PASS",
+      "dataset_status": "completed",
+      "aggregate_rows": 2512,
+      "tables": {
+        "customers": 8,
+        "empty_table": 0,
+        "large_events": 2500,
+        "Sales Data": 4
+      },
+      "large_events_unique_ids": 2500,
+      "failure_tests": "PASS",
+      "cleanup": "PASS",
+      "status": "PASS"
+    },
+    "mariadb": {
+      "implementation": "PASS",
+      "live": "PASS",
+      "full_e2e": "PASS",
+      "dataset_status": "completed",
+      "aggregate_rows": 2512,
+      "tables": {
+        "customers": 8,
+        "empty_table": 0,
+        "large_events": 2500,
+        "Sales Data": 4
+      },
+      "large_events_unique_ids": 2500,
+      "failure_tests": "PASS",
+      "cleanup": "PASS",
+      "status": "PASS"
+    },
+    "sqlite": {
+      "implementation": "PASS",
+      "live": "PASS",
+      "full_e2e": "PASS",
+      "dataset_status": "completed",
+      "aggregate_rows": 2503,
+      "tables": {
+        "Sales Data": 3,
+        "empty_table": 0,
+        "large_events": 2500
+      },
+      "large_events_unique_ids": 2500,
+      "failure_tests": "PASS",
+      "cleanup": "PASS",
+      "status": "PASS"
+    },
+    "clickhouse": {
+      "implementation": "PASS",
+      "live": "PASS",
+      "full_e2e": "PASS",
+      "dataset_status": "completed",
+      "aggregate_rows": 2512,
+      "tables": {
+        "customers": 8,
+        "empty_table": 0,
+        "large_events": 2500,
+        "Sales Data": 4
+      },
+      "large_events_unique_ids": 2500,
+      "failure_tests": "PASS",
+      "cleanup": "PASS",
+      "status": "PASS"
+    },
+    "mssql": {
+      "implementation": "PASS",
+      "driver": "PASS",
+      "contracts": "PASS",
+      "compose_profile": "PASS",
+      "live": "BLOCKED_EXTERNAL",
+      "full_e2e": "BLOCKED_EXTERNAL",
+      "rows_verified": 0,
+      "status": "BLOCKED_EXTERNAL"
+    },
+    "oracle": {
+      "implementation": "PASS",
+      "driver": "PASS",
+      "contracts": "PASS",
+      "compose_profile": "PASS",
+      "live": "BLOCKED_EXTERNAL",
+      "full_e2e": "BLOCKED_EXTERNAL",
+      "rows_verified": 0,
+      "status": "BLOCKED_EXTERNAL"
+    }
+  },
+  "multi_table": {
+    "previous_behavior": "first_table_only",
+    "final_behavior": "table_aware_dataset_with_opaque_selectors",
+    "backend": "PASS",
+    "frontend": "PASS",
+    "authorization": "PASS",
+    "cleanup_all_tables": "PASS",
+    "status": "PASS"
+  },
+  "security": {
+    "public_authentication": "PASS",
+    "internal_authentication": "PASS",
+    "workspace_isolation": "PASS",
+    "ssrf_policy": "PASS",
+    "local_allowlist": "192.168.65.254/32",
+    "credential_encryption": "PASS",
+    "recursive_redaction": "PASS",
+    "sqlite_confinement": "PASS",
+    "safe_error_mapping": "PASS",
+    "tls_contracts": "PASS",
+    "read_only_sources": "PASS",
+    "secret_log_scan": "PASS"
+  },
+  "tests": {
+    "shared_connector_security_redaction_schema": {
+      "passed": 111,
+      "failed": 0
+    },
+    "focused_tls_ssrf_error_auth": {
+      "passed": 16,
+      "deselected": 26,
+      "failed": 0
+    },
+    "query_service": {
+      "passed": 79,
+      "warnings": 3,
+      "failed": 0
+    },
+    "connector_service": {
+      "passed": 134,
+      "failed": 0
+    },
+    "extractor": {
+      "passed": 220,
+      "skipped": 5,
+      "warnings": 22,
+      "failed": 0
+    },
+    "transformer": {
+      "passed": 12,
+      "skipped": 1,
+      "warnings": 113,
+      "failed": 0
+    },
+    "loader": {
+      "passed": 14,
+      "skipped": 1,
+      "warnings": 1,
+      "failed": 0
+    },
+    "etl_listener_contracts": {
+      "passed": 7,
+      "warnings": 9,
+      "failed": 0
+    },
+    "csv_focused": {
+      "passed": 24,
+      "failed": 0
+    }
+  },
+  "frontend": {
+    "tests": {
+      "passed": 19,
+      "failed": 0
+    },
+    "lint": "PASS",
+    "build": "PASS",
+    "modules_transformed": 1929,
+    "advisories": [
+      "stale browser metadata",
+      "bundle chunk exceeds 500 kB"
+    ]
+  },
+  "static_gates": {
+    "query_django_check": "PASS",
+    "connector_django_check": "PASS",
+    "migration_drift": "PASS",
+    "main_compose_config": "PASS",
+    "optional_compose_config": "PASS"
+  },
+  "docker": {
+    "required_services_healthy": 8,
+    "required_services_total": 8,
+    "status": "PASS"
+  },
+  "runtime_logs": {
+    "window": "final 5 minutes after final recreation",
+    "error_scan": "PASS",
+    "secret_scan": "PASS"
+  },
+  "cleanup": {
+    "query_records_remaining": 0,
+    "clickhouse_tables_remaining": 0,
+    "sqlite_files_remaining": 0,
+    "disposable_source_containers_remaining": 0,
+    "status": "PASS"
+  },
+  "regressions": [],
+  "external_blockers": [
+    "SQL Server image was not cached and authorization to download/start it was declined; live status remains BLOCKED_EXTERNAL.",
+    "Oracle image was not cached; after the optional enterprise image download was declined, no unauthorized pull was attempted; live status remains BLOCKED_EXTERNAL."
+  ],
+  "remaining_limitations": [
+    "No CDC, persistent connection, offset, replay, scheduler, or continuous synchronization is implemented.",
+    "SQL Server and Oracle are not live-certified in this environment.",
+    "Enterprise TLS is contract-tested; local disposable servers used explicit development plaintext mode.",
+    "CSV empty-input acceptance was not separately rerun.",
+    "Non-blocking Python deprecation and frontend build advisories remain."
+  ],
+  "p2_ready": true
+}

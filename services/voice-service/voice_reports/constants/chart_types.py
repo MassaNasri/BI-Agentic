@@ -1,72 +1,75 @@
 """
-Central chart type constants and mappings used across voice report execution.
+Voice-service compatibility wrapper around the canonical shared chart contract.
 """
+
+from __future__ import annotations
 
 from typing import Optional
 
+from bi_platform_shared.contracts.chart import (
+    ChartTypeEnum,
+    normalize_chart_type as _normalize_chart_type_shared,
+    to_metabase_display as _to_metabase_display_shared,
+)
+
 
 class ChartType:
-    BAR = "bar"
-    LINE = "line"
-    TABLE = "table"
-    CARD = "card"
-    SCATTER = "scatter"
-    HISTOGRAM = "histogram"
+    LINE = ChartTypeEnum.LINE.value
+    LINE_MULTI = ChartTypeEnum.LINE_MULTI.value
+    BAR = ChartTypeEnum.BAR.value
+    BAR_GROUPED = ChartTypeEnum.BAR_GROUPED.value
+    BAR_STACKED = ChartTypeEnum.BAR_STACKED.value
+    PIE = ChartTypeEnum.PIE.value
+    AREA = ChartTypeEnum.AREA.value
+    SCATTER = ChartTypeEnum.SCATTER.value
+    HISTOGRAM = ChartTypeEnum.HISTOGRAM.value
+    MAP = ChartTypeEnum.MAP.value
+    HEATMAP = ChartTypeEnum.HEATMAP.value
+    COMBO_LINE_BAR = ChartTypeEnum.COMBO_LINE_BAR.value
+    CUMULATIVE_LINE = ChartTypeEnum.CUMULATIVE_LINE.value
+    CARD = ChartTypeEnum.CARD.value
+    TABLE = ChartTypeEnum.TABLE.value
     # Legacy alias retained for backward compatibility.
     KPI = CARD
 
 
-VALID_CHART_TYPES = {
-    ChartType.BAR,
-    ChartType.LINE,
-    ChartType.TABLE,
-    ChartType.CARD,
-    ChartType.SCATTER,
-    ChartType.HISTOGRAM,
-}
+VALID_CHART_TYPES = {chart.value for chart in ChartTypeEnum}
 
-# Normalize legacy or external values to canonical chart types.
 LEGACY_TO_CANONICAL_CHART_TYPE = {
-    "grouped_bar": ChartType.BAR,
-    "scalar": ChartType.CARD,
-    "number": ChartType.CARD,
-    "kpi": ChartType.CARD,
-    "card": ChartType.CARD,
-    "bar": ChartType.BAR,
-    "line": ChartType.LINE,
-    "pie": ChartType.BAR,
-    "table": ChartType.TABLE,
-    "scatter": ChartType.SCATTER,
-    "histogram": ChartType.HISTOGRAM,
+    legacy: canonical.value
+    for legacy, canonical in {
+        "grouped_bar": ChartTypeEnum.BAR_GROUPED,
+        "scalar": ChartTypeEnum.CARD,
+        "number": ChartTypeEnum.CARD,
+        "kpi": ChartTypeEnum.CARD,
+        "card": ChartTypeEnum.CARD,
+        "bar": ChartTypeEnum.BAR,
+        "line": ChartTypeEnum.LINE,
+        "line_multi": ChartTypeEnum.LINE_MULTI,
+        "multi_line": ChartTypeEnum.LINE_MULTI,
+        "pie": ChartTypeEnum.PIE,
+        "table": ChartTypeEnum.TABLE,
+        "scatter": ChartTypeEnum.SCATTER,
+        "histogram": ChartTypeEnum.HISTOGRAM,
+        "map": ChartTypeEnum.MAP,
+        "heatmap": ChartTypeEnum.HEATMAP,
+        "combo": ChartTypeEnum.COMBO_LINE_BAR,
+        "combo_line_bar": ChartTypeEnum.COMBO_LINE_BAR,
+        "cumulative_line": ChartTypeEnum.CUMULATIVE_LINE,
+    }.items()
 }
 
-# Map canonical chart types to Metabase display types.
 CHART_TYPE_TO_METABASE_DISPLAY = {
-    ChartType.BAR: "bar",
-    ChartType.LINE: "line",
-    ChartType.TABLE: "table",
-    ChartType.CARD: "scalar",
-    ChartType.SCATTER: "scatter",
-    ChartType.HISTOGRAM: "histogram",
+    chart.value: _to_metabase_display_shared(chart)
+    for chart in ChartTypeEnum
 }
 
 
-def normalize_chart_type(
-    raw_chart_type: Optional[str], *, default: str = ChartType.TABLE
-) -> str:
-    """
-    Convert potentially inconsistent chart labels into a canonical chart type.
-    Unknown values are mapped to the provided default.
-    """
-    if not raw_chart_type:
-        return default
-    normalized = str(raw_chart_type).strip().lower()
-    return LEGACY_TO_CANONICAL_CHART_TYPE.get(normalized, default)
+def normalize_chart_type(raw_chart_type: Optional[str], *, default: str = ChartType.TABLE) -> str:
+    default_enum = _normalize_chart_type_shared(default, default=ChartTypeEnum.TABLE)
+    return _normalize_chart_type_shared(raw_chart_type, default=default_enum).value
 
 
 def to_metabase_display(chart_type: Optional[str]) -> str:
-    """
-    Return a Metabase-compatible display type from a canonical/legacy chart type.
-    """
-    canonical_chart_type = normalize_chart_type(chart_type)
-    return CHART_TYPE_TO_METABASE_DISPLAY.get(canonical_chart_type, "table")
+    return _to_metabase_display_shared(chart_type or ChartType.TABLE)
+

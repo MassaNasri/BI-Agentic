@@ -326,10 +326,19 @@ def intent_extraction_asset(
     schema_snapshot = scoped_schema
     should_scope_schema = True
 
+    preprocessing_context = {
+        "semantic_filters": preprocessing_high_asset.get("semantic_filters", []),
+        "canonical_verbs": preprocessing_high_asset.get("canonical_verbs", []),
+        "analytical_semantics": preprocessing_high_asset.get("analytical_semantics", []),
+        "analytical_semantic_hints": preprocessing_high_asset.get("analytical_semantic_hints", {}),
+        "selected_columns": selected_columns,
+    }
+
     result = run_intent_extraction_stage(
         query=final_query,
         schema=schema_snapshot,
         route=route,
+        preprocessing_context=preprocessing_context,
     )
     result.setdefault("started_at", stage_started_at)
     result.setdefault("finished_at", utc_now_iso())
@@ -353,6 +362,7 @@ def intent_extraction_asset(
     result["debug_metadata"]["schema_validation_status"] = preprocessing_high_asset.get("schema_validation_status")
     result["debug_metadata"]["unresolved_terms"] = preprocessing_high_asset.get("unresolved_terms", [])
     result["debug_metadata"]["unsupported_terms"] = preprocessing_high_asset.get("unsupported_terms", [])
+    result["debug_metadata"]["preprocessing_context"] = preprocessing_context
     result["debug_metadata"]["sql_generation_allowed"] = True
     if schema_validation_deferred:
         result["warnings"].append(

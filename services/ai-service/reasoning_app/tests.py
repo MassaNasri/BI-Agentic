@@ -149,6 +149,13 @@ class ReasoningRulesTests(unittest.TestCase):
 
 
 class PipelineCaseCoverageTests(unittest.TestCase):
+    def assert_schema_valid(self, diagnostics):
+        self.assertIn(
+            diagnostics["schema_validation_status"],
+            {"valid", "valid_with_llm_assist", "valid_with_value_matches"},
+        )
+        self.assertEqual(diagnostics["legacy_schema_validation_status"], "valid")
+
     def _population_schema(self):
         return _build_loaded_schema(
             {
@@ -282,7 +289,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
         )
         statuses = {item["resolution_status"] for item in diagnostics["term_resolutions"]}
         self.assertIn("corrected_typo", statuses)
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         trace = build_pipeline_trace_template({"request_id": "b"})
         attach_stage(
             trace,
@@ -338,7 +345,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertEqual(diagnostics["unresolved_terms"], [])
         trace = build_pipeline_trace_template({"request_id": "c"})
         attach_stage(
@@ -387,7 +394,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("age", diagnostics["unresolved_terms"])
         self.assertIn("avg_age", diagnostics["selected_columns"])
 
@@ -463,7 +470,8 @@ class PipelineCaseCoverageTests(unittest.TestCase):
             },
         )
         self.assertIn("profit_margin", diagnostics["unresolved_terms"])
-        self.assertIn("invalid", diagnostics["schema_validation_status"])
+        self.assertEqual(diagnostics["schema_validation_status"], "degraded_uncertain")
+        self.assertEqual(diagnostics["legacy_schema_validation_status"], "invalid_unresolved_terms")
         trace = build_pipeline_trace_template({"request_id": "e"})
         attach_stage(
             trace,
@@ -531,7 +539,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertEqual(diagnostics["selected_table"], "population_distribution_csv")
         self.assertIn("total_population", diagnostics["selected_columns"])
         self.assertIn("region", diagnostics["selected_columns"])
@@ -553,7 +561,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
             },
         )
         statuses = {item["resolution_status"] for item in diagnostics["term_resolutions"]}
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertIn("corrected_typo", statuses)
         self.assertEqual(diagnostics["selected_table"], "population_distribution_csv")
         self.assertIn("city", diagnostics["selected_columns"])
@@ -581,7 +589,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("highest", diagnostics["unresolved_terms"])
 
     def test_case_k2b_relationship_language_is_not_marked_unresolved_schema(self):
@@ -622,7 +630,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("relationship", diagnostics["unresolved_terms"])
 
     def test_case_k2c_value_language_is_not_marked_unresolved_schema(self):
@@ -663,7 +671,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("value", diagnostics["unresolved_terms"])
 
     def test_case_k3_literal_filter_value_is_not_schema_unresolved(self):
@@ -695,7 +703,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("north", diagnostics["unresolved_terms"])
 
     def test_case_k4_comparison_language_is_not_schema_unresolved(self):
@@ -734,7 +742,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("where", diagnostics["unresolved_terms"])
         self.assertNotIn("above", diagnostics["unresolved_terms"])
 
@@ -769,7 +777,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("time", diagnostics["unsupported_terms"])
         self.assertNotIn("time", diagnostics["unresolved_terms"])
         self.assertIn("total_sales", diagnostics["selected_columns"])
@@ -805,7 +813,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("daily", diagnostics["unresolved_terms"])
         self.assertNotIn("daily", diagnostics["unsupported_terms"])
         self.assertNotIn("month", diagnostics["unresolved_terms"])
@@ -835,7 +843,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertNotIn("revenue", diagnostics["unresolved_terms"])
         self.assertIn("total_sales", diagnostics["selected_columns"])
 
@@ -853,7 +861,8 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "invalid_unresolved_terms")
+        self.assertEqual(diagnostics["schema_validation_status"], "degraded_uncertain")
+        self.assertEqual(diagnostics["legacy_schema_validation_status"], "invalid_unresolved_terms")
         self.assertIn("revenue", diagnostics["unresolved_terms"])
 
     def test_case_m_invalid_population_by_year(self):
@@ -871,7 +880,8 @@ class PipelineCaseCoverageTests(unittest.TestCase):
             },
         )
         self.assertIn("year", diagnostics["unsupported_terms"])
-        self.assertIn(diagnostics["schema_validation_status"], {"invalid_unresolved_terms", "invalid_unsupported_terms"})
+        self.assertEqual(diagnostics["schema_validation_status"], "invalid_structural")
+        self.assertEqual(diagnostics["legacy_schema_validation_status"], "invalid_unsupported_terms")
 
     @patch("preprocessing_low.preprocess_task._call_ollama_preprocessor", side_effect=lambda text, **_: text)
     def test_case_n_noise_query_preprocessing(self, _mock_llm):
@@ -914,7 +924,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
                 "invalid_mappings": [],
             },
         )
-        self.assertEqual(diagnostics["schema_validation_status"], "valid")
+        self.assert_schema_valid(diagnostics)
         self.assertEqual(diagnostics["selected_table"], "customer_stats")
         self.assertIn("customer_count", diagnostics["selected_columns"])
 
@@ -977,7 +987,7 @@ class PipelineCaseCoverageTests(unittest.TestCase):
             },
         )
         self.assertNotIn("statu", diagnostics.get("unresolved_terms", []))
-        self.assertEqual(diagnostics.get("schema_validation_status"), "valid")
+        self.assert_schema_valid(diagnostics)
 
     def test_case_o_numeric_only_classification(self):
         result = classify_input(raw_text="123123", cleaned_text="123123")

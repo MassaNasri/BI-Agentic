@@ -61,6 +61,7 @@ class PreprocessHighResult(TypedDict, total=False):
     candidate_tables: list[str]
     selected_table: str
     selected_columns: list[str]
+    selected_columns_in_scope: list[str]
     schema_validation_status: str
     route: str
     skipped_schema_terms: list[str]
@@ -96,6 +97,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    token = str(raw_value).strip().lower()
+    if token in {"1", "true", "yes", "on"}:
+        return True
+    if token in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 @dataclass(frozen=True)
 class HighPreprocessConfig:
     ollama_url: str
@@ -110,6 +123,11 @@ class HighPreprocessConfig:
     user_database_template: str
     schema_cache_ttl_seconds: int
     default_user_id: str
+    value_index_enabled: bool = True
+    value_index_max_cardinality_threshold: int = 500
+    value_index_max_values_per_column: int = 500
+    value_index_cache_ttl_seconds: int = 300
+    value_index_redis_url: str = "redis://localhost:6379/0"
 
     @classmethod
     def from_env(cls) -> "HighPreprocessConfig":
@@ -121,12 +139,29 @@ class HighPreprocessConfig:
             max_retries=max(0, min(retries, 3)),
             clickhouse_host=os.getenv("CLICKHOUSE_HOST", "localhost"),
             clickhouse_port=_env_int("CLICKHOUSE_PORT", 8123),
-            clickhouse_user=os.getenv("CLICKHOUSE_USER", "etl_user"),
-            clickhouse_password=os.getenv("CLICKHOUSE_PASSWORD", "etl_pass123"),
+            clickhouse_user=os.getenv("CLICKHOUSE_USER", ""),
+            clickhouse_password=os.getenv("CLICKHOUSE_PASSWORD", ""),
             clickhouse_default_database=os.getenv("CLICKHOUSE_DATABASE", "etl"),
             user_database_template=os.getenv("PREPROCESS_HIGH_DATABASE_TEMPLATE", "").strip(),
             schema_cache_ttl_seconds=max(0, _env_int("PREPROCESS_HIGH_SCHEMA_CACHE_TTL_SECONDS", 60)),
             default_user_id=os.getenv("PREPROCESS_HIGH_DEFAULT_USER_ID", "default_user"),
+            value_index_enabled=_env_bool("PREPROCESS_HIGH_VALUE_INDEX_ENABLED", True),
+            value_index_max_cardinality_threshold=max(
+                1,
+                _env_int("PREPROCESS_HIGH_VALUE_INDEX_MAX_CARDINALITY_THRESHOLD", 500),
+            ),
+            value_index_max_values_per_column=max(
+                1,
+                _env_int("PREPROCESS_HIGH_VALUE_INDEX_MAX_VALUES_PER_COLUMN", 500),
+            ),
+            value_index_cache_ttl_seconds=max(
+                0,
+                _env_int("PREPROCESS_HIGH_VALUE_INDEX_CACHE_TTL_SECONDS", 300),
+            ),
+            value_index_redis_url=os.getenv(
+                "PREPROCESS_HIGH_VALUE_INDEX_REDIS_URL",
+                os.getenv("TRANSCRIPTION_REDIS_URL", os.getenv("REDIS_URL", "redis://localhost:6379/0")),
+            ).strip(),
         )
 
 

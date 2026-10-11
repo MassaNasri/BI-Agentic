@@ -8,6 +8,7 @@ from typing import Any
 from preprocessing_high.preprocess_high_task import preprocess_high_task
 from preprocessing_high.schemas import HighPreprocessConfig
 from preprocessing_low.preprocess_task import preprocess_text_task
+from preprocessing_low.semantic_guard import semantic_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,16 @@ _MAX_LOW_CHANGES = 20
 def _default_preprocessing_low(text: str) -> dict[str, Any]:
     normalized_text = str(text or "")
     return {
+        "original_sentence": normalized_text,
         "original_text": normalized_text,
+        "cleaned_sentence": normalized_text,
         "cleaned_text": normalized_text,
         "changes": [],
+        "preserved_terms": [],
+        "semantic_terms": [],
+        "semantic_preservation": semantic_metadata(normalized_text, normalized_text),
+        "filter_operators": [],
+        "rejected_changes": [],
     }
 
 
@@ -37,6 +45,8 @@ def _default_preprocessing_high(corrected_query: str = "") -> dict[str, Any]:
         "term_corrections": [],
         "schema_used": {"tables": [], "columns": []},
         "schema_adjustments": [],
+        "semantic_filters": [],
+        "canonical_verbs": [],
     }
 
 
@@ -231,6 +241,10 @@ def _build_preprocessing_high_payload(
         "term_corrections": _extract_term_corrections(mappings),
         "schema_used": schema_used,
         "schema_adjustments": _extract_schema_adjustments(mappings),
+        "selected_columns": preprocess_high_result.get("selected_columns", []),
+        "selected_columns_in_scope": preprocess_high_result.get("selected_columns_in_scope", []),
+        "semantic_filters": preprocess_high_result.get("semantic_filters", []),
+        "canonical_verbs": preprocess_high_result.get("canonical_verbs", []),
     }
 
 
@@ -271,9 +285,20 @@ def build_preprocessing_metadata(
             detected_changes = [change for change in detected_changes if any(change.values())]
 
     low_payload = {
+        "original_sentence": source_text,
         "original_text": source_text,
+        "cleaned_sentence": cleaned_text,
         "cleaned_text": cleaned_text,
         "changes": detected_changes or _build_low_changes(source_text, cleaned_text),
+        "preserved_terms": preprocess_low_result.get("preserved_terms", []) if isinstance(preprocess_low_result, dict) else [],
+        "semantic_terms": preprocess_low_result.get("semantic_terms", []) if isinstance(preprocess_low_result, dict) else [],
+        "semantic_preservation": (
+            preprocess_low_result.get("semantic_preservation", {})
+            if isinstance(preprocess_low_result, dict)
+            else semantic_metadata(source_text, cleaned_text)
+        ),
+        "filter_operators": preprocess_low_result.get("filter_operators", []) if isinstance(preprocess_low_result, dict) else [],
+        "rejected_changes": preprocess_low_result.get("rejected_changes", []) if isinstance(preprocess_low_result, dict) else [],
     }
 
     if not run_high:

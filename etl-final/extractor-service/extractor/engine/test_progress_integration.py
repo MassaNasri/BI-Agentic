@@ -14,10 +14,10 @@ import os
 from datetime import datetime, timezone
 from unittest.mock import Mock, MagicMock
 
-from extraction_strategy import ExtractionConfig
-from csv_extraction_strategy import CSVExtractionStrategy
-from database_extraction_strategy import DatabaseExtractionStrategy
-from extraction_progress import ProgressTracker, ExtractionStatus
+from .extraction_strategy import ExtractionConfig
+from .csv_extraction_strategy import CSVExtractionStrategy
+from .database_extraction_strategy import DatabaseExtractionStrategy
+from .extraction_progress import ProgressTracker, ExtractionStatus
 
 
 class TestCSVExtractionWithProgress(unittest.TestCase):

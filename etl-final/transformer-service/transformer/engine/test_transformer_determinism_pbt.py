@@ -1,21 +1,13 @@
 """
 Property-based tests for deterministic transformer behavior.
 """
-import os
-import sys
 import random
-
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-TRANSFORMER_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-
-sys.path.insert(0, BASE_DIR)
-sys.path.insert(0, TRANSFORMER_DIR)
 
 from shared.models.transformation_rule import TransformationRule, RuleType
 from shared.models.rules_engine import RulesEngine
 from shared.models.rule_actions import trim_strings, uppercase_strings
 from shared.models.rule_conditions import always_true
-from engine.transformer_service import TransformerService
+from .transformer_service import TransformerService
 
 
 def _random_row(rng: random.Random) -> dict:
@@ -74,5 +66,12 @@ def test_transformer_service_determinism_randomized():
     results1, stats1 = service.process_batch(messages)
     results2, stats2 = service.process_batch(messages)
 
-    assert [r["clean_message"] for r in results1] == [r["clean_message"] for r in results2]
+    def stable_message(result):
+        message = dict(result["clean_message"])
+        message.pop("_cleaned_at", None)
+        message.pop("cleaned_at", None)
+        return message
+
+    assert [stable_message(r) for r in results1] == [stable_message(r) for r in results2]
+    assert all(r["clean_message"].get("_cleaned_at") for r in results1 + results2)
     assert stats1["success"] == stats2["success"]

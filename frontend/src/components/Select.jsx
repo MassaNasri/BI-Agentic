@@ -10,7 +10,7 @@ const Select = forwardRef(({
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="mb-2 block text-sm font-medium text-brand-300">
           {label}
         </label>
       )}

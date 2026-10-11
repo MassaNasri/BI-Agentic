@@ -12,11 +12,11 @@ import csv
 from unittest.mock import Mock, MagicMock
 from datetime import datetime, timezone
 
-from extraction_strategy import ExtractionConfig
-from csv_extraction_strategy import CSVExtractionStrategy
-from database_extraction_strategy import DatabaseExtractionStrategy
-from extraction_checkpoint import CheckpointManager, CheckpointStatus
-from extraction_progress import ProgressTracker
+from .extraction_strategy import ExtractionConfig
+from .csv_extraction_strategy import CSVExtractionStrategy
+from .database_extraction_strategy import DatabaseExtractionStrategy
+from .extraction_checkpoint import CheckpointManager, CheckpointStatus
+from .extraction_progress import ProgressTracker
 
 
 class TestCheckpointWithCSVExtraction:

@@ -23,15 +23,15 @@ import tempfile
 from datetime import datetime, timezone
 from unittest.mock import Mock, MagicMock, patch
 
-from extraction_strategy import (
+from .extraction_strategy import (
     ExtractionStrategy,
     ExtractionConfig,
     Batch,
     ExtractionError,
     ValidationError
 )
-from csv_extraction_strategy import CSVExtractionStrategy
-from database_extraction_strategy import DatabaseExtractionStrategy
+from .csv_extraction_strategy import CSVExtractionStrategy
+from .database_extraction_strategy import DatabaseExtractionStrategy
 
 
 class TestLineageEnrichment:

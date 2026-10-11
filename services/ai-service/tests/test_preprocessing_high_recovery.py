@@ -17,7 +17,10 @@ if "clickhouse_connect" not in sys.modules:
 
 sys.path.insert(0, os.path.abspath("services/ai-service"))
 
-from preprocessing_high.llm_client import build_deterministic_schema_validation_result
+from preprocessing_high.llm_client import (
+    _is_correction_structure_safe,
+    build_deterministic_schema_validation_result,
+)
 from preprocessing_high.diagnostics import build_schema_resolution_diagnostics
 from preprocessing_high.preprocess_high_task import (
     _apply_business_term_normalization,
@@ -55,6 +58,22 @@ def _loaded_schema_fixture() -> LoadedUserSchema:
 
 
 class PreprocessHighRecoveryTests(unittest.TestCase):
+    def test_structure_guard_rejects_dropped_temporal_phrase(self):
+        self.assertFalse(
+            _is_correction_structure_safe(
+                "Compare sales and customers over time",
+                "Compare total_sales and customers",
+            )
+        )
+
+    def test_structure_guard_accepts_preserved_temporal_phrase(self):
+        self.assertTrue(
+            _is_correction_structure_safe(
+                "Compare customers and sales over time",
+                "Compare customers and total_sales over time",
+            )
+        )
+
     def test_fuzzy_phrase_correction_maps_totol_sales_to_total_sales(self):
         corrected, corrections = _apply_fuzzy_phrase_corrections(
             query="How do customers impact totol sales?",
@@ -137,6 +156,54 @@ class PreprocessHighRecoveryTests(unittest.TestCase):
         )
         self.assertNotIn("together", diagnostics.get("unresolved_terms", []))
         self.assertFalse(diagnostics.get("unresolved_terms"))
+
+    @patch("preprocessing_high.preprocess_high_task.load_user_schema")
+    @patch("preprocessing_high.preprocess_high_task._apply_fuzzy_phrase_corrections")
+    @patch("preprocessing_high.preprocess_high_task.correct_query_terms")
+    @patch("preprocessing_high.preprocess_high_task.validate_query_schema_usage")
+    def test_run_preprocess_high_structural_guard_keeps_temporal_phrase_when_fuzzy_drops_it(
+        self,
+        mock_validate_query_schema_usage,
+        mock_correct_query_terms,
+        mock_apply_fuzzy_phrase_corrections,
+        mock_load_user_schema,
+    ):
+        loaded_schema = _loaded_schema_fixture()
+        mock_load_user_schema.return_value = loaded_schema
+        mock_apply_fuzzy_phrase_corrections.return_value = (
+            "Compare total_sales and customers",
+            [
+                {
+                    "type": "fuzzy_phrase",
+                    "from": "sales and customers over time",
+                    "to": "total_sales",
+                    "message": "Corrected 'sales and customers over time' to 'total_sales'.",
+                }
+            ],
+        )
+        mock_correct_query_terms.side_effect = lambda **kwargs: kwargs["query"]
+        mock_validate_query_schema_usage.side_effect = lambda **kwargs: build_deterministic_schema_validation_result(
+            corrected_query=kwargs["corrected_query"],
+            loaded_schema=kwargs["loaded_schema"],
+        )
+
+        result = run_preprocess_high(
+            cleaned_text="Compare sales and customers over time",
+            user_id="u1",
+            route="analytical",
+            dataset_scope={"workspace_id": "w1", "dataset_id": "d1", "manager_id": "m1", "table_name": "sales_fact"},
+        )
+
+        self.assertEqual(result.get("status"), "success")
+        self.assertIn("over time", str(result.get("final_query", "")).lower())
+        self.assertEqual(str(result.get("final_query", "")).strip(), "Compare sales and customers over time")
+        self.assertFalse(
+            any(
+                str(item.get("from", "")).strip().lower() == "sales and customers over time"
+                for item in result.get("term_corrections", [])
+                if isinstance(item, dict)
+            )
+        )
 
     @patch("preprocessing_high.preprocess_high_task.load_user_schema")
     @patch("preprocessing_high.preprocess_high_task.correct_query_terms")

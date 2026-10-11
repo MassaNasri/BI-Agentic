@@ -4,17 +4,11 @@ Tests the BronzeTableCreator class and its methods.
 """
 import pytest
 import os
-import sys
 from unittest.mock import Mock, patch, MagicMock
 from clickhouse_driver import Client
 
-# Add current directory to path for imports
-sys.path.insert(0, os.path.dirname(__file__))
-from create_bronze_tables import BronzeTableCreator
-
-# Add parent directory to path for model imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from models.bronze_schema import BronzeTableSchema
+from shared.utils.create_bronze_tables import BronzeTableCreator
+from shared.models.bronze_schema import BronzeTableSchema
 
 
 @pytest.fixture
@@ -40,7 +34,7 @@ class TestBronzeTableCreator:
         assert creator.client == mock_client
         assert creator.schema_manager is not None
     
-    @patch('create_bronze_tables.Client')
+    @patch('shared.utils.create_bronze_tables.Client')
     def test_initialization_from_env(self, mock_client_class):
         """Test creator initialization from environment variables."""
         mock_instance = Mock(spec=Client)

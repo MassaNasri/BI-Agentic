@@ -61,11 +61,13 @@ class RequestValidationMiddleware:
                         f"[{correlation_id}] Request size {actual_mb:.2f}MB exceeds limit {max_mb:.2f}MB",
                         extra={'correlation_id': correlation_id}
                     )
-                    return JsonResponse({
+                    response = JsonResponse({
                         'success': False,
                         'message': f'Request size {actual_mb:.2f}MB exceeds maximum allowed size of {max_mb:.2f}MB',
                         'correlation_id': correlation_id
                     }, status=413)
+                    response['X-Correlation-ID'] = correlation_id
+                    return response
             except ValueError:
                 pass
         

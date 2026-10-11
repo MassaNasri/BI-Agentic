@@ -4,6 +4,18 @@ from .models import Database
 
 class DatabaseSerializer(serializers.ModelSerializer):
     """Serializer for Database model."""
+    source_tables = serializers.SerializerMethodField()
+
+    def get_source_tables(self, obj):
+        """Expose source identity and status, never the physical storage name."""
+        public_fields = (
+            'id', 'schema', 'name', 'status', 'row_count', 'column_count', 'columns_schema'
+        )
+        tables = []
+        for item in obj.source_tables or []:
+            if isinstance(item, dict):
+                tables.append({key: item.get(key) for key in public_fields if key in item})
+        return tables
     
     class Meta:
         model = Database
@@ -15,6 +27,9 @@ class DatabaseSerializer(serializers.ModelSerializer):
             'filename',
             'file_size',
             'file_path',
+            'source_kind',
+            'source_engine',
+            'source_tables',
             'row_count',
             'column_count',
             'columns_schema',

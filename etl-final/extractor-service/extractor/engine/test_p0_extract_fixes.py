@@ -41,22 +41,17 @@ class TestExtractorListenerP0Fixes(unittest.TestCase):
     def test_process_file_reads_csv_in_chunks(self):
         listener, _, _ = self._build_listener()
         first = pd.DataFrame([{"id": 1, "name": "a"}])
-        empty = pd.DataFrame([])
-
         def _read_csv_side_effect(*_args, **kwargs):
             if kwargs.get("nrows") == 1:
                 return first
-            return empty
+            raise AssertionError("streaming must use iter_batches after the schema read")
 
         with patch.object(kl.pd, "read_csv", side_effect=_read_csv_side_effect) as mock_read_csv, patch.object(
-            listener.csv_strategy, "extract_batch"
-        ) as mock_extract_batch:
-            mock_extract_batch.side_effect = [
-                Mock(rows=[{"id": 1, "name": "a"}], total_rows=1, has_more=False),
-            ]
+            listener.csv_strategy, "iter_batches", return_value=iter([[{"id": 1, "name": "a"}]])
+        ) as mock_iter_batches:
             ok = listener.process_file({"filename": "a.csv", "path": "a.csv"})
         self.assertTrue(ok)
-        self.assertEqual(mock_extract_batch.call_args.kwargs["limit"], listener.batch_size)
+        self.assertEqual(mock_iter_batches.call_args.kwargs["batch_size"], listener.batch_size)
 
     def test_send_batch_retries_then_dlq(self):
         listener, _, producer = self._build_listener()

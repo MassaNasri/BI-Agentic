@@ -30,8 +30,8 @@ def sanitize_sql_for_http(sql: str) -> str:
 def get_query_clickhouse_client():
     host = os.getenv("CLICKHOUSE_HOST", "localhost")
     port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
-    username = os.getenv("CLICKHOUSE_USER", "etl_user")
-    password = os.getenv("CLICKHOUSE_PASSWORD", "etl_pass123")
+    username = os.getenv("CLICKHOUSE_USER", "")
+    password = os.getenv("CLICKHOUSE_PASSWORD", "")
     database = os.getenv("CLICKHOUSE_DATABASE", "etl")
 
     logger.info("Connecting to ClickHouse for schema read: %s:%s db=%s", host, port, database)

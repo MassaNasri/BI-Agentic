@@ -44,11 +44,33 @@ Runtime inspection of `etl-final/` found:
 ## Startup
 From repository root:
 
-```bash
-docker compose up -d
+```powershell
+PowerShell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-microservices.ps1
 ```
 
-This starts the full unified stack (microservices + ETL + infra) in one command.
+The launcher validates the ignored local `.env`, builds the images, starts the unified stack in detached mode, and prints service status. Create `.env` once from the safe template if it does not exist:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Configure every required placeholder, then use the canonical development command:
+
+```powershell
+docker compose up --build
+```
+
+Docker Compose automatically loads `.env` before interpolating `docker-compose.yml`. Required-variable checks remain enabled, and service containers also receive the same file through `env_file`. Validate without starting containers with `docker compose config --quiet`.
+
+The React frontend is intentionally run as a separate Vite development process:
+
+```powershell
+Set-Location .\frontend
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`; it connects to the API gateway at `http://127.0.0.1:8000`.
 
 ## Data Flow
 `Voice -> AI -> SQL -> ClickHouse -> Visualization`

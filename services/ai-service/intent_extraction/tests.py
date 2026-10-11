@@ -411,7 +411,7 @@ class SemanticExtractionCompletenessTests(unittest.TestCase):
         self.assertEqual(validated["aggregation"], "")
         self.assertIn("comparison", validated["operations"])
         self.assertNotIn("aggregation", validated["operations"])
-        self.assertEqual(validated["metrics"], ["revenue", "profit"])
+        self.assertEqual(validated["metrics"], ["profit", "revenue"])
         for spec in validated["metric_specs"]:
             self.assertIsNone(spec["aggregation"])
 
@@ -440,7 +440,7 @@ class SemanticExtractionCompletenessTests(unittest.TestCase):
         )
         self.assertNotIn("SUM(", sql.upper())
 
-    def test_relationship_wording_with_over_time_keeps_time_series_shape(self):
+    def test_relationship_wording_with_over_time_keeps_relationship_shape(self):
         intent = self._extract_with_mocked_llm(
             query="Show relationship between revenue and order_date over time",
             payload={
@@ -463,9 +463,10 @@ class SemanticExtractionCompletenessTests(unittest.TestCase):
             intent=validated,
             schema=TEST_SCHEMA,
         )
-        self.assertIn("AS period", sql)
-        self.assertIn("ORDER BY period ASC", sql)
-        self.assertIn("order_date", sql)
+        self.assertNotIn("AS period", sql)
+        self.assertNotIn("SUM(", sql.upper())
+        self.assertIn("revenue", sql.lower())
+        self.assertIn("orders", sql.lower())
 
 
 if __name__ == "__main__":

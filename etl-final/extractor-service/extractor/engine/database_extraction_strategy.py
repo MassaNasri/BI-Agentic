@@ -22,7 +22,7 @@ Requirements:
 - Section 9.1: CRITICAL - SQL Injection vulnerability must be fixed
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Mapping, Optional
 from datetime import datetime, timezone
 import re
 import os
@@ -145,6 +145,8 @@ class DatabaseExtractionStrategy(ExtractionStrategy):
         order_by = config.connection_params.get("order_by")
         pk_column = config.connection_params.get("pk_column")
         last_pk = config.connection_params.get("last_pk")
+        connector = config.connection_params.get("connector")
+        schema = config.connection_params.get("schema")
         
         # Estimate total rows for progress tracking (if at offset 0)
         estimated_total_rows = None
@@ -153,8 +155,8 @@ class DatabaseExtractionStrategy(ExtractionStrategy):
         
         try:
             # Get database type and quote table name appropriately
-            quoted_table = self._quote_identifier(connection, table)
-            db_type = self._detect_database_type(connection)
+            quoted_table = connector.qualified_table(schema, table) if connector else self._quote_identifier(connection, table)
+            db_type = connector.key if connector else self._detect_database_type(connection)
             pagination_mode = "offset"
             nondeterministic_paging = False
             fallback_strategy = None
@@ -191,7 +193,23 @@ class DatabaseExtractionStrategy(ExtractionStrategy):
             if where_clause:
                 where_clauses.append(where_clause)
 
-            if pk_column and (order_by is None or order_by == pk_column):
+            effective_order = pk_column if pk_column and (order_by is None or order_by == pk_column) else order_by
+            if connector:
+                if where_clause:
+                    raise ExtractionError("Ad-hoc where clauses are not supported by registry connectors")
+                pagination_mode = "keyset" if effective_order and last_pk is not None else (
+                    "keyset" if pk_column and effective_order == pk_column else pagination_mode
+                )
+                query, built_params = connector.build_snapshot_query(
+                    schema,
+                    table,
+                    order_by=effective_order,
+                    offset=offset,
+                    limit=limit,
+                    last_pk=last_pk,
+                )
+                params = built_params
+            elif pk_column and (order_by is None or order_by == pk_column):
                 pagination_mode = "keyset"
                 quoted_pk = self._quote_identifier(connection, pk_column)
                 if last_pk is not None:
@@ -200,7 +218,7 @@ class DatabaseExtractionStrategy(ExtractionStrategy):
                 if where_clauses:
                     query += f" WHERE {' AND '.join(where_clauses)}"
                 query += f" ORDER BY {quoted_pk} ASC LIMIT {limit}"
-            else:
+            elif not connector:
                 if where_clauses:
                     query += f" WHERE {' AND '.join(where_clauses)}"
                 if order_by:
@@ -212,7 +230,7 @@ class DatabaseExtractionStrategy(ExtractionStrategy):
             # Execute query
             cursor = connection.cursor()
             if params:
-                cursor.execute(query, tuple(params))
+                cursor.execute(query, params if isinstance(params, Mapping) else tuple(params))
             else:
                 cursor.execute(query)
             rows = cursor.fetchall()
@@ -517,10 +535,16 @@ class DatabaseExtractionStrategy(ExtractionStrategy):
             # If estimation fails, return None
             return None
 
-    def detect_primary_key(self, connection, table: str) -> Optional[str]:
+    def detect_primary_key(self, connection, table: str, connector=None, schema=None) -> Optional[str]:
         """
         Detect a table primary key column for deterministic keyset pagination.
         """
+        if connector is not None:
+            try:
+                primary_key = connector.inspect_table(connection, schema, table).get("primary_key", [])
+                return primary_key[0] if primary_key else None
+            except Exception:
+                return None
         db_type = self._detect_database_type(connection)
         cursor = connection.cursor()
         try:

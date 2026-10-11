@@ -15,18 +15,15 @@ Usage:
     creator.create_table("customers", ["id", "name", "email"])
 """
 import os
-import sys
 import logging
 import argparse
 from typing import List, Dict, Optional
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from models.bronze_schema import BronzeTableSchema
-from clickhouse_schemas import ClickHouseSchemaManager
-from ch_identifiers import quote_identifier, sanitize_identifier
+from shared.models.bronze_schema import BronzeTableSchema
+from shared.utils.clickhouse_schemas import ClickHouseSchemaManager
+from shared.utils.ch_identifiers import quote_identifier, sanitize_identifier
 
 logging.basicConfig(
     level=logging.INFO,

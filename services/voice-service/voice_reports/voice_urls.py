@@ -1,10 +1,9 @@
-﻿from django.urls import path
+"""
+Compatibility URL module for legacy imports.
 
-from . import views
+`service_config.urls` historically included `voice_reports.voice_urls`.
+Keep this file as a thin alias to the canonical `voice_reports.urls`
+to avoid route drift between duplicate URL modules.
+"""
 
-urlpatterns = [
-    path('health/', views.HealthCheckView.as_view(), name='voice-reports-health'),
-    path('upload/', views.VoiceUploadView.as_view(), name='voice-upload'),
-    path('text-query/', views.TextQueryView.as_view(), name='text-query'),
-    path('<int:report_id>/execute/', views.QueryExecuteView.as_view(), name='query-execute'),
-]
+from .urls import urlpatterns  # noqa: F401

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Callable
+from typing import Any, Callable
 
 import requests
 
@@ -17,6 +17,9 @@ from preprocessing_high.schema_loader import (
     get_fallback_derivable_column,
 )
 from preprocessing_high.schemas import HighPreprocessConfig, SchemaValidationResult, ValidationMapping
+from preprocessing_high.value_index import normalize_value
+from shared.bi_semantic_layer import has_natural_comparison_language, schema_diagnostic_ignore_tokens
+from shared.bi_temporal_semantics import has_explicit_temporal_phrase
 from shared.schema_utils import is_date_type
 
 
@@ -288,8 +291,11 @@ def _extract_query_shape(query: str) -> dict[str, Any]:
     numeric_limits = [int(value) for value in re.findall(r"\b(?:top|bottom|first|last)\s+(\d+)\b", normalized)]
     explicit_numbers = [int(value) for value in re.findall(r"\b\d+\b", normalized)]
     has_where_like = bool(re.search(r"\b(where|having|with)\b", normalized))
+    has_temporal_phrase = has_explicit_temporal_phrase(normalized)
     has_comparison = bool(
-        re.search(r"(>=|<=|>|<|=)", normalized) or any(word in normalized for word in _COMPARISON_WORDS)
+        re.search(r"(>=|<=|>|<|=)", normalized)
+        or any(word in normalized for word in _COMPARISON_WORDS)
+        or has_natural_comparison_language(normalized)
     )
     ranking_direction = ""
     if any(word in normalized for word in ("highest", "largest", "most", "top", "best")):
@@ -300,6 +306,7 @@ def _extract_query_shape(query: str) -> dict[str, Any]:
         "numeric_limits": numeric_limits,
         "explicit_numbers": explicit_numbers,
         "has_where_like": has_where_like,
+        "has_temporal_phrase": has_temporal_phrase,
         "has_comparison": has_comparison,
         "ranking_direction": ranking_direction,
         "has_ranking_language": any(word in normalized for word in _RANKING_WORDS),
@@ -310,6 +317,8 @@ def _is_correction_structure_safe(original_query: str, corrected_query: str) -> 
     source = _extract_query_shape(original_query)
     corrected = _extract_query_shape(corrected_query)
 
+    if source["has_temporal_phrase"] and not corrected["has_temporal_phrase"]:
+        return False
     if source["has_ranking_language"] and not corrected["has_ranking_language"]:
         return False
     if source["ranking_direction"] and source["ranking_direction"] != corrected["ranking_direction"]:
@@ -378,7 +387,56 @@ def _extract_json_object(raw_output: str) -> dict:
     return payload
 
 
-def _build_validation_prompt(*, corrected_query: str, loaded_schema: LoadedUserSchema) -> str:
+def _value_context_for_prompt(
+    *,
+    corrected_query: str,
+    value_index: dict[str, list[dict[str, Any]]] | None,
+) -> str:
+    if not isinstance(value_index, dict) or not value_index:
+        return "No indexed value matches were supplied."
+
+    normalized_query = f" {normalize_value(corrected_query)} "
+    matches: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for normalized_value, candidates in sorted(
+        value_index.items(),
+        key=lambda item: (len(str(item[0]).split()), len(str(item[0]))),
+        reverse=True,
+    ):
+        value_term = normalize_value(normalized_value)
+        if not value_term or f" {value_term} " not in normalized_query:
+            continue
+        if not isinstance(candidates, list):
+            continue
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            table = str(candidate.get("table") or "").strip()
+            column = str(candidate.get("column") or "").strip()
+            value = str(candidate.get("value") or normalized_value).strip()
+            if not table or not column or not value:
+                continue
+            key = (table.lower(), column.lower(), value.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append({"value": value, "table": table, "column": column})
+            if len(matches) >= 25:
+                break
+        if len(matches) >= 25:
+            break
+
+    if not matches:
+        return "No indexed value matches were found in the query."
+    return json.dumps(matches, ensure_ascii=False, separators=(",", ":"))
+
+
+def _build_validation_prompt(
+    *,
+    corrected_query: str,
+    loaded_schema: LoadedUserSchema,
+    value_index: dict[str, list[dict[str, Any]]] | None = None,
+) -> str:
     return (
         "You validate whether a corrected analytical query references valid schema fields.\n"
         "Return JSON only.\n\n"
@@ -402,8 +460,10 @@ def _build_validation_prompt(*, corrected_query: str, loaded_schema: LoadedUserS
         "  ]\n"
         "}\n\n"
         "Include every table/column-like reference in the query. "
-        "If there is no reference, return references as an empty array.\n\n"
+        "If there is no reference, return references as an empty array.\n"
+        "Indexed value matches are literal filter values, not missing schema columns; do not mark them invalid.\n\n"
         f"Schema:\n{_schema_for_prompt(loaded_schema)}\n\n"
+        f"Indexed value matches:\n{_value_context_for_prompt(corrected_query=corrected_query, value_index=value_index)}\n\n"
         f"Corrected query:\n{corrected_query}\n\n"
         "JSON response:"
     )
@@ -637,7 +697,10 @@ def _find_semantic_schema_mentions(
     mappings: list[ValidationMapping] = []
     raw_tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(query or "").lower())
     seen_requested = set(existing_requested)
-    ignored = {str(term).strip().lower() for term in (ignored_terms or set()) if str(term).strip()}
+    ignored = (
+        {str(term).strip().lower() for term in (ignored_terms or set()) if str(term).strip()}
+        | schema_diagnostic_ignore_tokens(str(query or ""))
+    )
 
     column_catalog: list[tuple[str, str, set[str]]] = []
     for table_name, columns in loaded_schema.schema["columns"].items():
@@ -755,7 +818,10 @@ def build_deterministic_schema_validation_result(
     ignored_terms: set[str] | None = None,
 ) -> SchemaValidationResult:
     mappings = _find_direct_schema_mentions(query=corrected_query, loaded_schema=loaded_schema)
-    ignored = {str(term).strip().lower() for term in (ignored_terms or set()) if str(term).strip()}
+    ignored = (
+        {str(term).strip().lower() for term in (ignored_terms or set()) if str(term).strip()}
+        | schema_diagnostic_ignore_tokens(corrected_query)
+    )
     mappings = [
         mapping
         for mapping in mappings
@@ -825,8 +891,13 @@ def validate_query_schema_usage(
     config: HighPreprocessConfig,
     logger: logging.Logger,
     log_event: Callable[..., None],
+    value_index: dict[str, list[dict[str, Any]]] | None = None,
 ) -> SchemaValidationResult:
-    prompt = _build_validation_prompt(corrected_query=corrected_query, loaded_schema=loaded_schema)
+    prompt = _build_validation_prompt(
+        corrected_query=corrected_query,
+        loaded_schema=loaded_schema,
+        value_index=value_index,
+    )
     raw_output = _call_ollama(
         prompt=prompt,
         config=config,

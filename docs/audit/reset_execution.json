@@ -1,0 +1,62 @@
+{
+  "status": "ACTIVE DATA CLEANED; LOCAL STARTUP SMOKE PASS; OVERALL PHASE 0 ACCEPTANCE PARTIAL",
+  "started_utc": "2026-09-13T15:11:24.974197+00:00",
+  "actions": [
+    "PostgreSQL: 21 tables truncated; six configuration tables preserved",
+    "ClickHouse: five tables truncated; schema registry preserved",
+    "Redis: four obsolete Kombu binding keys removed; no FLUSHALL",
+    "Removed 9 backed-up files from bi-voice-agent_uploaded-files",
+    "Removed 21 backed-up files from bi-voice-agent_voice_service_media",
+    "Removed 7 backed-up files from etl-final_uploaded-files",
+    "Removed three backed-up local test audio files; directories preserved"
+  ],
+  "postgres_after": {
+    "auth_group": 0,
+    "auth_group_permissions": 0,
+    "auth_permission": 96,
+    "dashboard_pages": 0,
+    "django_admin_log": 0,
+    "django_content_type": 24,
+    "django_migrations": 56,
+    "django_session": 0,
+    "invitations": 0,
+    "manager_databases": 0,
+    "notification_dispatch_logs": 0,
+    "password_reset_codes": 0,
+    "report_page_assignments": 0,
+    "sql_edit_history": 0,
+    "subscription_free_tier_usage": 0,
+    "subscription_payments": 0,
+    "subscription_plans": 2,
+    "token_blacklist_blacklistedtoken": 0,
+    "token_blacklist_outstandingtoken": 0,
+    "users": 0,
+    "users_groups": 0,
+    "users_user_permissions": 0,
+    "voice_pipeline_jobs": 0,
+    "voice_reports": 0,
+    "workspace_members": 0,
+    "workspace_subscriptions": 0,
+    "workspaces": 0
+  },
+  "clickhouse_after": {
+    "deduplication_log": 0,
+    "quality_anomalies": 0,
+    "quality_metrics": 0,
+    "quarantine": 0,
+    "sales_3months_realistic_csv": 0,
+    "schema_contract_registry": 0
+  },
+  "redis_after": "# Keyspace",
+  "kafka": "Business topics verified empty; no destructive operation needed",
+  "post_startup_evidence": [
+    "startup_verification.json",
+    "final_storage_verification.json",
+    "STARTUP_VERIFICATION.md"
+  ],
+  "limitations": [
+    "Historical volumes and Metabase metadata intentionally preserved",
+    "Model/migration parity fails in voice and notification",
+    "Full functional workflow and new-empty-PostgreSQL migration NOT VERIFIED"
+  ]
+}

@@ -147,8 +147,7 @@ class BronzeRow:
         
         The deduplication key is based on:
         - source_id: Identifies the data source
-        - batch_id: Identifies the extraction batch
-        - data content: Ensures identical data is detected
+        - data content: Ensures identical source rows are detected across retry batches
         
         Returns:
             SHA256 hash string
@@ -156,7 +155,6 @@ class BronzeRow:
         # Create deterministic representation of the row
         key_components = {
             "source_id": self.source_id,
-            "batch_id": self.batch_id,
             "data": self.data
         }
         

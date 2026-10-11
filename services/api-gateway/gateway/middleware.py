@@ -62,7 +62,7 @@ class GatewayAuthenticationMiddleware:
         if is_public_path(request.path):
             return self.get_response(request)
 
-        if request.path.startswith('/health/'):
+        if request.path.startswith(('/health/', '/ready/')):
             return self.get_response(request)
 
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')

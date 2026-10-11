@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, CreditCard, Landmark, Sparkles, ShieldCheck, Zap } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 
@@ -93,7 +93,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
     [bankSearch]
   )
 
-  const loadPlans = async () => {
+  const loadPlans = useCallback(async () => {
     setLoading(true)
     try {
       const plansResponse = await subscriptionAPI.listPlans()
@@ -108,11 +108,11 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
     } finally {
       setLoading(false)
     }
-  }
+  }, [workspaceId])
 
   useEffect(() => {
     loadPlans()
-  }, [workspaceId])
+  }, [loadPlans])
 
   useEffect(() => {
     if (selectedPlanId && !plans.some((plan) => plan.id === selectedPlanId)) {
@@ -204,25 +204,25 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Subscription</p>
-        <h2 className="mt-2 text-2xl font-semibold text-slate-900">{title}</h2>
-        <p className="mt-2 text-sm text-slate-600">
+      <div className="rounded-2xl border border-brand-700/30 bg-gradient-to-r from-brand-900/30 via-brand-900/30 to-brand-900/30 p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">Subscription</p>
+        <h2 className="mt-2 text-2xl font-semibold text-white">{title}</h2>
+        <p className="mt-2 text-sm text-[var(--c-muted)]">
           Pick a plan and activate instantly. Payment is simulated and always succeeds in this environment.
         </p>
       </div>
 
       {currentSubscription && (
-        <Card className="border border-blue-200 bg-blue-50/60">
+        <Card className="border border-brand-700/40 bg-brand-900/30">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Current Plan</p>
-              <h3 className="text-lg font-semibold text-slate-900">{currentSubscription.plan?.name}</h3>
-              <p className="text-sm text-slate-600">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">Current Plan</p>
+              <h3 className="text-lg font-semibold text-white">{currentSubscription.plan?.name}</h3>
+              <p className="text-sm text-[var(--c-muted)]">
                 Active until {currentSubscription.end_date || 'N/A'}.
               </p>
             </div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-sm font-medium text-blue-700">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--c-card-bg)] px-3 py-1 text-sm font-medium text-brand-300">
               <ShieldCheck className="h-4 w-4" />
               Active
             </div>
@@ -232,7 +232,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
 
       {loading ? (
         <Card>
-          <p className="text-sm text-slate-600">Loading available plans...</p>
+          <p className="text-sm text-[var(--c-muted)]">Loading available plans...</p>
         </Card>
       ) : (
         <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -248,8 +248,8 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 key={plan.id}
                 className={`relative rounded-2xl border p-5 shadow-sm transition ${
                   isRecommended
-                    ? 'border-amber-300 bg-gradient-to-b from-amber-50 to-white'
-                    : 'border-slate-200 bg-white'
+                    ? 'border-amber-400 bg-gradient-to-b from-amber-500/15 to-brand-900/30'
+                    : 'border-brand-700/30 bg-[var(--c-card-bg)]'
                 }`}
               >
                 {isRecommended && (
@@ -260,48 +260,48 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 )}
 
                 {badge && (
-                  <div className="mt-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                  <div className="mt-2 inline-flex items-center rounded-full bg-brand-700/30 px-2.5 py-1 text-xs font-medium text-brand-300">
                     {badge}
                   </div>
                 )}
 
-                <h3 className="mt-3 text-xl font-semibold text-slate-900">{plan.name}</h3>
-                <p className="mt-2 min-h-[40px] text-sm text-slate-600">{plan.description || 'Subscription plan'}</p>
+                <h3 className="mt-3 text-xl font-semibold text-white">{plan.name}</h3>
+                <p className="mt-2 min-h-[40px] text-sm text-[var(--c-muted)]">{plan.description || 'Subscription plan'}</p>
 
                 <div className="mt-4 flex items-end gap-2">
-                  <p className="text-2xl font-bold text-slate-900">
+                  <p className="text-2xl font-bold text-white">
                     {currencyFormatter.format(Number(plan.price_monthly || 0))}
                   </p>
-                  <p className="pb-1 text-xs uppercase tracking-[0.12em] text-slate-500">/ month</p>
+                  <p className="pb-1 text-xs uppercase tracking-[0.12em] text-brand-300/80">/ month</p>
                 </div>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-brand-300/80">
                   {currencyFormatter.format(Number(plan.price_yearly || 0))} yearly
                 </p>
 
                 <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                  <div className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700">
-                    <p className="font-semibold text-slate-900">{plan.duration_days} days</p>
+                  <div className="rounded-lg bg-brand-700/30 px-3 py-2 text-brand-300">
+                    <p className="font-semibold text-white">{plan.duration_days} days</p>
                     <p>Duration</p>
                   </div>
-                  <div className="rounded-lg bg-slate-100 px-3 py-2 text-slate-700">
-                    <p className="font-semibold text-slate-900">{plan.max_voice_requests}</p>
+                  <div className="rounded-lg bg-brand-700/30 px-3 py-2 text-brand-300">
+                    <p className="font-semibold text-white">{plan.max_voice_requests}</p>
                     <p>Voice Requests</p>
                   </div>
                 </div>
 
                 <div className="mt-4 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium">
                   <Zap
-                    className={`h-3.5 w-3.5 ${plan.has_mcp_access ? 'text-emerald-600' : 'text-slate-400'}`}
+                    className={`h-3.5 w-3.5 ${plan.has_mcp_access ? 'text-brand-500' : 'text-brand-300/60'}`}
                   />
-                  <span className={plan.has_mcp_access ? 'text-emerald-700' : 'text-slate-500'}>
+                  <span className={plan.has_mcp_access ? 'text-brand-300' : 'text-brand-300/80'}>
                     {plan.has_mcp_access ? 'MCP Enabled' : 'MCP Not Included'}
                   </span>
                 </div>
 
-                <ul className="mt-4 space-y-2 text-sm text-slate-700">
+                <ul className="mt-4 space-y-2 text-sm text-brand-300">
                   {(features.length > 0 ? features : ['Basic analytics support']).map((feature) => (
                     <li key={`${plan.id}-${feature}`} className="flex items-start gap-2">
-                      <Check className="mt-0.5 h-4 w-4 text-emerald-600" />
+                      <Check className="mt-0.5 h-4 w-4 text-brand-500" />
                       <span>{feature}</span>
                     </li>
                   ))}
@@ -327,26 +327,26 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
       )}
 
       {!selectedPlan ? (
-        <Card className="border border-slate-200 bg-slate-50">
-          <p className="text-sm text-slate-600">Select a plan to reveal payment options.</p>
+        <Card className="border border-brand-700/30 bg-[rgba(255,255,255,0.04)]">
+          <p className="text-sm text-[var(--c-muted)]">Select a plan to reveal payment options.</p>
         </Card>
       ) : (
-        <Card className="border border-slate-200 bg-white">
+        <Card className="border border-brand-700/30 bg-[var(--c-card-bg)]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Payment</p>
-              <h3 className="mt-1 text-lg font-semibold text-slate-900">Complete Subscription</h3>
-              <p className="mt-1 text-sm text-slate-600">
-                Selected plan: <span className="font-semibold text-slate-900">{selectedPlan.name}</span>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-300/80">Payment</p>
+              <h3 className="mt-1 text-lg font-semibold text-white">Complete Subscription</h3>
+              <p className="mt-1 text-sm text-[var(--c-muted)]">
+                Selected plan: <span className="font-semibold text-white">{selectedPlan.name}</span>
               </p>
             </div>
-            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+            <div className="rounded-full bg-brand-700/30 px-3 py-1 text-xs font-medium text-brand-300">
               {currencyFormatter.format(Number(selectedPlan.price_monthly || 0))} / month
             </div>
           </div>
 
           <div className="mt-5 space-y-4">
-            <div className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            <div className="inline-flex items-center rounded-xl border border-brand-700/30 bg-[var(--c-card-bg)] p-1 shadow-sm">
               <button
                 type="button"
                 onClick={() => {
@@ -355,8 +355,8 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 }}
                 className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
                   paymentMethod === 'visa'
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-600 hover:bg-slate-100'
+                    ? 'bg-brand-950 text-white'
+                    : 'text-[var(--c-muted)] hover:bg-brand-700/30'
                 }`}
               >
                 <CreditCard className="h-4 w-4" />
@@ -370,8 +370,8 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 }}
                 className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
                   paymentMethod === 'bank'
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-600 hover:bg-slate-100'
+                    ? 'bg-brand-950 text-white'
+                    : 'text-[var(--c-muted)] hover:bg-brand-700/30'
                 }`}
               >
                 <Landmark className="h-4 w-4" />
@@ -382,7 +382,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
             {paymentMethod === 'bank' ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Search Bank (Optional)</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">Search Bank (Optional)</label>
                   <input
                     type="text"
                     value={bankSearch}
@@ -393,7 +393,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Bank</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">Bank</label>
                   <select
                     value={selectedBank}
                     onChange={(event) => setSelectedBank(event.target.value)}
@@ -410,7 +410,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Account Number</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">Account Number</label>
                   <input
                     type="text"
                     value={bankAccountNumber}
@@ -424,7 +424,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Account Name</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">Account Name</label>
                   <input
                     type="text"
                     value={bankAccountName}
@@ -440,7 +440,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Card Number</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">Card Number</label>
                   <input
                     type="text"
                     value={cardForm.cardNumber}
@@ -457,7 +457,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Card Holder Name</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">Card Holder Name</label>
                   <input
                     type="text"
                     value={cardForm.cardHolderName}
@@ -476,7 +476,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">Expiry Date (MM/YY)</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">Expiry Date (MM/YY)</label>
                   <input
                     type="text"
                     value={cardForm.expiryDate}
@@ -493,7 +493,7 @@ function SubscriptionPlansPanel({ workspaceId, onSubscribed, title = 'Choose You
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700">CVV</label>
+                  <label className="mb-2 block text-sm font-medium text-brand-300">CVV</label>
                   <input
                     type="text"
                     value={cardForm.cvv}

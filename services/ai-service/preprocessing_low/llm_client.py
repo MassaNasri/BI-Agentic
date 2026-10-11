@@ -20,11 +20,11 @@ _MEANINGLESS_OUTPUTS = {"__empty__", "empty", "n/a", "na", "none", "null"}
 def _build_preprocess_prompt(raw_text: str) -> str:
     return (
         "You are a multilingual text preprocessing engine for speech transcripts.\n"
-        "Rewrite noisy transcription into a concise intent-focused query for intent classification.\n\n"
+        "Lightly clean noisy transcription into a semantically equivalent BI query.\n\n"
         "Rules:\n"
-        "1) Keep only meaningful analytical/query intent.\n"
+        "1) Never remove analytical meaning. Preserve metrics, dimensions, time/grouping phrases, comparisons, rankings, filters, forecasts, chart intent, and numbers.\n"
         "2) Remove filler words, greetings, conversational phrases, hesitation sounds, speech artifacts, repeated text, malformed symbols, and redundant punctuation.\n"
-        "3) Preserve entities, metrics, dimensions, filters, numbers, dates, and comparison terms.\n"
+        "3) Preserve natural filter words such as exceeded, above, below, between, from, and to. Do not replace them with symbols.\n"
         "4) Keep the original language of the user's intent whenever possible.\n"
         "5) If no meaningful query intent exists, output exactly __EMPTY__.\n\n"
         "Output constraints:\n"

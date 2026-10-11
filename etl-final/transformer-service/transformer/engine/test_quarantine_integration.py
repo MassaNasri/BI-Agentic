@@ -2,20 +2,14 @@
 Integration tests for quarantine behavior using real ClickHouse.
 """
 import os
-import sys
 from uuid import uuid4
 
 import pytest
 from clickhouse_driver import Client
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-TRANSFORMER_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, BASE_DIR)
-sys.path.insert(0, TRANSFORMER_DIR)
-
 from shared.models import SchemaContract, FieldDefinition, DataType
 from shared.utils.quarantine_manager import QuarantineManager
-from engine.transformer_service import TransformerService
+from .transformer_service import TransformerService
 
 
 def is_clickhouse_available():

@@ -187,14 +187,14 @@ function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-cyan-50 to-blue-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-brand-900/30 via-brand-900/30 to-brand-700/30 p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-brand-700/30 bg-[var(--c-card-bg)] p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-700">System Admin</p>
-              <h1 className="mt-2 text-3xl font-semibold text-slate-900">Admin Dashboard</h1>
-              <p className="mt-2 text-sm text-slate-600">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">System Admin</p>
+              <h1 className="mt-2 text-3xl font-semibold text-white">Admin Dashboard</h1>
+              <p className="mt-2 text-sm text-[var(--c-muted)]">
                 Manage plans, monitor platform usage, and control subscription lifecycle.
               </p>
             </div>
@@ -214,45 +214,45 @@ function AdminDashboard() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Card>
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-blue-100 p-3 text-blue-700">
+              <div className="rounded-lg bg-brand-700/30 p-3 text-brand-300">
                 <Users className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm text-slate-600">Users</p>
-                <p className="text-2xl font-semibold text-slate-900">{stats?.users?.total ?? 0}</p>
+                <p className="text-sm text-[var(--c-muted)]">Users</p>
+                <p className="text-2xl font-semibold text-white">{stats?.users?.total ?? 0}</p>
               </div>
             </div>
           </Card>
           <Card>
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-violet-100 p-3 text-violet-700">
+              <div className="rounded-lg bg-brand-700/30 p-3 text-brand-300">
                 <Building2 className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm text-slate-600">Workspaces</p>
-                <p className="text-2xl font-semibold text-slate-900">{stats?.workspaces?.total ?? 0}</p>
+                <p className="text-sm text-[var(--c-muted)]">Workspaces</p>
+                <p className="text-2xl font-semibold text-white">{stats?.workspaces?.total ?? 0}</p>
               </div>
             </div>
           </Card>
           <Card>
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-amber-100 p-3 text-amber-700">
+              <div className="rounded-lg bg-amber-500/20 p-3 text-amber-400">
                 <Layers3 className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm text-slate-600">Active Subscriptions</p>
-                <p className="text-2xl font-semibold text-slate-900">{stats?.subscriptions?.active ?? 0}</p>
+                <p className="text-sm text-[var(--c-muted)]">Active Subscriptions</p>
+                <p className="text-2xl font-semibold text-white">{stats?.subscriptions?.active ?? 0}</p>
               </div>
             </div>
           </Card>
           <Card>
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-emerald-100 p-3 text-emerald-700">
+              <div className="rounded-lg bg-brand-700/30 p-3 text-brand-300">
                 <CreditCard className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm text-slate-600">Revenue</p>
-                <p className="text-2xl font-semibold text-slate-900">
+                <p className="text-sm text-[var(--c-muted)]">Revenue</p>
+                <p className="text-2xl font-semibold text-white">
                   {currencyFormatter.format(Number(stats?.payments?.revenue || 0))}
                 </p>
               </div>
@@ -265,7 +265,7 @@ function AdminDashboard() {
           subtitle="Create, edit, activate, and retire plans without disrupting existing subscriptions."
         >
           {loading ? (
-            <p className="text-sm text-slate-600">Loading plans...</p>
+            <p className="text-sm text-[var(--c-muted)]">Loading plans...</p>
           ) : (
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
               {sortedPlans.map((plan) => {
@@ -274,50 +274,50 @@ function AdminDashboard() {
                   <div
                     key={plan.id}
                     className={`rounded-2xl border p-5 ${
-                      plan.is_active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50'
+                      plan.is_active ? 'border-brand-700/30 bg-[var(--c-card-bg)]' : 'border-brand-700/30 bg-[rgba(255,255,255,0.04)]'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-lg font-semibold text-slate-900">{plan.name}</p>
-                        <p className="mt-1 text-xs text-slate-500">{plan.badge || 'No badge'}</p>
+                        <p className="text-lg font-semibold text-white">{plan.name}</p>
+                        <p className="mt-1 text-xs text-brand-300/80">{plan.badge || 'No badge'}</p>
                       </div>
                       <span
                         className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                          plan.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                          plan.is_active ? 'bg-brand-700/30 text-brand-300' : 'bg-brand-700/40 text-brand-300'
                         }`}
                       >
                         {plan.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </div>
 
-                    <p className="mt-3 text-sm text-slate-600">{plan.description || 'No description set.'}</p>
+                    <p className="mt-3 text-sm text-[var(--c-muted)]">{plan.description || 'No description set.'}</p>
 
                     <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                      <div className="rounded-lg bg-slate-100 px-3 py-2">
-                        <p className="text-xs text-slate-500">Monthly</p>
-                        <p className="font-semibold text-slate-900">
+                      <div className="rounded-lg bg-brand-700/30 px-3 py-2">
+                        <p className="text-xs text-brand-300/80">Monthly</p>
+                        <p className="font-semibold text-white">
                           {currencyFormatter.format(Number(plan.price_monthly || 0))}
                         </p>
                       </div>
-                      <div className="rounded-lg bg-slate-100 px-3 py-2">
-                        <p className="text-xs text-slate-500">Yearly</p>
-                        <p className="font-semibold text-slate-900">
+                      <div className="rounded-lg bg-brand-700/30 px-3 py-2">
+                        <p className="text-xs text-brand-300/80">Yearly</p>
+                        <p className="font-semibold text-white">
                           {currencyFormatter.format(Number(plan.price_yearly || 0))}
                         </p>
                       </div>
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                      <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-700">
+                      <span className="rounded-full bg-brand-700/30 px-2.5 py-1 text-brand-300">
                         {plan.duration_days} days
                       </span>
-                      <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-indigo-700">
+                      <span className="rounded-full bg-brand-700/30 px-2.5 py-1 text-brand-300">
                         {plan.max_voice_requests} voice requests
                       </span>
                       <span
                         className={`rounded-full px-2.5 py-1 ${
-                          plan.has_mcp_access ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                          plan.has_mcp_access ? 'bg-brand-700/30 text-brand-300' : 'bg-brand-700/40 text-brand-300'
                         }`}
                       >
                         {plan.has_mcp_access ? 'MCP On' : 'MCP Off'}
@@ -325,13 +325,13 @@ function AdminDashboard() {
                     </div>
 
                     <div className="mt-4">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.1em] text-brand-300/80">
                         Features
                       </p>
-                      <ul className="space-y-1 text-sm text-slate-700">
+                      <ul className="space-y-1 text-sm text-brand-300">
                         {(features.length > 0 ? features : ['No features configured']).map((feature) => (
                           <li key={`${plan.id}-${feature}`} className="flex items-center gap-2">
-                            <BarChart3 className="h-3.5 w-3.5 text-cyan-600" />
+                            <BarChart3 className="h-3.5 w-3.5 text-brand-500" />
                             <span>{feature}</span>
                           </li>
                         ))}
@@ -438,7 +438,7 @@ function AdminDashboard() {
               />
 
               <div className="md:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-gray-700">
+                <label className="mb-1 block text-xs font-medium text-brand-300">
                   Features (JSON or comma/new line)
                 </label>
                 <textarea
@@ -450,7 +450,7 @@ function AdminDashboard() {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 md:col-span-2">
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <label className="inline-flex items-center gap-2 text-sm text-brand-300">
                   <input
                     type="checkbox"
                     checked={form.has_mcp_access}
@@ -458,7 +458,7 @@ function AdminDashboard() {
                   />
                   MCP Access
                 </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <label className="inline-flex items-center gap-2 text-sm text-brand-300">
                   <input
                     type="checkbox"
                     checked={form.is_active}
@@ -470,7 +470,7 @@ function AdminDashboard() {
             </div>
           </div>
 
-          <div className="sticky bottom-0 border-t bg-white px-3 py-2 sm:px-4 sm:py-3">
+          <div className="sticky bottom-0 border-t bg-[var(--c-card-bg)] px-3 py-2 sm:px-4 sm:py-3">
             <div className="flex items-center justify-end gap-2 sm:gap-3">
               <Button type="button" variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
                 Cancel

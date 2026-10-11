@@ -1,0 +1,9 @@
+{
+  "required_reports": 11,
+  "unique_issues": 38,
+  "script_ast": "PASS",
+  "internal_report_links": "PASS",
+  "current_env_secret_value_scan": "PASS; values never serialized",
+  "scope": "No exhaustive historical/provider secret scan claim",
+  "timestamp_utc": "2026-09-13T16:41:30.867068+00:00"
+}

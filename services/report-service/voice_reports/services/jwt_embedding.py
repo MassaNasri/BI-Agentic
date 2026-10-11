@@ -180,7 +180,10 @@ class JWTEmbeddingService:
         """
         resource = {"type": resource_type, "id": resource_id}
         token = self.generate_embed_token(resource, params)
-        embed_url = f"{self.metabase_url}/embed/{resource_type}/{token}#bordered=true&titled=true"
+        appearance_hash = "#theme=night&bordered=true&titled=true"
+        if resource_type == "dashboard":
+            appearance_hash = f"{appearance_hash}&background=false"
+        embed_url = f"{self.metabase_url}/embed/{resource_type}/{token}{appearance_hash}"
         logger.info("Generated embed URL for %s %s", resource_type, resource_id)
         return embed_url
     
@@ -209,7 +212,7 @@ class JWTEmbeddingService:
             )
             return payload
         except jwt.ExpiredSignatureError:
-            logger.warning("JWT token has expired")
+            logger.debug("JWT token has expired")
             return None
         except jwt.InvalidTokenError:
             return None

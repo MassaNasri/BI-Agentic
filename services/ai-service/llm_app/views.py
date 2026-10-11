@@ -76,17 +76,7 @@ def intent_test_view(request):
         else {}
     )
     final_route = str(pipeline_result.get("final_route", "")).strip().lower()
-    selected_chart_type = str(visualization.get("selected_chart_type", "")).strip().lower()
-    reason_chart_selected = str(visualization.get("reason_chart_selected", "")).strip()
     chart_payload = visualization.get("downstream_result")
-    if selected_chart_type:
-        base_payload = chart_payload if isinstance(chart_payload, dict) else {}
-        chart_payload = {
-            **base_payload,
-            "type": selected_chart_type,
-            "chart_type": selected_chart_type,
-            "reason_chart_selected": reason_chart_selected or str(base_payload.get("reason_chart_selected", "")).strip(),
-        }
     if final_route == "forecasting" and not chart_payload:
         downstream = forecasting.get("downstream_result", {}) if isinstance(forecasting.get("downstream_result"), dict) else {}
         chart_payload = downstream.get("visualization_payload")

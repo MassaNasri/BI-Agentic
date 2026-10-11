@@ -10,13 +10,9 @@ from unittest.mock import Mock, MagicMock, patch, call
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
-from utils.bronze_writer import BronzeWriter, BronzeWriteError
-from utils.idempotency_manager import IdempotencyManager, IdempotencyKey, PipelineStage
+from shared.models.bronze_schema import BronzeRow, BronzeBatch, BronzeTableSchema
+from shared.utils.bronze_writer import BronzeWriter, BronzeWriteError
+from shared.utils.idempotency_manager import IdempotencyClaim, IdempotencyManager, IdempotencyKey, PipelineStage
 
 
 class TestBronzeWriter:
@@ -36,6 +32,10 @@ class TestBronzeWriter:
         manager = Mock(spec=IdempotencyManager)
         manager.is_duplicate.return_value = False
         manager.mark_processed.return_value = True
+        manager.claim_new_keys.side_effect = lambda keys, stage: [
+            IdempotencyClaim(key=key, claim_row_id=uuid4()) for key in keys
+        ]
+        manager.rollback_claims.return_value = True
         return manager
     
     @pytest.fixture
@@ -151,8 +151,12 @@ class TestBronzeWriter:
             idempotency_manager=mock_idempotency_manager
         )
         
-        # Mock first row as duplicate, second as new
-        mock_idempotency_manager.is_duplicate.side_effect = [True, False]
+        # Claim only the second row; the first is an existing duplicate.
+        second_key = writer._build_idempotency_key(sample_bronze_batch.rows[1], sample_bronze_batch.source_id)
+        mock_idempotency_manager.claim_new_keys.return_value = [
+            IdempotencyClaim(key=second_key, claim_row_id=uuid4())
+        ]
+        mock_idempotency_manager.claim_new_keys.side_effect = None
         
         # Mock table exists and insert
         mock_client.execute.side_effect = [
@@ -174,8 +178,9 @@ class TestBronzeWriter:
             idempotency_manager=mock_idempotency_manager
         )
         
-        # Mock all rows as duplicates
-        mock_idempotency_manager.is_duplicate.return_value = True
+        # No claim means every row already exists.
+        mock_idempotency_manager.claim_new_keys.return_value = []
+        mock_idempotency_manager.claim_new_keys.side_effect = None
         
         result = writer.write_batch(sample_bronze_batch)
         

@@ -121,14 +121,14 @@ function ForgotPassword() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-blue-50 to-indigo-50 flex items-center justify-center px-6 py-12">
-      <div className="card max-w-md w-full bg-white/90 backdrop-blur-sm shadow-2xl">
+    <div className="min-h-screen bg-gradient-to-br from-brand-900/30 via-brand-900/30 to-brand-900/30 flex items-center justify-center px-6 py-12">
+      <div className="card max-w-md w-full bg-[var(--c-card-bg)] backdrop-blur-sm shadow-2xl">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-primary-100 to-blue-100 rounded-full mb-4 shadow-lg">
-            <KeyRound className="w-8 h-8 text-primary-600" />
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-brand-700/30 to-brand-700/30 rounded-full mb-4 shadow-lg">
+            <KeyRound className="w-8 h-8 text-brand-500" />
           </div>
-          <h2 className="text-3xl font-bold text-gray-900">{stepTitle}</h2>
-          <p className="mt-2 text-gray-600">{stepDescription}</p>
+          <h2 className="text-3xl font-bold text-white">{stepTitle}</h2>
+          <p className="mt-2 text-[var(--c-muted)]">{stepDescription}</p>
         </div>
 
         {errorMessage && (
@@ -218,7 +218,7 @@ function ForgotPassword() {
         )}
 
         <div className="mt-6 text-center">
-          <Link to="/login" className="text-primary-600 hover:text-primary-700 font-semibold transition-colors">
+          <Link to="/login" className="text-brand-500 hover:text-brand-300 font-semibold transition-colors">
             Back to Sign In
           </Link>
         </div>

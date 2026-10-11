@@ -46,194 +46,33 @@ def _extract_result_preview(execution_result: Any, max_rows: int = 5) -> dict[st
     }
 
 
-def _single_value_result_shape(execution_result: Any) -> bool:
-    if not isinstance(execution_result, dict):
-        return False
-    rows = execution_result.get("rows", [])
-    if not isinstance(rows, list) or len(rows) != 1:
-        return False
-    first_row = rows[0]
-    if not isinstance(first_row, dict):
-        return False
-    return len(first_row.keys()) == 1
-
-
-def _is_numeric_value(value: Any) -> bool:
-    if isinstance(value, str):
-        return bool(re.fullmatch(r"-?\d+(?:\.\d+)?", value.strip()))
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _column_name(column: Any) -> str:
-    if isinstance(column, dict):
-        return str(column.get("name") or "").strip()
-    return str(column or "").strip()
-
-
-def _column_type(column: Any) -> str:
-    if isinstance(column, dict):
-        return str(column.get("type") or "").strip().lower()
-    return ""
-
-
-def _column_type_is_numeric(column_type: str) -> bool:
-    lowered = str(column_type or "").strip().lower()
-    if not lowered:
-        return False
-    return any(token in lowered for token in ("int", "float", "decimal", "numeric", "double"))
-
-
-def _result_shape_profile(execution_result: Any) -> dict[str, Any]:
-    if not isinstance(execution_result, dict):
-        return {
-            "row_count": 0,
-            "columns": [],
-            "numeric_columns": [],
-            "time_like_columns": [],
-            "has_category_value_shape": False,
-        }
-    rows = execution_result.get("rows", [])
-    columns = execution_result.get("columns", [])
-    if not isinstance(rows, list):
-        rows = []
-    if not isinstance(columns, list):
-        columns = []
-    column_specs = [
-        (raw_col, _column_name(raw_col))
-        for raw_col in columns
-        if _column_name(raw_col)
-    ]
-    normalized_columns = [name for _, name in column_specs]
-    if not rows:
-        return {
-            "row_count": 0,
-            "columns": normalized_columns,
-            "numeric_columns": [],
-            "time_like_columns": [],
-            "has_category_value_shape": False,
-        }
-
-    sample_rows = [row for row in rows if isinstance(row, dict)][:25]
-    numeric_columns: list[str] = []
-    time_like_columns: list[str] = []
-    for raw_col, col_name in column_specs:
-        if not col_name:
-            continue
-        lowered = col_name.lower()
-        if _column_type_is_numeric(_column_type(raw_col)):
-            numeric_columns.append(col_name)
-        else:
-            observed = [row.get(col_name) for row in sample_rows if col_name in row and row.get(col_name) is not None]
-            if observed and all(_is_numeric_value(value) for value in observed):
-                numeric_columns.append(col_name)
-        if lowered in {"ds", "date", "period", "timestamp", "datetime"} or any(
-            token in lowered for token in ("date", "time", "month", "week", "year", "quarter")
-        ):
-            time_like_columns.append(col_name)
-
-    row_count = int(execution_result.get("row_count") or len(rows))
-    has_category_value_shape = bool(
-        row_count >= 1
-        and len(numeric_columns) >= 1
-        and len(normalized_columns) > len(numeric_columns)
-    )
-    return {
-        "row_count": row_count,
-        "columns": normalized_columns,
-        "numeric_columns": numeric_columns,
-        "time_like_columns": time_like_columns,
-        "has_category_value_shape": has_category_value_shape,
-    }
-
-
 def _normalize_chart_type(chart_type: str) -> str:
     normalized = str(chart_type or "").strip().lower()
     mapping = {
         "grouped_bar": "bar",
+        "bar_grouped": "bar_grouped",
+        "stacked_bar": "bar_stacked",
+        "bar_stacked": "bar_stacked",
         "scalar": "card",
         "number": "card",
         "kpi": "card",
         "card": "card",
         "bar": "bar",
         "line": "line",
+        "line_multi": "line_multi",
+        "multi_line": "line_multi",
+        "combo_line_bar": "combo_line_bar",
+        "combo": "combo_line_bar",
+        "area": "area",
+        "pie": "pie",
         "table": "table",
         "scatter": "scatter",
         "histogram": "histogram",
+        "map": "map",
+        "heatmap": "heatmap",
+        "cumulative_line": "cumulative_line",
     }
     return mapping.get(normalized, "")
-
-
-def _shape_supports(chart_type: str, *, shape: dict[str, Any], single_value: bool) -> bool:
-    normalized = _normalize_chart_type(chart_type)
-    row_count = int(shape.get("row_count", 0) or 0)
-    numeric_count = len(shape.get("numeric_columns", []))
-    time_count = len(shape.get("time_like_columns", []))
-    has_category_value_shape = bool(shape.get("has_category_value_shape"))
-    if normalized == "card":
-        return single_value
-    if normalized == "scatter":
-        return row_count > 1 and numeric_count >= 2 and not has_category_value_shape
-    if normalized == "line":
-        return row_count >= 1 and time_count >= 1 and numeric_count >= 1
-    if normalized == "histogram":
-        return row_count > 1 and numeric_count >= 1 and not has_category_value_shape
-    if normalized == "bar":
-        return row_count >= 1 and has_category_value_shape
-    if normalized == "table":
-        return row_count >= 0
-    return False
-
-
-def _validated_chart_choice(
-    *,
-    upstream_chart_type: str,
-    shape: dict[str, Any],
-    single_value: bool,
-    relationship_requested: bool,
-    time_series_requested: bool,
-    distribution_requested: bool,
-    ranking_dimension_shape: bool,
-) -> tuple[str, str]:
-    upstream = _normalize_chart_type(upstream_chart_type)
-    row_count = int(shape.get("row_count", 0) or 0)
-    numeric_count = len(shape.get("numeric_columns", []))
-    time_count = len(shape.get("time_like_columns", []))
-    has_category_value_shape = bool(shape.get("has_category_value_shape"))
-
-    # Preserve explicit upstream chart when valid (except table, which is a low-information fallback).
-    if upstream and upstream != "table" and _shape_supports(upstream, shape=shape, single_value=single_value):
-        return upstream, "upstream_preserved_validated"
-
-    reason_prefix = f"adjusted_from_{upstream}:" if upstream and upstream != "table" else ""
-
-    # Enforce strict priority: correlation -> time_series -> distribution -> category comparison -> card.
-    if relationship_requested and _shape_supports("scatter", shape=shape, single_value=single_value):
-        return "scatter", f"{reason_prefix}priority_correlation_scatter"
-    if time_series_requested and _shape_supports("line", shape=shape, single_value=single_value):
-        return "line", f"{reason_prefix}priority_time_series_line"
-    if distribution_requested and _shape_supports("histogram", shape=shape, single_value=single_value):
-        return "histogram", f"{reason_prefix}priority_distribution_histogram"
-    if (ranking_dimension_shape or has_category_value_shape) and _shape_supports("bar", shape=shape, single_value=single_value):
-        return "bar", f"{reason_prefix}priority_category_comparison_bar"
-    if _shape_supports("card", shape=shape, single_value=single_value):
-        return "card", f"{reason_prefix}priority_single_value_card"
-
-    # Shape-based fallback rules.
-    if _shape_supports("line", shape=shape, single_value=single_value):
-        return "line", f"{reason_prefix}shape_fallback_line"
-    if _shape_supports("scatter", shape=shape, single_value=single_value):
-        return "scatter", f"{reason_prefix}shape_fallback_scatter"
-    if _shape_supports("histogram", shape=shape, single_value=single_value):
-        return "histogram", f"{reason_prefix}shape_fallback_histogram"
-    if _shape_supports("bar", shape=shape, single_value=single_value):
-        return "bar", f"{reason_prefix}shape_fallback_bar"
-    if _shape_supports("card", shape=shape, single_value=single_value):
-        return "card", f"{reason_prefix}shape_fallback_card"
-    if row_count == 0:
-        return "", ""
-    if numeric_count >= 1 or time_count >= 1:
-        return "table", "safe_fallback_table"
-    return "table", "safe_fallback_table"
 
 
 def _ranking_with_dimension(intent_payload: dict[str, Any]) -> bool:
@@ -245,68 +84,12 @@ def _ranking_with_dimension(intent_payload: dict[str, Any]) -> bool:
     return any(str(dim).strip() for dim in dimensions)
 
 
-def _relationship_comparison_shape(intent_payload: dict[str, Any]) -> bool:
-    if not isinstance(intent_payload, dict):
-        return False
-    operations = {
-        str(op).strip().lower()
-        for op in (intent_payload.get("operations", []) or [])
-        if str(op).strip()
-    }
-    if "comparison" not in operations:
-        return False
-    dimensions = intent_payload.get("dimensions", []) if isinstance(intent_payload.get("dimensions"), list) else []
-    if any(str(dim).strip() for dim in dimensions):
-        return False
-
-    metrics_payload = intent_payload.get("metrics", [])
-    metric_count = 0
-    if isinstance(metrics_payload, list):
-        for metric in metrics_payload:
-            if isinstance(metric, dict):
-                column = str(metric.get("column", "")).strip()
-                raw_aggregation = metric.get("aggregation")
-                aggregation = str(raw_aggregation).strip().upper() if raw_aggregation is not None else ""
-                if column and not aggregation:
-                    metric_count += 1
-            elif isinstance(metric, str) and metric.strip():
-                metric_count += 1
-
-    if metric_count >= 2:
-        return True
-
-    metric_specs_payload = intent_payload.get("metric_specs", [])
-    if isinstance(metric_specs_payload, list):
-        non_agg_specs = 0
-        for metric in metric_specs_payload:
-            if not isinstance(metric, dict):
-                continue
-            column = str(metric.get("column", "")).strip()
-            raw_aggregation = metric.get("aggregation")
-            aggregation = str(raw_aggregation).strip().upper() if raw_aggregation is not None else ""
-            if column and not aggregation:
-                non_agg_specs += 1
-        if non_agg_specs >= 2:
-            return True
-    return False
-
-
 def _sql_has_agg_limit_without_group_by(sql_query: str) -> bool:
     sql_upper = str(sql_query or "").upper()
     has_limit = " LIMIT " in f" {sql_upper} "
     has_group_by = " GROUP BY " in f" {sql_upper} "
     has_aggregate = any(token in sql_upper for token in ("SUM(", "AVG(", "COUNT(", "MIN(", "MAX("))
     return has_limit and has_aggregate and not has_group_by
-
-
-def _time_grouping_intent(intent_payload: dict[str, Any]) -> bool:
-    if not isinstance(intent_payload, dict):
-        return False
-    granularity = str(intent_payload.get("time_granularity", "")).strip().lower()
-    detected = bool(intent_payload.get("time_grouping_detected"))
-    if granularity in {"day", "week", "month", "quarter", "year"}:
-        return True
-    return detected
 
 
 def _looks_predictive_query(query: str) -> bool:
@@ -324,13 +107,6 @@ def _looks_predictive_query(query: str) -> bool:
         r"\bnext\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b",
     )
     return any(re.search(pattern, normalized) for pattern in predictive_patterns)
-
-
-def _looks_time_series_query(query: str) -> bool:
-    normalized = str(query or "").strip().lower()
-    if not normalized:
-        return False
-    return bool(re.search(r"\b(per|by)\s+(day|week|month|quarter|year|hour)\b", normalized))
 
 
 def _root_cause_for(stage: str, payload: dict[str, Any] | None = None) -> tuple[str, str, str]:
@@ -1060,8 +836,13 @@ def _run_downstream_stage(
     while True:
         try:
             attempt_started_perf = time.perf_counter()
+            downstream_intent_payload = (
+                query_execution_result.get("normalized_intent")
+                if isinstance(query_execution_result.get("normalized_intent"), dict)
+                else query_execution_result.get("validated_intent")
+            )
             next_step, downstream_result = execute_downstream_route(
-                intent=query_execution_result["validated_intent"],
+                intent=downstream_intent_payload,
                 sql_query=str(query_execution_result.get("sql_query", "")),
                 execution_result=query_execution_result.get("execution_result"),
                 config=config,
@@ -1121,89 +902,22 @@ def _run_downstream_stage(
                     or downstream_result.get("reason")
                     or ""
                 ).strip()
-            time_grouping_shape = _time_grouping_intent(
-                query_execution_result.get("normalized_intent", {})
-                if isinstance(query_execution_result.get("normalized_intent"), dict)
-                else {}
-            )
-            ranking_dimension_shape = _ranking_with_dimension(
-                query_execution_result.get("normalized_intent", {})
-                if isinstance(query_execution_result.get("normalized_intent"), dict)
-                else {}
-            )
-            relationship_comparison_shape = _relationship_comparison_shape(
-                query_execution_result.get("normalized_intent", {})
-                if isinstance(query_execution_result.get("normalized_intent"), dict)
-                else {}
-            )
-            distribution_shape = "distribution" in {
-                str(op).strip().lower()
-                for op in (
-                    (
-                        query_execution_result.get("normalized_intent", {})
-                        if isinstance(query_execution_result.get("normalized_intent"), dict)
-                        else {}
-                    ).get("operations", [])
-                    or []
-                )
-                if str(op).strip()
-            }
-            time_series_query = _looks_time_series_query(str(query_execution_result.get("query", "")))
             reason_chart_not_generated = ""
             visualization_status = "success"
             degraded = False
             degradation_reason = ""
             if expected_next_step == "metabase":
                 preview = _extract_result_preview(query_execution_result.get("execution_result"))
-                shape = _result_shape_profile(query_execution_result.get("execution_result"))
-                single_value_shape = _single_value_result_shape(query_execution_result.get("execution_result"))
-                normalized_intent_payload = (
-                    query_execution_result.get("normalized_intent", {})
-                    if isinstance(query_execution_result.get("normalized_intent"), dict)
-                    else {}
-                )
-                operations = {
-                    str(op).strip().lower()
-                    for op in (normalized_intent_payload.get("operations", []) or [])
-                    if str(op).strip()
-                }
-                relationship_requested = bool(
-                    relationship_comparison_shape
-                    or str(normalized_intent_payload.get("analysis_mode", "")).strip().lower() == "relationship"
-                    or str(normalized_intent_payload.get("intent", "")).strip().lower() in {"correlation", "relationship"}
-                    or "relationship" in operations
-                )
-                time_series_requested = bool(
-                    time_grouping_shape
-                    or time_series_query
-                    or str(normalized_intent_payload.get("intent", "")).strip().lower() == "time_series"
-                    or "time_grouping" in operations
-                )
-                distribution_requested = bool(distribution_shape)
                 if preview.get("row_count", 0) == 0:
                     reason_chart_not_generated = "empty_result_set"
-                if not reason_chart_not_generated:
-                    selected_chart_type, reason_chart_selected = _validated_chart_choice(
-                        upstream_chart_type=selected_chart_type,
-                        shape=shape,
-                        single_value=single_value_shape,
-                        relationship_requested=relationship_requested,
-                        time_series_requested=time_series_requested,
-                        distribution_requested=distribution_requested,
-                        ranking_dimension_shape=ranking_dimension_shape,
-                    )
+                selected_chart_type = _normalize_chart_type(selected_chart_type)
                 if not selected_chart_type and not reason_chart_not_generated:
-                    reason_chart_not_generated = "missing_dimension_measure_shape"
+                    reason_chart_not_generated = "deferred_to_visualization_service_chart_type_selector"
                 context.log.info(
-                    "chart_selected=%s fallback_applied=%s reason=%s upstream=%s",
+                    "chart_selected=%s reason=%s upstream=%s",
                     selected_chart_type or "none",
-                    bool(reason_chart_selected and reason_chart_selected.startswith("shape_fallback")),
                     reason_chart_selected or reason_chart_not_generated or "none",
-                    _normalize_chart_type(str(
-                        (downstream_result or {}).get("chart_type")
-                        if isinstance(downstream_result, dict)
-                        else ""
-                    )) or "none",
+                    selected_chart_type or "none",
                 )
             else:
                 forecast_meta = (
@@ -1218,10 +932,7 @@ def _run_downstream_stage(
                     if degraded
                     else ""
                 )
-                selected_chart_type = _normalize_chart_type(selected_chart_type) or "line"
-                reason_chart_selected = reason_chart_selected or (
-                    "forecast_actual_overlay" if forecast_available else "historical_only_fallback"
-                )
+                selected_chart_type = _normalize_chart_type(selected_chart_type)
                 if not forecast_available:
                     reason_chart_not_generated = (
                         degradation_reason
@@ -1335,7 +1046,7 @@ def _run_downstream_stage(
                             },
                         },
                         "visualization_payload": {
-                            "chart_type": "line",
+                            "chart_type": "",
                             "mode": "historical_only",
                             "message": "Forecast unavailable",
                             "series": (
@@ -1367,14 +1078,14 @@ def _run_downstream_stage(
                 "errors": ([{"type": error_type, "message": str(exc)}] if not is_forecast_route else []),
                 "debug_metadata": {"retry_count": retry_count},
                 "visualization_status": "failed" if not is_forecast_route else "degraded",
-                "selected_chart_type": "" if not is_forecast_route else "line",
-                "reason_chart_selected": "" if not is_forecast_route else "historical_only_fallback",
+                "selected_chart_type": "",
+                "reason_chart_selected": "",
                 "reason_chart_not_generated": "visualization_service_failure" if not is_forecast_route else str(error_type),
                 "visualization_payload_preview": (
                     None
                     if not is_forecast_route
                     else {
-                        "chart_type": "line",
+                        "chart_type": "",
                         "mode": "historical_only",
                         "message": "Forecast unavailable",
                         "series": (
@@ -2138,7 +1849,7 @@ def pipeline_result_asset(
                 result=forecasting_asset,
                 final_output={
                     "visualization_status": forecasting_asset.get("visualization_status", "success"),
-                    "selected_chart_type": forecasting_asset.get("selected_chart_type", "line"),
+                    "selected_chart_type": forecasting_asset.get("selected_chart_type", ""),
                     "reason_chart_selected": forecasting_asset.get("reason_chart_selected", ""),
                     "reason_chart_not_generated": forecasting_asset.get("reason_chart_not_generated", ""),
                     "visualization_payload_preview": predictive_visualization_payload,
@@ -2182,7 +1893,7 @@ def pipeline_result_asset(
             "downstream_result": predictive_visualization_payload
             if isinstance(predictive_visualization_payload, dict)
             else {
-                "chart_type": "line",
+                "chart_type": "",
                 "mode": "historical_only",
                 "message": "Forecast unavailable",
                 "series": [],
@@ -2190,7 +1901,7 @@ def pipeline_result_asset(
                 "fallback_reason": "missing_visualization_payload",
             },
             "visualization_status": forecasting_asset.get("visualization_status", "success"),
-            "selected_chart_type": forecasting_asset.get("selected_chart_type", "line"),
+            "selected_chart_type": forecasting_asset.get("selected_chart_type", ""),
             "reason_chart_selected": forecasting_asset.get("reason_chart_selected", ""),
             "reason_chart_not_generated": forecasting_asset.get("reason_chart_not_generated", ""),
             "visualization_payload_preview": predictive_visualization_payload,

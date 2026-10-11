@@ -16,11 +16,8 @@ import os
 from unittest.mock import Mock, MagicMock, patch
 from clickhouse_driver.errors import Error as ClickHouseError
 
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from utils.create_silver_tables import SilverTableCreator
-from models.silver_schema import (
+from shared.utils.create_silver_tables import SilverTableCreator
+from shared.models.silver_schema import (
     SilverTableSchema,
     SilverColumnDefinition,
     DataType
@@ -625,7 +622,7 @@ class TestSchemaParser:
 class TestClientCreation:
     """Test ClickHouse client creation from environment."""
     
-    @patch('utils.create_silver_tables.Client')
+    @patch('shared.utils.create_silver_tables.Client')
     def test_create_client_from_env_defaults(self, mock_client_class):
         """Test client creation with default environment variables."""
         # Arrange
@@ -645,7 +642,7 @@ class TestClientCreation:
         'CLICKHOUSE_PASSWORD': 'test-pass',
         'CLICKHOUSE_DATABASE': 'test-db'
     })
-    @patch('utils.create_silver_tables.Client')
+    @patch('shared.utils.create_silver_tables.Client')
     def test_create_client_from_env_custom(self, mock_client_class):
         """Test client creation with custom environment variables."""
         # Arrange

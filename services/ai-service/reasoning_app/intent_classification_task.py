@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, TypedDict
 
 from reasoning_app.llm_intent_client import classify_question
-from shared.input_classifier import classify_input
+from shared.input_classifier import classify_input, detect_shortform_analytical_semantics
 from shared.pipeline_trace import make_attempt
 from shared.stage_contract import stage_allows_progress
 
@@ -147,6 +147,10 @@ _ANALYTICAL_KEYWORDS = (
     "compare",
     "top",
     "bottom",
+    "highest",
+    "lowest",
+    "best",
+    "worst",
 )
 
 _PREDICTIVE_KEYWORDS = (
@@ -224,6 +228,7 @@ def _detect_rule_based_analytical(text: str) -> dict[str, Any]:
             "matched_keywords": [],
             "matched_grouping_keywords": [],
             "matched_patterns": [],
+            "shortform_semantics": {},
         }
 
     matched_keywords = [
@@ -241,6 +246,7 @@ def _detect_rule_based_analytical(text: str) -> dict[str, Any]:
         for pattern in _STRONG_ANALYTICAL_PATTERNS
         if re.search(pattern, normalized)
     ]
+    shortform_semantics = detect_shortform_analytical_semantics(normalized)
 
     has_metric_signal = bool(matched_keywords)
     has_group_signal = bool(matched_grouping_keywords)
@@ -248,12 +254,14 @@ def _detect_rule_based_analytical(text: str) -> dict[str, Any]:
         matched_patterns
         or has_metric_signal
         or (has_group_signal and has_metric_signal)
+        or bool(shortform_semantics.get("detected"))
     )
     return {
         "is_analytical": is_analytical,
         "matched_keywords": matched_keywords,
         "matched_grouping_keywords": matched_grouping_keywords,
         "matched_patterns": matched_patterns,
+        "shortform_semantics": shortform_semantics,
     }
 
 
@@ -447,6 +455,7 @@ def run_intent_classification(
         detected=rule_based_detected,
         matched_keywords=rule_detection.get("matched_keywords", []),
         matched_grouping_keywords=rule_detection.get("matched_grouping_keywords", []),
+        shortform_semantics=rule_detection.get("shortform_semantics", {}),
     )
 
     attempts.append(
@@ -460,6 +469,7 @@ def run_intent_classification(
                 "matched_predictive_keywords": predictive_rule_detection.get("matched_keywords", []),
                 "matched_grouping_keywords": rule_detection.get("matched_grouping_keywords", []),
                 "matched_patterns": rule_detection.get("matched_patterns", []),
+                "shortform_semantics": rule_detection.get("shortform_semantics", {}),
                 "input_classifier_label": pre_label,
             },
             success=True,
@@ -514,6 +524,7 @@ def run_intent_classification(
                 "classification_source": "rule_based_intent_detector",
                 "rule_based": rule_detection,
                 "predictive_rule_based": predictive_rule_detection,
+                "shortform_semantics": rule_detection.get("shortform_semantics", {}),
             },
         })
 

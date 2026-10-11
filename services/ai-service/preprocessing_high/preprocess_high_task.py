@@ -22,6 +22,7 @@ from preprocessing_high.error_handler import (
 )
 from preprocessing_high.llm_client import (
     FORECAST_RESERVED_TERMS,
+    _is_correction_structure_safe,
     build_deterministic_schema_validation_result,
     correct_query_terms,
     validate_query_schema_usage,
@@ -34,8 +35,10 @@ from preprocessing_high.schemas import (
     build_preprocess_high_rejected_result,
     build_preprocess_high_success_result,
 )
+from preprocessing_high.value_index import load_value_index
 from shared.confidence import schema_confidence
 from shared.pipeline_trace import make_attempt
+from shared.bi_semantic_layer import build_nl_semantic_metadata
 
 
 def _utc_now() -> str:
@@ -138,6 +141,18 @@ _BUSINESS_TERM_NORMALIZATION = {
     "influence": "relationship",
     "relation": "relationship",
 }
+
+_CONTINUABLE_SCHEMA_STATUSES = {
+    "valid",
+    "valid_with_value_matches",
+    "valid_with_llm_assist",
+    "degraded_uncertain",
+    "skipped_for_forecasting",
+}
+
+
+def _schema_status_is_continuable(status: str) -> bool:
+    return str(status or "").strip().lower() in _CONTINUABLE_SCHEMA_STATUSES
 
 
 def _schema_token_vocabulary(loaded_schema) -> set[str]:
@@ -451,6 +466,17 @@ def _filter_resolved_diagnostics(
     return filtered
 
 
+def _guard_structural_correction(
+    *,
+    source_query: str,
+    candidate_query: str,
+    corrections: list[dict[str, str]] | None = None,
+) -> tuple[str, list[dict[str, str]]]:
+    if _is_correction_structure_safe(source_query, candidate_query):
+        return candidate_query, list(corrections or [])
+    return source_query, []
+
+
 def run_preprocess_high(
     cleaned_text: str,
     user_id: str,
@@ -466,6 +492,7 @@ def run_preprocess_high(
     final_query = ""
     loaded_schema = None
     validation_result = None
+    value_index: dict[str, list[dict[str, object]]] = {}
     diagnostics: dict[str, object] = {}
     attempts: list[dict[str, object]] = []
     stage_started_at = _utc_now()
@@ -483,8 +510,16 @@ def run_preprocess_high(
                 log_event=_log_event,
                 dataset_scope=dataset_scope,
             )
+            value_index = load_value_index(
+                loaded_schema=loaded_schema,
+                config=config,
+                logger=logger,
+                log_event=_log_event,
+            )
             term_corrections: list[dict[str, str]] = []
             user_friendly_messages: list[str] = []
+
+            nl_semantics = build_nl_semantic_metadata(normalized_text)
 
             skipped_schema_terms: list[str] = []
             if normalized_route == "forecasting":
@@ -505,13 +540,30 @@ def run_preprocess_high(
                     query=normalized_text,
                     loaded_schema=loaded_schema,
                 )
+                pre_corrected_query, phrase_corrections = _guard_structural_correction(
+                    source_query=normalized_text,
+                    candidate_query=pre_corrected_query,
+                    corrections=phrase_corrections,
+                )
+                term_corrections.extend(phrase_corrections)
+
                 pre_corrected_query, fuzzy_corrections = _apply_fuzzy_token_corrections(
                     query=pre_corrected_query,
                     loaded_schema=loaded_schema,
                 )
-                term_corrections.extend(phrase_corrections)
-                pre_corrected_query, semantic_corrections = _apply_business_term_normalization(pre_corrected_query)
+                pre_corrected_query, fuzzy_corrections = _guard_structural_correction(
+                    source_query=normalized_text,
+                    candidate_query=pre_corrected_query,
+                    corrections=fuzzy_corrections,
+                )
                 term_corrections.extend(fuzzy_corrections)
+
+                pre_corrected_query, semantic_corrections = _apply_business_term_normalization(pre_corrected_query)
+                pre_corrected_query, semantic_corrections = _guard_structural_correction(
+                    source_query=normalized_text,
+                    candidate_query=pre_corrected_query,
+                    corrections=semantic_corrections,
+                )
                 term_corrections.extend(semantic_corrections)
 
                 final_query = correct_query_terms(
@@ -521,12 +573,15 @@ def run_preprocess_high(
                     logger=logger,
                     log_event=_log_event,
                 )
+                if not _is_correction_structure_safe(normalized_text, final_query):
+                    final_query = normalized_text
                 validation_result = validate_query_schema_usage(
                     corrected_query=final_query,
                     loaded_schema=loaded_schema,
                     config=config,
                     logger=logger,
                     log_event=_log_event,
+                    value_index=value_index,
                 )
 
             diagnostics = build_schema_resolution_diagnostics(
@@ -535,6 +590,7 @@ def run_preprocess_high(
                 loaded_schema=loaded_schema,
                 validation_result=validation_result,
                 ignored_terms=set(skipped_schema_terms),
+                value_index=value_index,
             )
             bound_table = str((dataset_scope or {}).get("table_name", "")).strip()
             if bound_table:
@@ -549,11 +605,18 @@ def run_preprocess_high(
                             bound_columns = table_columns
                             diagnostics["selected_table"] = table_name
                             break
-                diagnostics["selected_columns"] = [
+                scoped_columns = [
                     str(column.get("name", "")).strip()
                     for column in bound_columns
                     if isinstance(column, dict) and str(column.get("name", "")).strip()
                 ]
+                explicit_selected_columns = [
+                    str(column_name).strip()
+                    for column_name in diagnostics.get("selected_columns", [])
+                    if str(column_name).strip()
+                ]
+                diagnostics["selected_columns_in_scope"] = scoped_columns
+                diagnostics["selected_columns"] = explicit_selected_columns
             if normalized_route == "forecasting":
                 diagnostics["schema_validation_status"] = "skipped_for_forecasting"
                 diagnostics["unresolved_terms"] = []
@@ -592,6 +655,12 @@ def run_preprocess_high(
                         recovery_query = semantic_recovery_query
                         recovery_corrections.extend(semantic_recovery)
 
+                    recovery_query, recovery_corrections = _guard_structural_correction(
+                        source_query=normalized_text,
+                        candidate_query=recovery_query,
+                        corrections=recovery_corrections,
+                    )
+
                     if recovery_query == final_query:
                         break
 
@@ -603,6 +672,7 @@ def run_preprocess_high(
                         config=config,
                         logger=logger,
                         log_event=_log_event,
+                        value_index=value_index,
                     )
                     diagnostics = build_schema_resolution_diagnostics(
                         original_query=normalized_text,
@@ -610,6 +680,7 @@ def run_preprocess_high(
                         loaded_schema=loaded_schema,
                         validation_result=validation_result,
                         ignored_terms=set(skipped_schema_terms),
+                        value_index=value_index,
                     )
                     term_corrections.extend(recovery_corrections)
                     unresolved_terms = [str(term) for term in diagnostics.get("unresolved_terms", []) if str(term)]
@@ -621,12 +692,19 @@ def run_preprocess_high(
             )
 
             schema_validation_status = str(diagnostics.get("schema_validation_status", "unknown")).strip().lower()
-            has_schema_validation_issue = schema_validation_status != "valid" or not bool(
-                validation_result.get("is_valid", False)
+            has_schema_validation_issue = (
+                not _schema_status_is_continuable(schema_validation_status)
+                or schema_validation_status == "degraded_uncertain"
+                or not bool(validation_result.get("is_valid", False))
             )
             if normalized_route == "forecasting":
                 has_schema_validation_issue = False
 
+            diagnostics_warnings = [
+                warning
+                for warning in diagnostics.get("preprocessing_warnings", [])
+                if isinstance(warning, dict)
+            ]
             deferred_schema_warnings: list[dict[str, str]] = []
             if has_schema_validation_issue:
                 unresolved_terms = [str(term) for term in diagnostics.get("unresolved_terms", []) if str(term)]
@@ -683,7 +761,7 @@ def run_preprocess_high(
                 message = str(correction.get("message", "")).strip()
                 if message and message not in user_friendly_messages:
                     user_friendly_messages.append(message)
-            for warning in deferred_schema_warnings:
+            for warning in diagnostics_warnings + deferred_schema_warnings:
                 warning_message = str(warning.get("message", "")).strip()
                 if warning_message and warning_message not in user_friendly_messages:
                     user_friendly_messages.append(warning_message)
@@ -732,7 +810,7 @@ def run_preprocess_high(
             success_payload.update(diagnostics)
             success_payload["attempts"] = attempts
             success_payload["attempts_count"] = len(attempts)
-            success_payload["warnings"] = deferred_schema_warnings
+            success_payload["warnings"] = diagnostics_warnings + deferred_schema_warnings
             success_payload["errors"] = []
             success_payload["term_corrections"] = term_corrections
             success_payload["user_friendly_messages"] = user_friendly_messages
@@ -746,9 +824,17 @@ def run_preprocess_high(
                 "dataset_scope": dataset_scope or {},
                 "reason_for_selection": "schema_validation_deferred" if deferred_schema_warnings else "schema_validation_passed",
                 "auto_recovery_applied": bool(term_corrections),
+                "nl_semantics": nl_semantics,
+                "value_index_enabled": bool(config.value_index_enabled),
+                "value_index_values": len(value_index),
+                "value_index_matches": len(success_payload.get("value_matches", []) or []),
             }
             success_payload["route"] = normalized_route
             success_payload["skipped_schema_terms"] = skipped_schema_terms
+            success_payload["semantic_filters"] = nl_semantics.get("semantic_filters", [])
+            success_payload["canonical_verbs"] = nl_semantics.get("canonical_verbs", [])
+            success_payload["analytical_semantics"] = nl_semantics.get("analytical_semantics", [])
+            success_payload["analytical_semantic_hints"] = nl_semantics.get("analytical_semantic_hints", {})
             success_payload["confidence"] = schema_confidence(success_payload)
             return success_payload
         except PreprocessHighMissingColumnError as exc:
@@ -853,12 +939,13 @@ def run_preprocess_high(
                     corrected_query=fallback_query,
                     loaded_schema=loaded_schema,
                     validation_result=fallback_validation_result,
+                    value_index=value_index,
                 )
                 fallback_schema_status = str(
                     fallback_diagnostics.get("schema_validation_status", "unknown")
                 ).strip().lower()
                 fallback_is_valid = bool(fallback_validation_result.get("is_valid", False))
-                fallback_success = fallback_is_valid and fallback_schema_status == "valid"
+                fallback_success = fallback_is_valid and _schema_status_is_continuable(fallback_schema_status)
                 attempts.append(
                     make_attempt(
                         attempt_number=len(attempts) + 1,
@@ -882,6 +969,12 @@ def run_preprocess_high(
                 )
 
                 if fallback_success:
+                    fallback_deferred = fallback_schema_status == "degraded_uncertain"
+                    fallback_diagnostics_warnings = [
+                        warning
+                        for warning in fallback_diagnostics.get("preprocessing_warnings", [])
+                        if isinstance(warning, dict)
+                    ]
                     success_payload = build_preprocess_high_success_result(
                         final_query=fallback_query,
                         schema_used=loaded_schema.schema,
@@ -889,13 +982,15 @@ def run_preprocess_high(
                         derivable_columns=fallback_validation_result.get("derivable_columns", []),
                         invalid_mappings=fallback_validation_result.get("invalid_mappings", []),
                     )
-                    success_payload["degraded"] = False
-                    success_payload["deferred"] = False
-                    success_payload["degradation_reason"] = ""
+                    success_payload["degraded"] = fallback_deferred
+                    success_payload["deferred"] = fallback_deferred
+                    success_payload["degradation_reason"] = (
+                        "schema_validation_deferred" if fallback_deferred else ""
+                    )
                     success_payload.update(fallback_diagnostics)
                     success_payload["attempts"] = attempts
                     success_payload["attempts_count"] = len(attempts)
-                    success_payload["warnings"] = [
+                    success_payload["warnings"] = fallback_diagnostics_warnings + [
                         {
                             "type": "schema_validation_llm_fallback",
                             "message": (
@@ -917,6 +1012,9 @@ def run_preprocess_high(
                         "schema_tables": len(loaded_schema.schema.get("tables", [])),
                         "dataset_scope": dataset_scope or {},
                         "reason_for_selection": "deterministic_schema_fallback",
+                        "value_index_enabled": bool(config.value_index_enabled),
+                        "value_index_values": len(value_index),
+                        "value_index_matches": len(success_payload.get("value_matches", []) or []),
                     }
                     success_payload["status"] = "degraded"
                     success_payload["degraded"] = True

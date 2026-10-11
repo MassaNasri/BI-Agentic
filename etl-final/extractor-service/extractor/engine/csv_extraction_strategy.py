@@ -17,6 +17,7 @@ Requirements:
 """
 
 import pandas as pd
+from contextlib import closing
 from typing import Dict, Any, Optional, List
 import os
 from datetime import datetime, timezone
@@ -254,10 +255,11 @@ class CSVExtractionStrategy(ExtractionStrategy):
             if skip_rows > 0:
                 read_kwargs["skiprows"] = skip_rows
 
-            for chunk in pd.read_csv(file_path, **read_kwargs):
-                rows = chunk.to_dict("records")
-                if rows:
-                    yield rows
+            with closing(pd.read_csv(file_path, **read_kwargs)) as reader:
+                for chunk in reader:
+                    rows = chunk.to_dict("records")
+                    if rows:
+                        yield rows
 
         try:
             yield from _read_chunks(encoding)
@@ -404,18 +406,19 @@ class CSVExtractionStrategy(ExtractionStrategy):
             rows_window: List[Dict[str, Any]] = []
             consumed = 0
 
-            for chunk in pd.read_csv(file_path, **read_kwargs):
-                chunk_rows = chunk.to_dict("records")
-                if consumed + len(chunk_rows) <= offset:
-                    consumed += len(chunk_rows)
-                    continue
+            with closing(pd.read_csv(file_path, **read_kwargs)) as reader:
+                for chunk in reader:
+                    chunk_rows = chunk.to_dict("records")
+                    if consumed + len(chunk_rows) <= offset:
+                        consumed += len(chunk_rows)
+                        continue
 
-                start_idx = max(0, offset - consumed)
-                for row in chunk_rows[start_idx:]:
-                    rows_window.append(row)
-                    if len(rows_window) >= limit:
-                        return rows_window
-                consumed += len(chunk_rows)
+                    start_idx = max(0, offset - consumed)
+                    for row in chunk_rows[start_idx:]:
+                        rows_window.append(row)
+                        if len(rows_window) >= limit:
+                            return rows_window
+                    consumed += len(chunk_rows)
 
             return rows_window
 

@@ -1,6 +1,6 @@
 const adjustmentClassByType = {
-  derived_field: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200',
-  mapped_column: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200',
+  derived_field: 'bg-amber-500/20 text-amber-400 dark:bg-amber-400/40 dark:text-amber-400',
+  mapped_column: 'bg-amber-500/20 text-amber-400 dark:bg-amber-400/40 dark:text-amber-400',
 }
 
 function Pill({ text, className }) {
@@ -32,7 +32,7 @@ function SchemaUsageViewer({
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">
           Tables Used
         </p>
         {tables.length > 0 ? (
@@ -46,12 +46,12 @@ function SchemaUsageViewer({
             ))}
           </div>
         ) : (
-          <p className="text-sm text-slate-500 dark:text-slate-400">No table references detected.</p>
+          <p className="text-sm text-brand-300/80 dark:text-brand-300/60">No table references detected.</p>
         )}
       </div>
 
       <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">
           Columns Used
         </p>
         {columns.length > 0 ? (
@@ -65,12 +65,12 @@ function SchemaUsageViewer({
             ))}
           </div>
         ) : (
-          <p className="text-sm text-slate-500 dark:text-slate-400">No column references detected.</p>
+          <p className="text-sm text-brand-300/80 dark:text-brand-300/60">No column references detected.</p>
         )}
       </div>
 
       <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">
           Schema Adjustments
         </p>
         {Array.isArray(adjustments) && adjustments.length > 0 ? (
@@ -78,20 +78,20 @@ function SchemaUsageViewer({
             {adjustments.map((adjustment, index) => (
               <div
                 key={`${adjustment.type}-${index}`}
-                className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/40"
+                className="rounded-lg border border-brand-700/30 bg-[var(--c-card-bg)] p-3 dark:border-brand-700/40 dark:bg-brand-950/40"
               >
                 <div className="flex items-center gap-2 text-sm">
                   <Pill
                     text={String(adjustment.type || 'mapped_column').replace('_', ' ')}
                     className={adjustmentClassByType[adjustment.type] || adjustmentClassByType.mapped_column}
                   />
-                  <span className="text-slate-700 dark:text-slate-200">{adjustment.description}</span>
+                  <span className="text-brand-300 dark:text-brand-200">{adjustment.description}</span>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-slate-500 dark:text-slate-400">No schema adjustments were required.</p>
+          <p className="text-sm text-brand-300/80 dark:text-brand-300/60">No schema adjustments were required.</p>
         )}
       </div>
     </div>

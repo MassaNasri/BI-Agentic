@@ -1,0 +1,492 @@
+{
+  "timestamp_utc": "2026-09-13T16:35:52.848060+00:00",
+  "scope": "Local runtime smoke and active business-state verification; not E2E or dependency outage/load tests",
+  "containers": [
+    {
+      "name": "phase0-metabase-restore",
+      "service": null,
+      "project": null,
+      "status": "running",
+      "health": "none",
+      "image_id": "sha256:f8ad50bba07c555e103097218e9a8b4edbd64311e754072d148578cd54c5bd9a"
+    },
+    {
+      "name": "notification-expiry-worker",
+      "service": "notification-expiry-worker",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "none",
+      "image_id": "sha256:d109465a1637adf0a2ffc55725e3487ba56d3f67d84141a04d1647d45a8ebab4"
+    },
+    {
+      "name": "api-gateway",
+      "service": "api-gateway",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:77191f1bb5f43067346586de0adbef4048a4856d1326a425eea3bbd172eb9cb5"
+    },
+    {
+      "name": "notification-service",
+      "service": "notification-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:e937262f17333b2f3f3698e109c64d66460e79ced93b01508af039d25f0f5edc"
+    },
+    {
+      "name": "voice-service",
+      "service": "voice-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:90b55914cce431d591c27e01c1e5b546d4d77532b762a9ee4138ae34214febf1"
+    },
+    {
+      "name": "visualization-service",
+      "service": "visualization-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:bebc5002ec0357fe229453494ad11e47f94744f7bb0f34d06a716fd12815809a"
+    },
+    {
+      "name": "report-service",
+      "service": "report-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:84e86911ba4594f6e238c8b87666a15f605b2e15d71d2a6eb372b5b281243d6a"
+    },
+    {
+      "name": "query-service",
+      "service": "query-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:7d7aa38a7f7cf9c85467722742d52c83c6d06a162476d50f532f4a44e6de2b60"
+    },
+    {
+      "name": "subscription-service",
+      "service": "subscription-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:63706a5bd78bb571e1dd47222c8570181eb3f549ab147d40be350bf2a3987f18"
+    },
+    {
+      "name": "workspace-service",
+      "service": "workspace-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:e6c1401aceab43dd5a961869c268b779d2da5685a40e1a5d36d6d187226ba208"
+    },
+    {
+      "name": "ai-service",
+      "service": "ai-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:5a38fc416ab8346c9f25b3ae908a8f650f9e9e88d292a9aebce21f492ad1e864"
+    },
+    {
+      "name": "etl-extractor",
+      "service": "etl-extractor",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:33e9e7bddba4b95e03c879a08af9ce6321aadcc6b23b87b98daf1bc3988791ef"
+    },
+    {
+      "name": "etl-connector",
+      "service": "etl-connector",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:f496f63ee40b68c29c43657b781a5c6a79c1d3d9cb88abeba6bb9bede0bf4d1f"
+    },
+    {
+      "name": "etl-loader",
+      "service": "etl-loader",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:4b26aa18306a8448e23364e042e4a8810d7735790f87040f39c9c6f92240447c"
+    },
+    {
+      "name": "etl-detector",
+      "service": "etl-detector",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:dc7ff2fcbb08f7bb961e12bab06d2040a214eeeb8c0b54d7916730065e5e1a01"
+    },
+    {
+      "name": "etl-metadata",
+      "service": "etl-metadata",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:2ba545d296353f8d903212c481ecac066888c46a71cc6e50fbded9c917309d99"
+    },
+    {
+      "name": "auth-service",
+      "service": "auth-service",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:e93ab1b2b630d64654262306b168f7e2379a3cb5b7b5e922e29369b487c191b9"
+    },
+    {
+      "name": "etl-transformer",
+      "service": "etl-transformer",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:c8d446fb0f99069e1c89e7a034810213a72bd4d2540caa816d7a15b365e20bb7"
+    },
+    {
+      "name": "kafka-ui",
+      "service": "kafka-ui",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:8f2ff02d64b0a7a2b71b6b3b3148b85f66d00ec20ad40c30bdcd415d46d31818"
+    },
+    {
+      "name": "kafka",
+      "service": "kafka",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41"
+    },
+    {
+      "name": "redis",
+      "service": "redis",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065"
+    },
+    {
+      "name": "clickhouse",
+      "service": "clickhouse",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:0b2d7824347397b2ba6fcb216f0ae772568105f1f47e19f0d3247e24c79bc10a"
+    },
+    {
+      "name": "zookeeper",
+      "service": "zookeeper",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6"
+    },
+    {
+      "name": "surrealdb",
+      "service": "surrealdb",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:849c9ad548415ddf06b80d834929ddc43fb9c482d2ef9b51113641a8e47fad63"
+    },
+    {
+      "name": "clamav",
+      "service": "clamav",
+      "project": "bi-voice-agent",
+      "status": "running",
+      "health": "healthy",
+      "image_id": "sha256:b32e587feae9f156d660704beeec4ee69c79fcf5af092bdc0f2f93892a29b553"
+    },
+    {
+      "name": "voice-service-worker",
+      "service": "voice-service-worker",
+      "project": "bi-voice-agent",
+      "status": "exited",
+      "health": "unhealthy",
+      "image_id": "sha256:481cfb5a2f88dcc25374cdf0a7be3817b7a50ce7c48fff0430ce9d76329aa100"
+    },
+    {
+      "name": "extractor-service",
+      "service": "extractor-service",
+      "project": "etl-final",
+      "status": "exited",
+      "health": "none",
+      "image_id": "sha256:9b7cb17690bca5c47923f91926a6692e408d9f6ade4946b52d485fd822d90c05"
+    },
+    {
+      "name": "connector-service",
+      "service": "connector-service",
+      "project": "etl-final",
+      "status": "exited",
+      "health": "none",
+      "image_id": "sha256:4fc68d851e9c18dde01bdb14e41ce0a663e7f016f702fb94ebb0ba286ddccf02"
+    },
+    {
+      "name": "loader-service",
+      "service": "loader-service",
+      "project": "etl-final",
+      "status": "exited",
+      "health": "none",
+      "image_id": "sha256:f5412560910b436e92d8f6fe37e93f74029841e59bda19b51c061b2fd6e046fb"
+    },
+    {
+      "name": "metadata-service",
+      "service": "metadata-service",
+      "project": "etl-final",
+      "status": "exited",
+      "health": "none",
+      "image_id": "sha256:885e7a28399f2d888215cc27bf9a84e9b5eb0c33d10170647110f7d956618ef6"
+    },
+    {
+      "name": "transformer-service",
+      "service": "transformer-service",
+      "project": "etl-final",
+      "status": "exited",
+      "health": "none",
+      "image_id": "sha256:25434716c0ae91a3c2323fb5b52bb47cc55ecf9a97023fbac54809eb01ea6df5"
+    },
+    {
+      "name": "metabase",
+      "service": null,
+      "project": null,
+      "status": "exited",
+      "health": "none",
+      "image_id": "sha256:f8ad50bba07c555e103097218e9a8b4edbd64311e754072d148578cd54c5bd9a"
+    },
+    {
+      "name": "detector-service",
+      "service": "detector-service",
+      "project": "etl-final",
+      "status": "exited",
+      "health": "none",
+      "image_id": "sha256:64f52380f7050c35813ce6631e8113c5d97d590fb89db6a9a2b945b0120f6b9f"
+    }
+  ],
+  "http": [
+    {
+      "check": "gateway",
+      "port": 8000,
+      "path": "/health/",
+      "http_status": 200,
+      "success_field": true,
+      "status": "PASS"
+    },
+    {
+      "check": "auth rejects anonymous admin",
+      "port": 8001,
+      "path": "/admin/users/",
+      "http_status": 401,
+      "success_field": null,
+      "status": "PASS"
+    },
+    {
+      "check": "workspace rejects anonymous",
+      "port": 8002,
+      "path": "/workspace/",
+      "http_status": 401,
+      "success_field": null,
+      "status": "PASS"
+    },
+    {
+      "check": "report rejects anonymous",
+      "port": 8003,
+      "path": "/voice-reports/reports/",
+      "http_status": 401,
+      "success_field": null,
+      "status": "PASS"
+    },
+    {
+      "check": "voice rejects anonymous",
+      "port": 8004,
+      "path": "/voice-reports/reports/",
+      "http_status": 401,
+      "success_field": null,
+      "status": "PASS"
+    },
+    {
+      "check": "AI health",
+      "port": 8005,
+      "path": "/health/",
+      "http_status": 200,
+      "success_field": true,
+      "status": "PASS"
+    },
+    {
+      "check": "query dependency health",
+      "port": 8006,
+      "path": "/query/health/",
+      "http_status": 200,
+      "success_field": true,
+      "status": "PASS"
+    },
+    {
+      "check": "visualization rejects anonymous",
+      "port": 8007,
+      "path": "/visualization/question/1/embed-url/",
+      "http_status": 401,
+      "success_field": null,
+      "status": "PASS"
+    },
+    {
+      "check": "subscription health",
+      "port": 8009,
+      "path": "/subscription/health/",
+      "http_status": 200,
+      "success_field": true,
+      "status": "PASS"
+    },
+    {
+      "check": "notification health",
+      "port": 8010,
+      "path": "/notification/health/",
+      "http_status": 200,
+      "success_field": true,
+      "status": "PASS"
+    },
+    {
+      "check": "ETL connector health",
+      "port": 8101,
+      "path": "/api/health/",
+      "http_status": 200,
+      "success_field": true,
+      "status": "PASS"
+    },
+    {
+      "check": "ETL metadata health",
+      "port": 8106,
+      "path": "/api/health/",
+      "http_status": 200,
+      "success_field": true,
+      "status": "PASS"
+    },
+    {
+      "check": "Metabase restored copy health",
+      "port": 3000,
+      "path": "/api/health",
+      "http_status": 200,
+      "success_field": null,
+      "status": "PASS"
+    },
+    {
+      "check": "frontend development page",
+      "port": 5173,
+      "path": "/",
+      "http_status": 200,
+      "success_field": null,
+      "status": "PASS"
+    }
+  ],
+  "invalid_login": {
+    "http_status": 400,
+    "status": "PASS"
+  },
+  "bootstrap_admin_login": {
+    "http_status": 200,
+    "access_token_received": true,
+    "status": "PASS"
+  },
+  "authorized_admin_route": {
+    "http_status": 200,
+    "status": "PASS"
+  },
+  "postgres_business_counts": {
+    "dashboard_pages": 0,
+    "django_admin_log": 0,
+    "django_session": 0,
+    "invitations": 0,
+    "manager_databases": 0,
+    "notification_dispatch_logs": 0,
+    "password_reset_codes": 0,
+    "report_page_assignments": 0,
+    "sql_edit_history": 0,
+    "subscription_free_tier_usage": 0,
+    "subscription_payments": 0,
+    "token_blacklist_blacklistedtoken": 0,
+    "token_blacklist_outstandingtoken": 0,
+    "users": 0,
+    "users_groups": 0,
+    "users_user_permissions": 0,
+    "voice_pipeline_jobs": 0,
+    "voice_reports": 0,
+    "workspace_members": 0,
+    "workspace_subscriptions": 0,
+    "workspaces": 0
+  },
+  "postgres_clean": "PASS",
+  "log_categories": {
+    "query-service": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "voice-service": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "ai-service": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "etl-connector": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "etl-detector": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "etl-extractor": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "etl-transformer": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "etl-loader": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    },
+    "etl-metadata": {
+      "Traceback": 0,
+      "ModuleNotFoundError": 0,
+      "OperationalError": 0,
+      "Consumer started": 0,
+      "Listening": 0
+    }
+  },
+  "limitations": [
+    "Anonymous denials establish route availability, not tenant isolation",
+    "Positive auth uses the existing environment-defined bootstrap principal; tokens are never serialized",
+    "No paid inference, SMTP send, signup, upload, source mutation or Metabase card execution",
+    "Docker TCP health does not establish worker/dependency readiness"
+  ]
+}

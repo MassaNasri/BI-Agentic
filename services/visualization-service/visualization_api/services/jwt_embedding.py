@@ -26,7 +26,7 @@ class JWTEmbeddingService:
         """Initialize from environment (METABASE_SECRET_KEY required for embedding)."""
         self.secret_key = os.getenv("METABASE_SECRET_KEY")
         self.embed_exp_seconds = int(
-            os.getenv("METABASE_EMBED_EXP_SECONDS", str(60 * 60 * 24))
+            os.getenv("METABASE_EMBED_EXP_SECONDS", "300")
         )
         self.metabase_url = (
             os.getenv("METABASE_EMBED_URL")
@@ -128,8 +128,8 @@ class JWTEmbeddingService:
 
         current_time = int(time.time())
         expires_in_seconds = exp_seconds if exp_seconds is not None else self.embed_exp_seconds
-        if expires_in_seconds <= 0:
-            raise ValueError("Token expiration must be greater than 0 seconds")
+        if expires_in_seconds <= 0 or expires_in_seconds > 300:
+            raise ValueError("Token expiration must be between 1 and 300 seconds")
         payload = {
             "resource": metabase_resource,
             "params": params or {},
@@ -180,7 +180,10 @@ class JWTEmbeddingService:
         """
         resource = {"type": resource_type, "id": resource_id}
         token = self.generate_embed_token(resource, params)
-        embed_url = f"{self.metabase_url}/embed/{resource_type}/{token}#bordered=true&titled=true"
+        appearance_hash = "#theme=night&bordered=true&titled=true"
+        if resource_type == "dashboard":
+            appearance_hash = f"{appearance_hash}&background=false"
+        embed_url = f"{self.metabase_url}/embed/{resource_type}/{token}{appearance_hash}"
         logger.info("Generated embed URL for %s %s", resource_type, resource_id)
         return embed_url
     

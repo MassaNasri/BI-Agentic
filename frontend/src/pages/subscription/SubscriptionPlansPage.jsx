@@ -17,10 +17,10 @@ function SubscriptionPlansPage() {
   return (
     <AnimatedPage>
       <div className="space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">Billing</p>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-900">Workspace Subscription</h1>
-          <p className="mt-2 text-sm text-slate-600">
+        <div className="rounded-2xl border border-brand-700/30 bg-[var(--c-card-bg)] p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-300">Billing</p>
+          <h1 className="mt-2 text-3xl font-semibold text-white">Workspace Subscription</h1>
+          <p className="mt-2 text-sm text-[var(--c-muted)]">
             Upgrade your workspace with voice limits, MCP access, and advanced capabilities.
           </p>
         </div>

@@ -2,7 +2,7 @@
 Unified Metadata Schema for ETL Pipeline
 Defines consistent metadata structures across all pipeline stages
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 
 
@@ -11,6 +11,19 @@ class MetadataSchema:
     Unified metadata model for ETL pipeline tracking.
     Ensures consistent metadata structure across all stages.
     """
+
+    SCOPE_FIELDS = ("workspace_id", "dataset_id", "ingestion_job_id")
+
+    @staticmethod
+    def scope_fields(message: Dict[str, Any]) -> Dict[str, Any]:
+        """Copy the immutable tenant/job scope without inventing defaults."""
+        if not isinstance(message, dict):
+            return {}
+        return {
+            field: message[field]
+            for field in MetadataSchema.SCOPE_FIELDS
+            if message.get(field) not in (None, "")
+        }
     
     @staticmethod
     def create_connection_metadata(
@@ -36,7 +49,7 @@ class MetadataSchema:
             "source_type": source_type,
             "source_id": source_id,
             "connection_info": connection_info,
-            "timestamp": timestamp.isoformat() if timestamp else datetime.utcnow().isoformat(),
+            "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
             "pipeline_stage": "connection",
             "status": "success"
         }
@@ -68,7 +81,7 @@ class MetadataSchema:
             "schema": schema,
             "row_count": row_count,
             "validation_results": validation_results or {},
-            "timestamp": timestamp.isoformat() if timestamp else datetime.utcnow().isoformat(),
+            "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
             "pipeline_stage": "extract",
             "status": "success"
         }
@@ -103,7 +116,7 @@ class MetadataSchema:
             "rows_successful": rows_successful,
             "rows_failed": rows_failed,
             "errors": errors or [],
-            "timestamp": timestamp.isoformat() if timestamp else datetime.utcnow().isoformat(),
+            "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
             "pipeline_stage": "extract",
             "status": "success" if rows_failed == 0 else "partial"
         }
@@ -141,9 +154,28 @@ class MetadataSchema:
             "rows_failed": rows_failed,
             "cleaning_rules_applied": cleaning_rules_applied,
             "validation_warnings": validation_warnings or [],
-            "timestamp": timestamp.isoformat() if timestamp else datetime.utcnow().isoformat(),
+            "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
             "pipeline_stage": "transform",
             "status": "success" if rows_failed == 0 else "partial"
+        }
+
+    @staticmethod
+    def create_detection_metadata(
+        source_id: str,
+        rows_observed: int,
+        detected_issues: Optional[List[str]] = None,
+        timestamp: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Create metadata for a non-mutating detector observation."""
+        issues = detected_issues or []
+        return {
+            "metadata_type": "detection",
+            "source_id": source_id,
+            "rows_observed": rows_observed,
+            "detected_issues": issues,
+            "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
+            "pipeline_stage": "detect",
+            "status": "success" if not issues else "partial",
         }
     
     @staticmethod
@@ -179,7 +211,7 @@ class MetadataSchema:
             "rows_failed": rows_failed,
             "load_duration_ms": load_duration_ms,
             "errors": errors or [],
-            "timestamp": timestamp.isoformat() if timestamp else datetime.utcnow().isoformat(),
+            "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
             "pipeline_stage": "load",
             "status": "success" if rows_failed == 0 else "partial"
         }
@@ -201,11 +233,11 @@ class MetadataSchema:
             if field not in metadata:
                 return False, f"Missing required field: {field}"
         
-        valid_types = ["connection", "schema", "extraction", "cleaning", "loading"]
+        valid_types = ["connection", "schema", "extraction", "detection", "cleaning", "loading"]
         if metadata["metadata_type"] not in valid_types:
             return False, f"Invalid metadata_type: {metadata['metadata_type']}"
         
-        valid_stages = ["connection", "extract", "transform", "load"]
+        valid_stages = ["connection", "extract", "detect", "transform", "load"]
         if metadata["pipeline_stage"] not in valid_stages:
             return False, f"Invalid pipeline_stage: {metadata['pipeline_stage']}"
         

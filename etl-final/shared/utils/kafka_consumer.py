@@ -36,8 +36,11 @@ class KafkaMessageConsumer:
         self.consumer = None
 
     def connect(self):
-        """Connect to Kafka with infinite retry."""
-        while True:
+        """Connect to Kafka with a bounded, configurable retry budget."""
+        max_attempts = max(1, int(os.getenv("KAFKA_CONNECT_MAX_ATTEMPTS", "12")))
+        retry_delay = max(0.0, float(os.getenv("KAFKA_CONNECT_RETRY_SECONDS", "5")))
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
             try:
                 ensure_topics(bootstrap_servers=self.servers, logger=logger)
                 logger.info(
@@ -76,10 +79,22 @@ class KafkaMessageConsumer:
 
                 self.consumer = KafkaConsumer(self.topic, **consumer_kwargs)
                 logger.info("[Kafka Consumer] Connected successfully")
-                break
+                return
             except Exception as e:
-                logger.warning(f"[Kafka Consumer] Kafka not ready, retrying in 5s: {e}")
-                time.sleep(5)
+                last_error = e
+                if attempt >= max_attempts:
+                    break
+                logger.warning(
+                    "[Kafka Consumer] Kafka not ready, retrying in %ss (%s/%s): %s",
+                    retry_delay,
+                    attempt,
+                    max_attempts,
+                    e,
+                )
+                time.sleep(retry_delay)
+        raise ConnectionError(
+            f"Kafka consumer connection failed after {max_attempts} attempts"
+        ) from last_error
 
     def _validate_message(self, message: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         """
@@ -174,6 +189,30 @@ class KafkaMessageConsumer:
             return True
         except Exception as e:
             logger.error("[Kafka Consumer] Failed to commit offsets: %s", e)
+            return False
+
+    def rewind(self, record) -> bool:
+        """Seek back to an uncommitted record after a processing failure.
+
+        Kafka's iterator advances its in-memory position before yielding a
+        record. Merely withholding the commit is insufficient for recovery in
+        a long-running consumer because the record is otherwise seen again
+        only after a rebalance or restart.
+        """
+        if self.consumer is None or record is None:
+            return False
+        try:
+            partition = TopicPartition(record.topic, record.partition)
+            self.consumer.seek(partition, record.offset)
+            logger.warning(
+                "[Kafka Consumer] Rewound topic=%s partition=%s offset=%s",
+                record.topic,
+                record.partition,
+                record.offset,
+            )
+            return True
+        except Exception as e:
+            logger.error("[Kafka Consumer] Failed to rewind offset: %s", e)
             return False
 
     def close(self):

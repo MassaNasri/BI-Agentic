@@ -83,7 +83,11 @@ class ForecastingPipelineTests(unittest.TestCase):
         payload = result["visualization_payload"]
         self.assertEqual(result["status"], "success")
         self.assertFalse(result["degraded"])
-        self.assertEqual(payload["chart_type"], "line")
+        self.assertEqual(payload["chart_type"], "")
+        self.assertEqual(
+            payload["reason_chart_selected"],
+            "deferred_to_visualization_service_chart_type_selector",
+        )
         self.assertEqual(payload["series_type_field"], "series_type")
         self.assertEqual(payload["preferred_color_role_field"], "preferred_color_role")
         self.assertEqual({item["series_type"] for item in payload["chart_series_config"]}, {"actual", "forecast"})

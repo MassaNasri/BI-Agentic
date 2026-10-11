@@ -6,12 +6,7 @@ import logging
 from typing import Optional, Dict, List
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
-import sys
-import os
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from models.bronze_schema import BronzeTableSchema
+from shared.models.bronze_schema import BronzeTableSchema
 from .ch_identifiers import quote_table_name
 
 logger = logging.getLogger(__name__)

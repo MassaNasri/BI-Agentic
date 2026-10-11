@@ -2,15 +2,12 @@
 Integration tests for silver layer writes using real ClickHouse.
 """
 import os
-import sys
 from uuid import uuid4
 
 import pytest
 from clickhouse_driver import Client
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'shared'))
-
-from loader_logic import LoaderLogic
+from .loader_logic import LoaderLogic
 
 
 def is_clickhouse_available():

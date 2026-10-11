@@ -11,8 +11,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 from shared.utils.logging_utils import configure_logging
 from shared.utils.tracing import configure_tracing
+from shared.security.runtime_config import load_runtime_security
 
 configure_logging()
 configure_tracing("detector-service")
@@ -25,12 +27,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-cy62bufz!fibfot5ufw&l*asncosd)qfpnoanu5d*@ern)2p@r'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = ['*']
+_SECURITY = load_runtime_security("detector-service")
+APP_ENV = _SECURITY.profile
+SECRET_KEY = _SECURITY.secret_key
+DEBUG = _SECURITY.debug
+ALLOWED_HOSTS = list(_SECURITY.allowed_hosts)
+ETL_INTERNAL_API_KEY = os.getenv("ETL_INTERNAL_API_KEY", "")
 
 
 # Application definition

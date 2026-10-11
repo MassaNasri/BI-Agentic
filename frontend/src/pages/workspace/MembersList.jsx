@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '../../store/auth'
 import { workspaceAPI } from '../../api/endpoints'
-import { Users, Mail, Shield, AlertCircle, Trash2, UserX, UserCheck, Edit, Clock } from 'lucide-react'
+import { Users, Mail, Shield, AlertCircle, Trash2, UserX, UserCheck, Edit } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Card from '../../components/Card'
 import Badge from '../../components/Badge'
@@ -18,7 +18,6 @@ function MembersList() {
   const [acceptedMembers, setAcceptedMembers] = useState([])
   const [pendingMembers, setPendingMembers] = useState([])
   const [invitedMembers, setInvitedMembers] = useState([])
-  const [workspaceId, setWorkspaceId] = useState(null)
   const [workspaceName, setWorkspaceName] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [selectedMember, setSelectedMember] = useState(null)
@@ -39,7 +38,6 @@ function MembersList() {
       setAcceptedMembers(response.data.accepted_members || [])
       setPendingMembers(response.data.pending_members || [])
       setInvitedMembers(response.data.invited_members || [])
-      setWorkspaceId(response.data.workspace_id)
       setWorkspaceName(response.data.workspace_name || 'Workspace')
     } catch (error) {
       const errorMsg = error.response?.data?.message || 'Failed to load members'
@@ -177,8 +175,8 @@ function MembersList() {
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Workspace Members</h1>
-          <p className="text-gray-600 mt-1">
+          <h1 className="text-3xl font-bold text-white">Workspace Members</h1>
+          <p className="text-[var(--c-muted)] mt-1">
             {workspaceName} - {totalCount} member{totalCount !== 1 ? 's' : ''} total
           </p>
         </div>
@@ -208,18 +206,18 @@ function MembersList() {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900">
+                <tr className="border-b border-brand-700/30">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-white">
                     Member
                   </th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-white">
                     Role
                   </th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-white">
                     Status
                   </th>
                   {isManager && (
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-gray-900">
+                    <th className="text-right py-3 px-4 text-sm font-semibold text-white">
                       Actions
                     </th>
                   )}
@@ -232,22 +230,22 @@ function MembersList() {
                   const isPending = member.status === 'pending_registration' || member.status === 'pending_acceptance'
 
                   return (
-                    <tr key={member.id || `pending-${index}`} className="border-b border-gray-100 hover:bg-gray-50">
+                    <tr key={member.id || `pending-${index}`} className="border-b border-brand-700/20 hover:bg-[rgba(255,255,255,0.04)]">
                       <td className="py-4 px-4">
                         <div className="flex items-center space-x-3">
-                          <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                            <span className="text-primary-600 font-semibold">
+                          <div className="w-10 h-10 bg-brand-700/30 rounded-full flex items-center justify-center">
+                            <span className="text-brand-500 font-semibold">
                               {member.name.charAt(0).toUpperCase()}
                             </span>
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">
+                            <p className="text-sm font-medium text-white">
                               {member.name}
                               {isCurrentUser && (
-                                <span className="ml-2 text-xs text-gray-500">(You)</span>
+                                <span className="ml-2 text-xs text-brand-300/80">(You)</span>
                               )}
                             </p>
-                            <p className="text-xs text-gray-600 flex items-center space-x-1">
+                            <p className="text-xs text-[var(--c-muted)] flex items-center space-x-1">
                               <Mail className="w-3 h-3" />
                               <span>{member.email}</span>
                             </p>
@@ -256,8 +254,8 @@ function MembersList() {
                       </td>
                       <td className="py-4 px-4">
                         <div className="flex items-center space-x-2">
-                          <Shield className="w-4 h-4 text-gray-400" />
-                          <span className="text-sm text-gray-900 capitalize">
+                          <Shield className="w-4 h-4 text-brand-300/60" />
+                          <span className="text-sm text-white capitalize">
                             {member.role}
                           </span>
                         </div>
@@ -282,7 +280,7 @@ function MembersList() {
                               <>
                                 <button
                                   onClick={() => openRoleModal(member)}
-                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  className="p-2 text-brand-500 hover:bg-brand-900/30 rounded-lg transition-colors"
                                   title="Change Role"
                                 >
                                   <Edit className="w-4 h-4" />
@@ -307,7 +305,7 @@ function MembersList() {
                                 </button>
                               </>
                             ) : isCurrentUser ? (
-                              <span className="text-sm text-gray-500">-</span>
+                              <span className="text-sm text-brand-300/80">-</span>
                             ) : null}
                           </div>
                         </td>
@@ -328,7 +326,7 @@ function MembersList() {
         title="Change Member Role"
       >
         <div className="space-y-4">
-          <p className="text-gray-600">
+          <p className="text-[var(--c-muted)]">
             Change the role for <strong>{selectedMember?.name}</strong>
           </p>
           <Select
@@ -365,10 +363,10 @@ function MembersList() {
         title={selectedMember?.status === 'suspended' ? 'Unsuspend Member' : 'Suspend Member'}
       >
         <div className="space-y-4">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="bg-amber-500/15 border border-amber-500/30 rounded-lg p-4">
             <div className="flex items-start space-x-3">
-              <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
-              <div className="text-sm text-yellow-800">
+              <AlertCircle className="w-5 h-5 text-amber-500 mt-0.5" />
+              <div className="text-sm text-amber-400">
                 {selectedMember?.status === 'suspended' ? (
                   <p>
                     Are you sure you want to unsuspend <strong>{selectedMember?.name}</strong>? 

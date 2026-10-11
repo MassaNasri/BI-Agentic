@@ -1,0 +1,175 @@
+{
+  "phase": "P1_MULTI_DATABASE",
+  "date": "2026-10-07",
+  "status": "GREEN",
+  "scope": {
+    "mode": "snapshot",
+    "cdc": false,
+    "supported_engines": [
+      "postgresql",
+      "mysql",
+      "mariadb",
+      "mssql",
+      "oracle",
+      "sqlite",
+      "clickhouse"
+    ]
+  },
+  "engine_matrix": {
+    "postgresql": {
+      "unit_contract": "PASS",
+      "live_integration": "PASS",
+      "application_e2e": "NOT_RUN",
+      "runtime": "PASS"
+    },
+    "mysql": {
+      "unit_contract": "PASS",
+      "live_integration": "PASS",
+      "application_e2e": "NOT_RUN",
+      "runtime": "PASS"
+    },
+    "mariadb": {
+      "unit_contract": "PASS",
+      "live_integration": "NOT_RUN",
+      "application_e2e": "NOT_RUN",
+      "runtime": "NOT_RUN"
+    },
+    "mssql": {
+      "unit_contract": "PASS",
+      "live_integration": "NOT_RUN",
+      "application_e2e": "NOT_RUN",
+      "runtime": "NOT_RUN"
+    },
+    "oracle": {
+      "unit_contract": "PASS",
+      "live_integration": "NOT_RUN",
+      "application_e2e": "NOT_RUN",
+      "runtime": "NOT_RUN"
+    },
+    "sqlite": {
+      "unit_contract": "PASS",
+      "live_integration": "PASS",
+      "application_e2e": "PASS",
+      "runtime": "PASS"
+    },
+    "clickhouse": {
+      "unit_contract": "PASS",
+      "live_integration": "PASS",
+      "application_e2e": "NOT_RUN",
+      "runtime": "PASS"
+    }
+  },
+  "tests": {
+    "shared_connector_and_redaction": {
+      "passed": 18,
+      "failed": 0
+    },
+    "query_service_full": {
+      "passed": 67,
+      "failed": 0,
+      "warnings": 3
+    },
+    "extractor_full": {
+      "passed": 218,
+      "failed": 0,
+      "skipped": 5,
+      "warnings": 20
+    },
+    "loader_full": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 1,
+      "warnings": 1
+    },
+    "connector_django_app_full": {
+      "tests_run": 134,
+      "result": "OK"
+    },
+    "frontend": {
+      "passed": 19,
+      "failed": 0
+    },
+    "csv_regression_subset": {
+      "passed": 24,
+      "failed": 0,
+      "overlaps_extractor_full": true
+    },
+    "frontend_lint": "PASS",
+    "frontend_production_build": {
+      "result": "PASS",
+      "modules_transformed": 1929,
+      "main_js_kb": 670.11,
+      "main_js_gzip_kb": 194.12
+    }
+  },
+  "public_e2e": {
+    "result": "PASS",
+    "path": [
+      "api-gateway",
+      "query-service",
+      "etl-connector",
+      "kafka",
+      "etl-extractor",
+      "etl-transformer",
+      "etl-loader",
+      "clickhouse",
+      "query-status-schema-preview"
+    ],
+    "source": "sqlite",
+    "connector_count": 7,
+    "connection_code": "CONNECTION_OK",
+    "dataset_status": "completed",
+    "preview_rows": 3,
+    "preview_nulls": 2,
+    "schema_columns": 11,
+    "unicode_values": [
+      "Damascus – مرحبا",
+      "Zoë",
+      "東京"
+    ],
+    "cleanup_verified": true
+  },
+  "runtime": {
+    "required_services_healthy": 8,
+    "required_services_total": 8,
+    "services": [
+      "api-gateway",
+      "clickhouse",
+      "etl-connector",
+      "etl-extractor",
+      "etl-loader",
+      "etl-transformer",
+      "kafka",
+      "query-service"
+    ],
+    "recent_error_scan_matches": 0,
+    "migration_0005_applied": true,
+    "optional_profiles_config_valid": [
+      "p1-mssql",
+      "p1-oracle"
+    ]
+  },
+  "security": {
+    "public_authentication": "PASS",
+    "internal_authentication": "PASS",
+    "workspace_isolation": "PASS",
+    "ssrf_destination_policy": "PASS",
+    "credential_encryption": "PASS",
+    "recursive_secret_redaction": "PASS",
+    "sqlite_path_confinement": "PASS",
+    "safe_error_mapping": "PASS",
+    "tls_contracts": "PASS"
+  },
+  "regression": {
+    "csv": "PASS",
+    "legacy_file_workflow_retained": true
+  },
+  "limitations": [
+    "CDC and continuous synchronization are out of scope.",
+    "MariaDB-specific, SQL Server, and Oracle live runtimes were not run in this environment.",
+    "A multi-table snapshot writes every selected table, while the current single dataset schema and preview bind to the first table.",
+    "Deployment CA and Oracle network material must be mounted where required.",
+    "Empty snapshots use a bounded default 60-second completion grace window.",
+    "The frontend build has advisory bundle-size and stale browser-data warnings."
+  ]
+}

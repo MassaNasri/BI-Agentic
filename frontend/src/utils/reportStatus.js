@@ -40,8 +40,8 @@ export const getReportStatusBadgeClass = (status) => {
     return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
   }
   if (isReportProcessing(status)) {
-    return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+    return 'bg-amber-500/20 text-amber-400 dark:bg-amber-400/30 dark:text-amber-400'
   }
-  return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+  return 'bg-[rgba(255,255,255,0.07)] text-[var(--c-text)] dark:bg-brand-800/70 dark:text-brand-200/70'
 }
 

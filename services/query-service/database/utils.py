@@ -3,9 +3,34 @@ Utility functions for database operations including ClickHouse cleanup.
 """
 import requests
 import logging
+import re
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+
+
+def quote_clickhouse_identifier(value):
+    value = str(value or '').strip()
+    if not _IDENTIFIER_RE.fullmatch(value):
+        raise ValueError('Invalid ClickHouse identifier')
+    return f'`{value}`'
+
+
+def quote_clickhouse_string(value):
+    """Return a ClickHouse single-quoted string literal.
+
+    JSON double-quoted strings are not SQL string literals in current
+    ClickHouse releases; they are parsed as identifiers. Backslash and quote
+    escaping keeps metadata predicates valid without interpolating raw input.
+    """
+    escaped = str(value).replace('\\', '\\\\').replace("'", "\\'")
+    return f"'{escaped}'"
+
+
+def _safe_error(exc):
+    return f'ClickHouse request failed ({type(exc).__name__})'
 
 
 class ClickHouseClient:
@@ -14,40 +39,44 @@ class ClickHouseClient:
     def __init__(self):
         self.host = getattr(settings, 'CLICKHOUSE_HOST', 'localhost')
         self.port = getattr(settings, 'CLICKHOUSE_PORT', '8123')
-        self.user = getattr(settings, 'CLICKHOUSE_USER', 'etl_user')
-        self.password = getattr(settings, 'CLICKHOUSE_PASSWORD', 'etl_pass123')
+        self.user = getattr(settings, 'CLICKHOUSE_USER', '')
+        self.password = getattr(settings, 'CLICKHOUSE_PASSWORD', '')
         self.base_url = f'http://{self.host}:{self.port}'
     
     def execute_query(self, query):
         """Execute a query on ClickHouse."""
         try:
-            params = {'query': query}
-            if self.user:
-                params['user'] = self.user
-            if self.password:
-                params['password'] = self.password
-            
-            response = requests.post(self.base_url, params=params, timeout=10)
+            auth = (self.user, self.password) if self.user else None
+            response = requests.post(
+                self.base_url,
+                data=str(query).encode('utf-8'),
+                auth=auth,
+                timeout=(3, 10),
+            )
             response.raise_for_status()
             return {'success': True, 'data': response.text}
         except Exception as e:
-            logger.error(f"ClickHouse query error: {str(e)}")
-            return {'success': False, 'error': str(e)}
+            safe_error = _safe_error(e)
+            logger.error('%s', safe_error)
+            return {'success': False, 'error': safe_error}
     
     def drop_table(self, database, table_name):
         """Drop a table from ClickHouse."""
-        query = f"DROP TABLE IF EXISTS {database}.{table_name}"
-        logger.info(f"Dropping ClickHouse table: {database}.{table_name}")
+        qualified = f"{quote_clickhouse_identifier(database)}.{quote_clickhouse_identifier(table_name)}"
+        query = f"DROP TABLE IF EXISTS {qualified}"
+        logger.info('Dropping ClickHouse table for authorized dataset')
         result = self.execute_query(query)
         if result['success']:
-            logger.info(f"Successfully dropped table: {database}.{table_name}")
+            logger.info('Successfully dropped authorized dataset table')
         else:
             logger.error(f"Failed to drop table: {result.get('error')}")
         return result
     
     def get_table_preview(self, database, table_name, limit=5):
         """Get preview data from a ClickHouse table."""
-        query = f"SELECT * FROM {database}.{table_name} LIMIT {limit} FORMAT JSONEachRow"
+        limit = max(1, min(int(limit), 100))
+        qualified = f"{quote_clickhouse_identifier(database)}.{quote_clickhouse_identifier(table_name)}"
+        query = f"SELECT * FROM {qualified} LIMIT {limit} FORMAT JSONEachRow"
         result = self.execute_query(query)
         
         if result['success']:
@@ -63,7 +92,8 @@ class ClickHouseClient:
     
     def get_table_schema(self, database, table_name):
         """Get schema information for a table."""
-        query = f"DESCRIBE TABLE {database}.{table_name} FORMAT JSONEachRow"
+        qualified = f"{quote_clickhouse_identifier(database)}.{quote_clickhouse_identifier(table_name)}"
+        query = f"DESCRIBE TABLE {qualified} FORMAT JSONEachRow"
         result = self.execute_query(query)
         
         if result['success']:
@@ -79,7 +109,8 @@ class ClickHouseClient:
     
     def get_table_count(self, database, table_name):
         """Get row count for a table."""
-        query = f"SELECT COUNT(*) as count FROM {database}.{table_name} FORMAT JSONEachRow"
+        qualified = f"{quote_clickhouse_identifier(database)}.{quote_clickhouse_identifier(table_name)}"
+        query = f"SELECT COUNT(*) as count FROM {qualified} FORMAT JSONEachRow"
         result = self.execute_query(query)
         
         if result['success']:
@@ -95,7 +126,15 @@ class ClickHouseClient:
     
     def table_exists(self, database, table_name):
         """Check if a table exists in ClickHouse."""
-        query = f"SELECT count() FROM system.tables WHERE database = '{database}' AND name = '{table_name}'"
+        database_value = str(database or '').strip()
+        table_value = str(table_name or '').strip()
+        quote_clickhouse_identifier(database_value)
+        quote_clickhouse_identifier(table_value)
+        query = (
+            'SELECT count() FROM system.tables WHERE database = '
+            f'{quote_clickhouse_string(database_value)} '
+            f'AND name = {quote_clickhouse_string(table_value)}'
+        )
         result = self.execute_query(query)
         
         if result['success']:
@@ -110,7 +149,12 @@ class ClickHouseClient:
     
     def get_all_tables(self, database='default'):
         """Get list of all tables in a database."""
-        query = f"SELECT name FROM system.tables WHERE database = '{database}' FORMAT JSONEachRow"
+        database_value = str(database or '').strip()
+        quote_clickhouse_identifier(database_value)
+        query = (
+            'SELECT name FROM system.tables WHERE database = '
+            f'{quote_clickhouse_string(database_value)} FORMAT JSONEachRow'
+        )
         result = self.execute_query(query)
         
         if result['success']:
@@ -144,16 +188,27 @@ def cleanup_database(database_instance):
         'errors': []
     }
     
-    # Drop ClickHouse table if exists
+    # Drop every allowlisted destination for a multi-table snapshot. Legacy
+    # datasets still contribute clickhouse_table_name as their only target.
+    table_names = []
+    for imported in getattr(database_instance, 'source_tables', None) or []:
+        if isinstance(imported, dict) and imported.get('destination_table'):
+            table_names.append(str(imported['destination_table']))
     if database_instance.clickhouse_table_name:
+        table_names.append(str(database_instance.clickhouse_table_name))
+    table_names = list(dict.fromkeys(table_names))
+    cleanup_results['clickhouse_tables'] = []
+    if table_names:
         clickhouse = ClickHouseClient()
-        result = clickhouse.drop_table(
-            database_instance.clickhouse_database,
-            database_instance.clickhouse_table_name
-        )
-        cleanup_results['clickhouse_dropped'] = result['success']
-        if not result['success']:
-            cleanup_results['errors'].append(f"ClickHouse: {result.get('error')}")
+        for table_name in table_names:
+            result = clickhouse.drop_table(database_instance.clickhouse_database, table_name)
+            cleanup_results['clickhouse_tables'].append({
+                'table': table_name,
+                'dropped': bool(result['success']),
+            })
+            if not result['success']:
+                cleanup_results['errors'].append(f"ClickHouse: {result.get('error')}")
+        cleanup_results['clickhouse_dropped'] = not cleanup_results['errors']
     
     return cleanup_results
 

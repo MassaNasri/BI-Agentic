@@ -33,7 +33,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Server runs at: http://localhost:3000
+Server runs at: http://127.0.0.1:5173
 
 ## Build for Production
 

@@ -16,15 +16,12 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from django.http import JsonResponse
-
-
-def health_view(request):
-    return JsonResponse({"success": True, "service": "ai-service"})
+from bi_platform_shared.http.health import liveness_view, readiness_view
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("health/", health_view),
+    path("health/", liveness_view),
+    path("ready/", readiness_view),
     path('api/', include('whisper_app.urls')),
     path('api/reasoning/', include('reasoning_app.urls')),
     path('api/llm/', include('llm_app.urls')),

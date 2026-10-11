@@ -10,7 +10,7 @@ Tests cover:
 """
 
 import unittest
-from input_validator import (
+from .input_validator import (
     FieldValidator,
     RequestValidator,
     ValidationError,

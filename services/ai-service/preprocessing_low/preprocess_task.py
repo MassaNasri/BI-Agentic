@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
@@ -17,6 +18,7 @@ from preprocessing_low.schemas import (
     build_preprocess_failed_result,
     build_preprocess_success_result,
 )
+from preprocessing_low.semantic_guard import semantic_metadata, validate_semantic_preservation
 from shared.confidence import preprocessing_low_confidence
 from shared.pipeline_trace import make_attempt
 
@@ -32,6 +34,44 @@ def _get_logger() -> logging.Logger:
 def _log_event(logger: logging.Logger, level: int, message: str, **fields: object) -> None:
     payload = {"timestamp": _utc_now(), **fields}
     logger.log(level, "%s | %s", message, json.dumps(payload, sort_keys=True, default=str))
+
+
+def _minimal_clean_text(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def _semantic_rejection_change(
+    *,
+    cleaner: str,
+    before: str,
+    after: str,
+    missing_terms: list[str],
+) -> dict:
+    return {
+        "type": "semantic_preservation_rejected",
+        "cleaner": cleaner,
+        "before": str(before or "").strip(),
+        "after": str(after or "").strip(),
+        "missing_terms": list(missing_terms),
+    }
+
+
+def _attach_common_success_metadata(
+    payload: dict,
+    *,
+    original_text: str,
+    cleaned_text: str,
+    rejected_changes: list[dict] | None = None,
+) -> None:
+    metadata = semantic_metadata(original_text, cleaned_text)
+    payload["original_sentence"] = original_text
+    payload["original_text"] = original_text
+    payload["cleaned_sentence"] = cleaned_text
+    payload["semantic_terms"] = metadata.get("semantic_terms_original", [])
+    payload["preserved_terms"] = metadata.get("preserved_terms", [])
+    payload["filter_operators"] = metadata.get("filter_operators", [])
+    payload["semantic_preservation"] = metadata
+    payload["rejected_changes"] = list(rejected_changes or [])
 
 
 def run_preprocess_text(text: str) -> dict:
@@ -50,16 +90,46 @@ def run_preprocess_text(text: str) -> dict:
         rule_started_perf = time.perf_counter()
         rule_cleaned_text, detected_changes, input_flags = _rule_based_clean_with_changes(source_text)
         rule_duration_ms = int((time.perf_counter() - rule_started_perf) * 1000)
+        semantic_validation = validate_semantic_preservation(source_text, rule_cleaned_text)
+        rejected_changes: list[dict] = []
+        if not semantic_validation["is_valid"]:
+            rejected_changes.append(
+                _semantic_rejection_change(
+                    cleaner="rule_based_cleaner",
+                    before=source_text,
+                    after=rule_cleaned_text,
+                    missing_terms=semantic_validation["missing_terms"],
+                )
+            )
+            fallback_cleaned = _minimal_clean_text(source_text)
+            detected_changes = []
+            if fallback_cleaned != source_text:
+                detected_changes.append(
+                    {
+                        "type": "normalized_whitespace",
+                        "before": source_text,
+                        "after": fallback_cleaned,
+                    }
+                )
+            rule_cleaned_text = fallback_cleaned
+            semantic_validation = validate_semantic_preservation(source_text, rule_cleaned_text)
+
         rule_validation = {
             "is_valid": True,
             "flags": input_flags,
             "change_count": len(detected_changes),
+            "semantic_preservation": semantic_validation,
+            "semantic_preservation_rejected": bool(rejected_changes),
         }
         attempts.append(
             make_attempt(
                 attempt_number=1,
                 input_payload={"text": source_text},
-                output_payload={"cleaned_text": rule_cleaned_text, "detected_changes": detected_changes},
+                output_payload={
+                    "cleaned_text": rule_cleaned_text,
+                    "detected_changes": detected_changes,
+                    "rejected_changes": rejected_changes,
+                },
                 success=True,
                 retry_triggered=False,
                 model_or_method_used="rule_based_cleaner",
@@ -109,12 +179,25 @@ def run_preprocess_text(text: str) -> dict:
         finished_at = _utc_now()
         success_payload = build_preprocess_success_result(cleaned_text=rule_cleaned_text)
         success_payload["detected_changes"] = detected_changes
+        _attach_common_success_metadata(
+            success_payload,
+            original_text=source_text,
+            cleaned_text=rule_cleaned_text,
+            rejected_changes=rejected_changes,
+        )
         success_payload["warnings"] = [
             {
                 "type": "empty_after_cleaning",
                 "message": "Input was classified as empty, punctuation-only, numeric-only, noise-like, or silence-like during low preprocessing.",
             }
         ]
+        if rejected_changes:
+            success_payload["warnings"].append(
+                {
+                    "type": "semantic_preservation_rejected",
+                    "message": "Rejected low preprocessing normalization because it removed semantic BI terms.",
+                }
+            )
         success_payload["attempts"] = attempts
         success_payload["attempts_count"] = len(attempts)
         success_payload["started_at"] = stage_started_at
@@ -124,6 +207,7 @@ def run_preprocess_text(text: str) -> dict:
             "input_chars": len(source_text),
             "cleaned_chars": len(rule_cleaned_text),
             "input_flags": input_flags,
+            "semantic_preservation": semantic_metadata(source_text, rule_cleaned_text),
         }
         success_payload["confidence"] = preprocessing_low_confidence(success_payload)
         return success_payload
@@ -141,6 +225,22 @@ def run_preprocess_text(text: str) -> dict:
             final_cleaned_text = llm_cleaned_text or rule_cleaned_text
             final_changes = list(detected_changes)
             final_changes.extend(llm_changes)
+            final_rejected_changes = list(rejected_changes)
+            llm_semantic_validation = validate_semantic_preservation(source_text, final_cleaned_text)
+            llm_rejected = False
+            if not llm_semantic_validation["is_valid"]:
+                llm_rejected = True
+                final_rejected_changes.append(
+                    _semantic_rejection_change(
+                        cleaner="llm_preprocessor",
+                        before=rule_cleaned_text,
+                        after=final_cleaned_text,
+                        missing_terms=llm_semantic_validation["missing_terms"],
+                    )
+                )
+                final_cleaned_text = rule_cleaned_text
+                final_changes = list(detected_changes)
+                llm_semantic_validation = validate_semantic_preservation(source_text, final_cleaned_text)
             if source_text.strip() and source_text.strip() != final_cleaned_text and not final_changes:
                 final_changes.append(
                     {
@@ -158,17 +258,36 @@ def run_preprocess_text(text: str) -> dict:
                         "cleaned_text": final_cleaned_text,
                         "llm_raw_output": cleaned_text,
                         "post_llm_changes": llm_changes,
+                        "rejected_changes": final_rejected_changes,
                     },
                     success=True,
                     retry_triggered=False,
                     model_or_method_used=f"ollama:{config.ollama_model}",
                     duration_ms=llm_duration_ms,
-                    validation_result={"is_valid": bool(final_cleaned_text.strip()), "flags": llm_flags},
+                    validation_result={
+                        "is_valid": bool(final_cleaned_text.strip()) and llm_semantic_validation["is_valid"],
+                        "flags": llm_flags,
+                        "semantic_preservation": llm_semantic_validation,
+                        "semantic_preservation_rejected": llm_rejected,
+                    },
                 )
             )
             finished_at = _utc_now()
             success_payload = build_preprocess_success_result(cleaned_text=final_cleaned_text)
             success_payload["detected_changes"] = final_changes
+            _attach_common_success_metadata(
+                success_payload,
+                original_text=source_text,
+                cleaned_text=final_cleaned_text,
+                rejected_changes=final_rejected_changes,
+            )
+            if final_rejected_changes:
+                success_payload["warnings"].append(
+                    {
+                        "type": "semantic_preservation_rejected",
+                        "message": "Rejected low preprocessing normalization because it removed semantic BI terms.",
+                    }
+                )
             success_payload["attempts"] = attempts
             success_payload["attempts_count"] = len(attempts)
             success_payload["started_at"] = stage_started_at
@@ -180,6 +299,8 @@ def run_preprocess_text(text: str) -> dict:
                 "final_cleaned_chars": len(final_cleaned_text),
                 "input_flags": input_flags,
                 "llm_output_flags": llm_flags,
+                "semantic_preservation": semantic_metadata(source_text, final_cleaned_text),
+                "rejected_changes": final_rejected_changes,
             }
             success_payload["confidence"] = preprocessing_low_confidence(success_payload)
             return success_payload
@@ -223,6 +344,12 @@ def run_preprocess_text(text: str) -> dict:
                 finished_at = _utc_now()
                 fallback_payload = build_preprocess_success_result(cleaned_text=rule_cleaned_text)
                 fallback_payload["detected_changes"] = detected_changes
+                _attach_common_success_metadata(
+                    fallback_payload,
+                    original_text=source_text,
+                    cleaned_text=rule_cleaned_text,
+                    rejected_changes=rejected_changes,
+                )
                 fallback_payload["attempts"] = attempts
                 fallback_payload["attempts_count"] = len(attempts)
                 fallback_payload["started_at"] = stage_started_at
@@ -245,6 +372,8 @@ def run_preprocess_text(text: str) -> dict:
                     "llm_fallback_used": True,
                     "llm_fallback_error_type": error_type,
                     "llm_fallback_error": str(exc),
+                    "semantic_preservation": semantic_metadata(source_text, rule_cleaned_text),
+                    "rejected_changes": rejected_changes,
                 }
                 _log_event(
                     logger,

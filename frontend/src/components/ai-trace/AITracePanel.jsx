@@ -3,10 +3,10 @@ import { ChevronDown, ChevronUp, Play, RotateCcw, Save } from 'lucide-react'
 
 const statusClasses = {
   success: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200',
-  degraded: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
-  warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+  degraded: 'bg-amber-500/20 text-amber-400 dark:bg-amber-400/40 dark:text-amber-400',
+  warning: 'bg-amber-500/20 text-amber-400 dark:bg-amber-400/40 dark:text-amber-400',
   error: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
-  skipped: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+  skipped: 'bg-brand-700/30 text-brand-300 dark:bg-brand-800/80 dark:text-brand-200',
 }
 
 function StageBadge({ status }) {
@@ -21,19 +21,19 @@ function StageBadge({ status }) {
 function StagePanel({ title, status, defaultOpen = false, children }) {
   const [isOpen, setIsOpen] = useState(defaultOpen)
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-slate-700">
+    <div className="rounded-lg border border-brand-700/30 dark:border-brand-700/40">
       <button
         type="button"
         className="flex w-full items-center justify-between px-4 py-3 text-left"
         onClick={() => setIsOpen((prev) => !prev)}
       >
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</span>
+          <span className="text-sm font-semibold text-white dark:text-brand-100">{title}</span>
           <StageBadge status={status} />
         </div>
-        {isOpen ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
+        {isOpen ? <ChevronUp className="h-4 w-4 text-brand-300/80" /> : <ChevronDown className="h-4 w-4 text-brand-300/80" />}
       </button>
-      {isOpen && <div className="border-t border-slate-200 p-4 dark:border-slate-700">{children}</div>}
+      {isOpen && <div className="border-t border-brand-700/30 p-4 dark:border-brand-700/40">{children}</div>}
     </div>
   )
 }
@@ -42,9 +42,9 @@ function KeyValueGrid({ items }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {items.map((item) => (
-        <div key={item.label} className="rounded-md bg-slate-50 p-3 dark:bg-slate-900/30">
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{item.label}</p>
-          <p className="mt-1 break-words text-sm text-slate-800 dark:text-slate-100">{item.value ?? '-'}</p>
+        <div key={item.label} className="rounded-md bg-[rgba(255,255,255,0.04)] p-3 dark:bg-brand-950/30">
+          <p className="text-xs uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">{item.label}</p>
+          <p className="mt-1 break-words text-sm text-[var(--c-text)] dark:text-brand-100">{item.value ?? '-'}</p>
         </div>
       ))}
     </div>
@@ -53,34 +53,39 @@ function KeyValueGrid({ items }) {
 
 function JsonBlock({ value }) {
   return (
-    <pre className="overflow-x-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
+    <pre className="overflow-x-auto rounded-md bg-brand-950 p-3 text-xs text-brand-100">
       {JSON.stringify(value ?? {}, null, 2)}
     </pre>
   )
 }
 
 function DataTable({ columns = [], rows = [] }) {
-  if (!columns.length || !rows.length) {
-    return <p className="text-sm text-slate-500 dark:text-slate-400">No sample rows available.</p>
+  const normalizedColumns = columns
+    .map((column) => (typeof column === 'object' && column !== null ? String(column.name || '') : String(column || '')))
+    .map((column) => column.trim())
+    .filter(Boolean)
+
+  if (!normalizedColumns.length || !rows.length) {
+    return <p className="text-sm text-brand-300/80 dark:text-brand-300/60">No sample rows available.</p>
   }
 
   return (
-    <div className="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700">
-      <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
-        <thead className="bg-slate-50 dark:bg-slate-900/30">
+    <div className="overflow-x-auto rounded-md border border-brand-700/30 dark:border-brand-700/40">
+      <table className="min-w-full divide-y divide-brand-700/30 text-sm dark:divide-brand-700/40">
+        <thead className="bg-[rgba(255,255,255,0.04)] dark:bg-brand-950/30">
           <tr>
-            {columns.map((column) => (
-              <th key={column} className="px-3 py-2 text-left font-semibold text-slate-700 dark:text-slate-200">
+            {normalizedColumns.map((column) => (
+              <th key={column} className="px-3 py-2 text-left font-semibold text-brand-300 dark:text-brand-200">
                 {column}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+        <tbody className="divide-y divide-brand-700/30 dark:divide-brand-700/40">
           {rows.map((row, index) => (
             <tr key={index}>
-              {columns.map((column) => (
-                <td key={`${index}-${column}`} className="px-3 py-2 text-slate-700 dark:text-slate-200">
+              {normalizedColumns.map((column) => (
+                <td key={`${index}-${column}`} className="px-3 py-2 text-brand-300 dark:text-brand-200">
                   {String(row?.[column] ?? '-')}
                 </td>
               ))}
@@ -123,11 +128,11 @@ function ForecastPreview({ historical = [], forecast = [] }) {
   }, [historical, forecast])
 
   if (!points) {
-    return <p className="text-sm text-slate-500 dark:text-slate-400">No forecast preview available.</p>
+    return <p className="text-sm text-brand-300/80 dark:text-brand-300/60">No forecast preview available.</p>
   }
 
   return (
-    <svg viewBox="0 0 100 100" className="h-32 w-full rounded-md border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/30">
+    <svg viewBox="0 0 100 100" className="h-32 w-full rounded-md border border-brand-700/30 bg-[var(--c-card-bg)] dark:border-brand-700/40 dark:bg-brand-950/30">
       <path d="M 75 5 L 75 95" stroke="#cbd5e1" strokeDasharray="2 2" fill="none" />
       <path d={points.historicalPath} stroke="#0ea5e9" strokeWidth="2" fill="none" />
       <path d={points.forecastPath} stroke="#f97316" strokeWidth="2" fill="none" />
@@ -256,14 +261,14 @@ function AITracePanel({
 
   return (
     <div className="space-y-3">
-      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">AI Trace</h3>
+      <h3 className="text-lg font-semibold text-white dark:text-brand-100">AI Trace</h3>
 
       <StagePanel title="1. Original Question" status={trace.original_question?.status || 'success'} defaultOpen>
         <textarea
           value={currentQuestion}
           onChange={(event) => onQuestionChange?.(event.target.value)}
           readOnly={!questionEditable}
-          className="h-24 w-full rounded-md border border-slate-300 bg-white p-3 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-100"
+          className="h-24 w-full rounded-md border border-brand-700/40 bg-[var(--c-card-bg)] p-3 text-sm text-[var(--c-text)] dark:border-brand-700/40 dark:bg-brand-950/40 dark:text-brand-100"
           spellCheck={false}
         />
         <div className="mt-3 flex justify-end">
@@ -271,7 +276,7 @@ function AITracePanel({
             type="button"
             onClick={() => onRerunQuestion?.()}
             disabled={!questionRerunnable || !currentQuestion.trim() || isRerunningQuestion}
-            className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCcw className={`h-4 w-4 ${isRerunningQuestion ? 'animate-spin' : ''}`} />
             Re-run
@@ -287,13 +292,13 @@ function AITracePanel({
           ]}
         />
         <div className="mt-3">
-          <p className="mb-2 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Changes</p>
+          <p className="mb-2 text-xs uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">Changes</p>
           {lowChanges.length ? (
-            <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-200">
+            <ul className="space-y-1 text-sm text-brand-300 dark:text-brand-200">
               {lowChanges.map((item, index) => <li key={`${item}-${index}`}>- {item}</li>)}
             </ul>
           ) : (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No significant changes.</p>
+            <p className="text-sm text-brand-300/80 dark:text-brand-300/60">No significant changes.</p>
           )}
         </div>
       </StagePanel>
@@ -323,17 +328,17 @@ function AITracePanel({
           ]}
         />
         <div className="mt-3">
-          <p className="mb-2 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Corrections</p>
+          <p className="mb-2 text-xs uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">Corrections</p>
           {highCorrections.length ? (
-            <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-200">
+            <ul className="space-y-1 text-sm text-brand-300 dark:text-brand-200">
               {highCorrections.map((item, index) => <li key={`${item}-${index}`}>- {item}</li>)}
             </ul>
           ) : (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No corrections applied.</p>
+            <p className="text-sm text-brand-300/80 dark:text-brand-300/60">No corrections applied.</p>
           )}
         </div>
         {Array.isArray(preHigh.user_friendly_messages) && preHigh.user_friendly_messages.length > 0 && (
-          <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+          <div className="mt-3 rounded-md bg-amber-500/15 p-3 text-sm text-amber-400 dark:bg-amber-400/20 dark:text-amber-400">
             {preHigh.user_friendly_messages.map((message, index) => (
               <p key={`${message}-${index}`}>- {String(message)}</p>
             ))}
@@ -342,7 +347,7 @@ function AITracePanel({
       </StagePanel>
 
       <StagePanel title="5. Intent Extraction" status={intent.status || 'skipped'}>
-        <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
+        <div className="space-y-2 text-sm text-brand-300 dark:text-brand-200">
           <p><span className="font-semibold">Intent:</span> {intentView.intentType}</p>
           <div>
             <p className="font-semibold">Columns:</p>
@@ -351,7 +356,7 @@ function AITracePanel({
                 {intentView.columns.map((column, index) => <li key={`${column}-${index}`}>- {column}</li>)}
               </ul>
             ) : (
-              <p className="text-slate-500 dark:text-slate-400">- None inferred</p>
+              <p className="text-brand-300/80 dark:text-brand-300/60">- None inferred</p>
             )}
           </div>
           <p><span className="font-semibold">Operation:</span> {intentView.operationText}</p>
@@ -364,7 +369,7 @@ function AITracePanel({
           value={currentSQL}
           onChange={(event) => onSQLChange?.(event.target.value)}
           readOnly={!sqlEditable}
-          className="h-56 w-full rounded-md bg-slate-900 p-3 font-mono text-xs text-green-300"
+          className="h-56 w-full rounded-md bg-brand-950 p-3 font-mono text-xs text-green-300"
           spellCheck={false}
         />
         <div className="mt-3 flex gap-2">
@@ -381,7 +386,7 @@ function AITracePanel({
             type="button"
             onClick={() => onSaveQuery?.()}
             disabled={!onSaveQuery || isSavingSQL || !hasSQLChanges}
-            className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Save className="h-4 w-4" />
             Save Query
@@ -416,11 +421,11 @@ function AITracePanel({
             ]}
           />
           <div className="mt-3">
-            <p className="mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Validation Notes</p>
+            <p className="mb-1 text-xs uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">Validation Notes</p>
             <JsonBlock value={forecasting?.validation_notes || []} />
           </div>
           <div className="mt-3">
-            <p className="mb-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Actual vs Forecast Preview</p>
+            <p className="mb-1 text-xs uppercase tracking-wide text-brand-300/80 dark:text-brand-300/60">Actual vs Forecast Preview</p>
             <ForecastPreview
               historical={forecasting?.historical_series_sample || []}
               forecast={forecasting?.forecast_output_sample || []}
@@ -440,7 +445,7 @@ function AITracePanel({
       </StagePanel>
 
       <StagePanel title="Errors" status={errors.length ? 'error' : 'success'}>
-        {errors.length ? <JsonBlock value={errors} /> : <p className="text-sm text-slate-600 dark:text-slate-300">No stage errors reported.</p>}
+        {errors.length ? <JsonBlock value={errors} /> : <p className="text-sm text-[var(--c-muted)] dark:text-brand-200/70">No stage errors reported.</p>}
       </StagePanel>
     </div>
   )

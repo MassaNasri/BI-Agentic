@@ -79,7 +79,7 @@ class CleanRowListener:
             "host": os.getenv("CLICKHOUSE_HOST", "clickhouse"),
             "port": int(os.getenv("CLICKHOUSE_PORT", "9000")),  # Native protocol port
             "user": os.getenv("CLICKHOUSE_USER", "etl_user"),
-            "password": os.getenv("CLICKHOUSE_PASSWORD", "etl_pass123"),
+            "password": os.getenv("CLICKHOUSE_PASSWORD", ""),
             "database": os.getenv("CLICKHOUSE_DATABASE", "etl"),
             "connect_timeout": int(os.getenv("CLICKHOUSE_CONNECT_TIMEOUT", "10")),
             "send_receive_timeout": int(os.getenv("CLICKHOUSE_SEND_RECEIVE_TIMEOUT", "300")),
@@ -103,8 +103,10 @@ class CleanRowListener:
         # Batch buffers per table
         self.batch_buffers: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.pending_idempotency_keys: Dict[str, List[str]] = defaultdict(list)
+        self.pending_lineage_records: Dict[str, List[LineageRecord]] = defaultdict(list)
         self.table_sources: Dict[str, str] = {}
         self.table_schemas: Dict[str, Dict[str, str]] = {}  # table_name -> {col: type}
+        self.table_schema_scopes: Dict[str, str] = {}  # table_name -> ingestion job scope last verified
         self.column_name_mappings: Dict[str, Dict[str, str]] = defaultdict(dict)
         self.buffered_rows_total = 0
         
@@ -112,6 +114,7 @@ class CleanRowListener:
         self.loaded_count = 0
         self.error_count = 0
         self.source_stats: Dict[str, Dict[str, int]] = {}  # source -> {loaded, failed}
+        self.source_scopes: Dict[str, Dict[str, Any]] = {}
         
         # Metadata emission interval
         self.metadata_interval = 5000  # Emit metadata every 5000 rows
@@ -227,7 +230,20 @@ class CleanRowListener:
         except Exception as exc:
             logger.warning("[LOADER] Lineage write failed and was skipped: %s", exc)
 
-    def _ensure_table_schema(self, source: str, row_data: Dict[str, Any]) -> Optional[str]:
+    def _safe_record_lineage_batch(self, records: List[LineageRecord]) -> None:
+        if not self.lineage_tracker or not records:
+            return
+        try:
+            self.lineage_tracker.record_transformations(records)
+        except Exception as exc:
+            logger.warning("[LOADER] Batch lineage write failed and was skipped: %s", exc)
+
+    def _ensure_table_schema(
+        self,
+        source: str,
+        row_data: Dict[str, Any],
+        ingestion_job_id: str | None = None,
+    ) -> Optional[str]:
         """
         Ensure table exists with correct schema.
         
@@ -247,9 +263,30 @@ class CleanRowListener:
             col: self._infer_clickhouse_type(col, val) for col, val in row_data.items()
         }
         cached_columns = self.table_schemas.get(table_name, {}) if not self.stateless_mode else {}
+        cache_scope = str(ingestion_job_id or "legacy")
+        cached_scope = self.table_schema_scopes.get(table_name)
         columns = {**cached_columns, **incoming_columns}
         
         try:
+            # Once a table is known in this process, avoid two ClickHouse
+            # metadata queries per row. A new ingestion job must revalidate the
+            # physical table because the query service may have deleted it.
+            if cached_columns and cached_scope == cache_scope:
+                to_add = {
+                    col: col_type for col, col_type in incoming_columns.items()
+                    if col not in cached_columns
+                }
+                if to_add:
+                    self.loader.client.add_columns_if_missing(table_name, to_add)
+                    cached_columns = {**cached_columns, **to_add}
+                    self.table_schemas[table_name] = cached_columns
+                    logger.info(
+                        "[LOADER] Evolved cached table %s with new columns: %s",
+                        table_name,
+                        sorted(to_add.keys()),
+                    )
+                return table_name
+
             # Create table if it doesn't exist
             if not self.loader.client.table_exists(table_name):
                 engine = "MergeTree()"
@@ -287,6 +324,7 @@ class CleanRowListener:
 
             if not self.stateless_mode:
                 self.table_schemas[table_name] = columns
+                self.table_schema_scopes[table_name] = cache_scope
             
             return table_name
             
@@ -295,26 +333,37 @@ class CleanRowListener:
             return None
 
     def _infer_clickhouse_type(self, column_name: str, value: Any) -> str:
+        """Infer a storage type without losing SQL NULL semantics.
+
+        Pipeline metadata is always populated by the loader, while source
+        columns may be NULL in any row even when the first observed value is
+        non-NULL.  Source columns therefore use Nullable types from the start;
+        this also prevents later batches from failing against a schema inferred
+        from an earlier non-NULL sample.
+        """
         if column_name in {"_loaded_at", "_extracted_at", "_cleaned_at"}:
             return "DateTime64(3)"
+        inferred = "String"
         if isinstance(value, bool):
-            return "Bool"
-        if isinstance(value, int) and not isinstance(value, bool):
-            return "Int64"
-        if isinstance(value, float):
-            return "Float64"
-        if isinstance(value, datetime):
-            return "DateTime64(3)"
-        if isinstance(value, str):
+            inferred = "Bool"
+        elif isinstance(value, int) and not isinstance(value, bool):
+            inferred = "Int64"
+        elif isinstance(value, float):
+            inferred = "Float64"
+        elif isinstance(value, datetime):
+            inferred = "DateTime64(3)"
+        elif isinstance(value, str):
             candidate = value.strip()
             if "T" in candidate:
                 normalized = candidate[:-1] + "+00:00" if candidate.endswith("Z") else candidate
                 try:
                     datetime.fromisoformat(normalized)
-                    return "DateTime64(3)"
+                    inferred = "DateTime64(3)"
                 except ValueError:
                     pass
-        return "String"
+        if not column_name.startswith("_"):
+            return f"Nullable({inferred})"
+        return inferred
 
     def _emit_backpressure_signal(self, level: str, table_name: str, buffered_rows: int) -> None:
         payload = {
@@ -362,22 +411,31 @@ class CleanRowListener:
         
         batch = list(self.batch_buffers[table_name])
         pending_hashes = list(self.pending_idempotency_keys.get(table_name, []))
+        pending_lineage = list(self.pending_lineage_records.get(table_name, []))
         pending_claims: List[IdempotencyClaim] = []
         if self.idempotency_manager and pending_hashes:
-            key_objects = [self._build_idempotency_key(source, dedup_hash) for dedup_hash in pending_hashes]
+            ingestion_job_id = self.source_scopes.get(source, {}).get("ingestion_job_id")
+            key_objects = [
+                self._build_idempotency_key(source, dedup_hash, ingestion_job_id)
+                for dedup_hash in pending_hashes
+            ]
             claims = self.idempotency_manager.claim_new_keys(key_objects, PipelineStage.LOAD)
             claim_by_dedup = {claim.key.to_dedup_key(): claim for claim in claims}
-            allowed = set(claim_by_dedup.keys())
             filtered_batch: List[Dict[str, Any]] = []
             filtered_hashes: List[str] = []
             filtered_claims: List[IdempotencyClaim] = []
+            filtered_lineage: List[LineageRecord] = []
             duplicates = 0
-            for row, dedup_hash in zip(batch, pending_hashes):
-                key = self._build_idempotency_key(source, dedup_hash)
-                if key.to_dedup_key() in allowed:
+            for index, (row, dedup_hash) in enumerate(zip(batch, pending_hashes)):
+                key = self._build_idempotency_key(source, dedup_hash, ingestion_job_id)
+                dedup_key = key.to_dedup_key()
+                claim = claim_by_dedup.pop(dedup_key, None)
+                if claim is not None:
                     filtered_batch.append(row)
                     filtered_hashes.append(dedup_hash)
-                    filtered_claims.append(claim_by_dedup[key.to_dedup_key()])
+                    filtered_claims.append(claim)
+                    if index < len(pending_lineage):
+                        filtered_lineage.append(pending_lineage[index])
                 else:
                     duplicates += 1
             if duplicates:
@@ -386,10 +444,12 @@ class CleanRowListener:
             batch = filtered_batch
             pending_hashes = filtered_hashes
             pending_claims = filtered_claims
+            pending_lineage = filtered_lineage
 
         if not batch:
             self.batch_buffers[table_name] = []
             self.pending_idempotency_keys[table_name] = []
+            self.pending_lineage_records[table_name] = []
             return True
 
         start_time = time.time()
@@ -422,7 +482,8 @@ class CleanRowListener:
                 "table": table_name,
                 "status": "success",
                 "row_count": inserted,
-                "load_duration_ms": duration_ms
+                "load_duration_ms": duration_ms,
+                **self.source_scopes.get(source, {}),
             }
             try:
                 self.producer.send("load_rows_topic", status_message)
@@ -432,11 +493,15 @@ class CleanRowListener:
             logger.info(f"[LOADER] Flushed batch: {inserted} rows to {table_name} in {duration_ms}ms")
             if PROCESS_LATENCY:
                 PROCESS_LATENCY.labels(service="loader", stage="load").observe((time.time() - start_time))
+
+            self._safe_record_lineage_batch(pending_lineage)
             
             # Clear batch
             self.buffered_rows_total = max(0, self.buffered_rows_total - len(batch))
             self.batch_buffers[table_name] = []
             self.pending_idempotency_keys[table_name] = []
+            self.pending_lineage_records[table_name] = []
+            self._emit_loading_metadata(source)
             return True
             
         except Exception as e:
@@ -453,7 +518,8 @@ class CleanRowListener:
                 "table": table_name,
                 "status": "error",
                 "error": str(e),
-                "row_count": len(batch)
+                "row_count": len(batch),
+                **self.source_scopes.get(source, {}),
             }
             try:
                 self.producer.send("load_rows_topic", error_message)
@@ -469,6 +535,7 @@ class CleanRowListener:
                 self.buffered_rows_total = max(0, self.buffered_rows_total - len(batch))
                 self.batch_buffers[table_name] = []
                 self.pending_idempotency_keys[table_name] = []
+                self.pending_lineage_records[table_name] = []
                 logger.warning("[LOADER] Batch moved to DLQ after load failure")
                 return True
             if self.idempotency_manager and pending_claims:
@@ -491,6 +558,7 @@ class CleanRowListener:
             rows_failed=stats["failed"],
             errors=[]  # Can be enhanced to track specific errors
         )
+        metadata.update(self.source_scopes.get(source, {}))
 
         try:
             self.producer.send("metadata_topic", metadata)
@@ -507,6 +575,9 @@ class CleanRowListener:
         """
         source = message.get("source") or message.get("source_id") or "unknown"
         row_data = message.get("data", {})
+        scope = MetadataSchema.scope_fields(message)
+        if scope:
+            self.source_scopes[source] = scope
         
         if not row_data:
             logger.debug(f"[LOADER] Skipping empty row from {source}")
@@ -551,19 +622,21 @@ class CleanRowListener:
                 dedup_key=transformed_dedup_key or "",
                 stage="load",
             )
-            self._safe_record_lineage(
-                LineageRecord(
-                    row_id=lineage_row_id,
-                    source_id=source,
-                    batch_id=batch_id or "",
-                    stage="load",
-                    applied_rules=[],
-                    parent_row_ids=[UUID(parent_lineage_id)] if parent_lineage_id else [],
-                )
+            lineage_record = LineageRecord(
+                row_id=lineage_row_id,
+                source_id=source,
+                batch_id=batch_id or "",
+                stage="load",
+                applied_rules=[],
+                parent_row_ids=[UUID(parent_lineage_id)] if parent_lineage_id else [],
             )
             
             # Ensure table schema exists
-            table_name = self._ensure_table_schema(source, enriched_row)
+            table_name = self._ensure_table_schema(
+                source,
+                enriched_row,
+                scope.get("ingestion_job_id"),
+            )
             
             if not table_name:
                 self.error_count += 1
@@ -573,6 +646,7 @@ class CleanRowListener:
             # Add to batch buffer
             self.batch_buffers[table_name].append(enriched_row)
             self.pending_idempotency_keys[table_name].append(row_dedup_key)
+            self.pending_lineage_records[table_name].append(lineage_record)
             self.table_sources[table_name] = source
             self.buffered_rows_total += 1
             if ROWS_PROCESSED:
@@ -597,11 +671,49 @@ class CleanRowListener:
             logger.error(traceback.format_exc())
             return None
 
-    def _build_idempotency_key(self, source: str, row_hash: str):
-        batch_id = f"load:{source}"
+    def _build_idempotency_key(self, source: str, row_hash: str, ingestion_job_id: str | None = None):
+        job_scope = str(ingestion_job_id or "legacy")
+        batch_id = f"load:{source}:{job_scope}"
         return IdempotencyKey(source_id=source, batch_id=batch_id, row_hash=row_hash)
 
     def _process_message(self, message: Dict[str, Any]) -> bool:
+        if isinstance(message, dict) and message.get("schema_only") is True:
+            source = str(message.get("source") or message.get("source_id") or "")
+            columns = message.get("columns") or []
+            if not source or not isinstance(columns, list):
+                logger.error("[LOADER] Invalid empty-table schema message")
+                return False
+            column_types = {}
+            for column in columns:
+                if not isinstance(column, dict):
+                    continue
+                original = column.get("column_name") or column.get("name")
+                if original:
+                    column_types[self._sanitize_column_name(str(original))] = "Nullable(String)"
+            if not column_types:
+                logger.error("[LOADER] Empty-table schema has no usable columns")
+                return False
+            table_name = self._sanitize_table_name(source)
+            try:
+                if not self.loader.client.table_exists(table_name):
+                    self.loader.client.create_table(
+                        table_name,
+                        column_types,
+                        engine="MergeTree()",
+                        order_by="tuple()",
+                        settings="index_granularity=8192",
+                    )
+                self.table_schemas[table_name] = column_types
+                self.table_schema_scopes[table_name] = str(message.get("ingestion_job_id") or "legacy")
+                self.source_scopes[source] = MetadataSchema.scope_fields(message)
+                logger.info(
+                    "empty_snapshot_materialized workspace=%s dataset=%s table=%s rows=0",
+                    message.get("workspace_id"), message.get("dataset_id"), table_name,
+                )
+                return True
+            except Exception as exc:
+                logger.error("[LOADER] Failed to materialize empty snapshot table %s: %s", table_name, exc)
+                return False
         impacted = set()
         if isinstance(message, dict) and "rows" in message:
             parent = {k: v for k, v in message.items() if k != "rows"}
@@ -640,6 +752,8 @@ class CleanRowListener:
                     self.consumer.commit(record)
                 else:
                     logger.warning("[LOADER] Message processing failed, offset not committed")
+                    self.consumer.rewind(record)
+                    time.sleep(max(0.0, float(os.getenv("KAFKA_PROCESSING_RETRY_SECONDS", "2"))))
         except KeyboardInterrupt:
             logger.info("[LOADER] Shutting down...")
         except Exception as e:

@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from rest_framework.exceptions import APIException, NotFound, PermissionDenied
+
+from .workspace_client import WorkspaceResolution, WorkspaceResolutionStatus
+
 
 @dataclass
 class IdentityContext:
@@ -63,3 +67,27 @@ def request_user_id(request) -> str:
 
 def request_user_email(request) -> str:
     return extract_identity_context(request).email
+
+
+class WorkspaceDependencyUnavailable(APIException):
+    status_code = 503
+    default_detail = "Workspace authorization service is unavailable."
+    default_code = "workspace_authorization_unavailable"
+
+
+class WorkspaceAuthorizationInvalid(APIException):
+    status_code = 502
+    default_detail = "Workspace authorization service returned an invalid response."
+    default_code = "workspace_authorization_invalid"
+
+
+def require_authorized_workspace(resolution: WorkspaceResolution):
+    if resolution.status is WorkspaceResolutionStatus.AUTHORIZED and resolution.context:
+        return resolution.context
+    if resolution.status is WorkspaceResolutionStatus.DENIED:
+        raise PermissionDenied("Workspace access denied.")
+    if resolution.status is WorkspaceResolutionStatus.NOT_FOUND:
+        raise NotFound("Workspace not found.")
+    if resolution.status is WorkspaceResolutionStatus.DEPENDENCY_UNAVAILABLE:
+        raise WorkspaceDependencyUnavailable()
+    raise WorkspaceAuthorizationInvalid()

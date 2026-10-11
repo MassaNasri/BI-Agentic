@@ -229,7 +229,7 @@ class MetabaseService:
             metrics = self._string_list(settings.get("graph.metrics")) or self._string_list(settings.get("numeric_columns"))
             if dimensions and metrics:
                 settings["graph.dimensions"] = [dimensions[0]]
-                settings["graph.metrics"] = [metrics[0]]
+                settings["graph.metrics"] = metrics
             else:
                 fallback_applied = True
                 fallback_reason = "invalid_line_shape"
@@ -462,15 +462,67 @@ class MetabaseService:
         size_x: int = 6,
         size_y: int = 4,
     ) -> bool:
-        payload = {
-            "cardId": question_id,
-            "row": row,
-            "col": col,
-            "sizeX": size_x,
-            "sizeY": size_y,
-        }
-        response = self._request("POST", f"/api/dashboard/{dashboard_id}/cards", json=payload)
-        if response and response.status_code in (200, 201):
+        self._set_last_error(None)
+        dashboard = self.get_dashboard(dashboard_id)
+        if not dashboard:
+            if self.last_error is None:
+                self._set_last_error("add_to_dashboard_failed: dashboard_not_found")
+            return False
+
+        existing_dashcards = dashboard.get("dashcards") if isinstance(dashboard, dict) else []
+        dashcards_payload: list[Dict[str, Any]] = []
+
+        if isinstance(existing_dashcards, list):
+            for dashcard in existing_dashcards:
+                if not isinstance(dashcard, dict):
+                    continue
+                dashcard_id = dashcard.get("id")
+                if dashcard_id is None:
+                    continue
+                item: Dict[str, Any] = {
+                    "id": dashcard_id,
+                    "size_x": int(dashcard.get("size_x", size_x)),
+                    "size_y": int(dashcard.get("size_y", size_y)),
+                    "row": int(dashcard.get("row", 0)),
+                    "col": int(dashcard.get("col", 0)),
+                }
+                card_id = dashcard.get("card_id")
+                if card_id is None and isinstance(dashcard.get("card"), dict):
+                    card_id = dashcard["card"].get("id")
+                if card_id is not None:
+                    item["card_id"] = int(card_id)
+
+                parameter_mappings = dashcard.get("parameter_mappings")
+                if parameter_mappings is not None:
+                    item["parameter_mappings"] = parameter_mappings
+                series = dashcard.get("series")
+                if series is not None:
+                    item["series"] = series
+                tab_id = dashcard.get("dashboard_tab_id")
+                if tab_id is not None:
+                    item["dashboard_tab_id"] = tab_id
+                dashcards_payload.append(item)
+
+        temporary_dashcard_id = -int(time.time() * 1000)
+        dashcards_payload.append(
+            {
+                "id": temporary_dashcard_id,
+                "card_id": int(question_id),
+                "row": int(row),
+                "col": int(col),
+                "size_x": int(size_x),
+                "size_y": int(size_y),
+                "series": [],
+                "parameter_mappings": [],
+            }
+        )
+
+        response = self._request(
+            "PUT",
+            f"/api/dashboard/{dashboard_id}",
+            json={"dashcards": dashcards_payload},
+        )
+        if response and response.status_code == 200:
             return True
         if response:
             details = self._extract_error_details(response)
@@ -518,7 +570,7 @@ class MetabaseService:
 
             jwt_service = get_jwt_service()
             token = jwt_service.generate_question_token(question_id, params=params or {})
-            return f"{self.embed_base_url}/embed/question/{token}#bordered=true&titled=true"
+            return f"{self.embed_base_url}/embed/question/{token}#theme=night&bordered=true&titled=true"
         except Exception as exc:
             self._set_last_error(f"question_embed_url_failed: {exc}")
             logger.error("Failed to generate question embed URL for %s: %s", question_id, exc)
@@ -531,7 +583,7 @@ class MetabaseService:
 
             jwt_service = get_jwt_service()
             token = jwt_service.generate_dashboard_token(dashboard_id, params=params or {})
-            return f"{self.embed_base_url}/embed/dashboard/{token}#bordered=true&titled=true"
+            return f"{self.embed_base_url}/embed/dashboard/{token}#theme=night&bordered=true&titled=true&background=false"
         except Exception as exc:
             self._set_last_error(f"dashboard_embed_url_failed: {exc}")
             logger.error("Failed to generate dashboard embed URL for %s: %s", dashboard_id, exc)

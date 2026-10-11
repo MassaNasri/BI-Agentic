@@ -1,0 +1,288 @@
+{
+  "environment": "LOCAL DEVELOPMENT",
+  "database": "127.0.0.1:5432/bi_voice_agent",
+  "postgres_clear": [
+    "dashboard_pages",
+    "django_admin_log",
+    "django_session",
+    "invitations",
+    "manager_databases",
+    "notification_dispatch_logs",
+    "password_reset_codes",
+    "report_page_assignments",
+    "sql_edit_history",
+    "subscription_free_tier_usage",
+    "subscription_payments",
+    "token_blacklist_blacklistedtoken",
+    "token_blacklist_outstandingtoken",
+    "users",
+    "users_groups",
+    "users_user_permissions",
+    "voice_pipeline_jobs",
+    "voice_reports",
+    "workspace_members",
+    "workspace_subscriptions",
+    "workspaces"
+  ],
+  "postgres_preserve": [
+    "auth_group",
+    "auth_group_permissions",
+    "auth_permission",
+    "django_content_type",
+    "django_migrations",
+    "subscription_plans"
+  ],
+  "postgres_before": {
+    "auth_group": 0,
+    "auth_group_permissions": 0,
+    "auth_permission": 96,
+    "dashboard_pages": 6,
+    "django_admin_log": 0,
+    "django_content_type": 24,
+    "django_migrations": 56,
+    "django_session": 0,
+    "invitations": 2,
+    "manager_databases": 2,
+    "notification_dispatch_logs": 223,
+    "password_reset_codes": 4,
+    "report_page_assignments": 334,
+    "sql_edit_history": 0,
+    "subscription_free_tier_usage": 3,
+    "subscription_payments": 3,
+    "subscription_plans": 2,
+    "token_blacklist_blacklistedtoken": 20,
+    "token_blacklist_outstandingtoken": 301,
+    "users": 5,
+    "users_groups": 0,
+    "users_user_permissions": 0,
+    "voice_pipeline_jobs": 134,
+    "voice_reports": 331,
+    "workspace_members": 2,
+    "workspace_subscriptions": 3,
+    "workspaces": 3
+  },
+  "clickhouse_clear": [
+    "etl.deduplication_log",
+    "etl.quality_anomalies",
+    "etl.quality_metrics",
+    "etl.quarantine",
+    "etl.sales_3months_realistic_csv"
+  ],
+  "clickhouse_preserve": [
+    "etl.schema_contract_registry"
+  ],
+  "clickhouse_before": {
+    "deduplication_log": 540,
+    "quality_anomalies": 0,
+    "quality_metrics": 2,
+    "quarantine": 0,
+    "sales_3months_realistic_csv": 180,
+    "schema_contract_registry": 0
+  },
+  "redis_db": 1,
+  "redis_keys": [
+    "_kombu.binding.celery.pidbox",
+    "_kombu.binding.celeryev",
+    "_kombu.binding.reply.celery.pidbox",
+    "_kombu.binding.voice_pipeline"
+  ],
+  "kafka": "15 business topics have zero end offsets; preserve topics and infrastructure offsets",
+  "kafka_end_offsets": {
+    "clean_rows_dlq:0": 0,
+    "clean_rows_topic:0": 0,
+    "connection_topic:0": 0,
+    "errors:0": 0,
+    "extracted_rows_dlq:0": 0,
+    "extracted_rows_topic:0": 0,
+    "load_requests:0": 0,
+    "load_rows_dlq:0": 0,
+    "load_rows_topic:0": 0,
+    "metadata_topic:0": 0,
+    "metadata_updates:0": 0,
+    "quarantine:0": 0,
+    "raw_data:0": 0,
+    "schema_topic:0": 0,
+    "transformed_data:0": 0
+  },
+  "volume_files": {
+    "bi-voice-agent_uploaded-files": [
+      {
+        "path": "4128a469-992c-4cc5-b521-521917fbe399_sales_3months_realistic.csv",
+        "sha256": "51b07587b380145e0ece1db7cb9972122a791c074aa877859a5825064eeca928"
+      },
+      {
+        "path": "42c266dd-063f-4771-9ef1-430350fab120_population_distribution.csv",
+        "sha256": "6643b9ea1efb77e8db856a585bbeacf0a01a0bf8cadcce9a311d2c8aacbbc0cf"
+      },
+      {
+        "path": "77bb586d-583b-4a47-a864-646b6d445afe_sales_3months_realistic.csv",
+        "sha256": "51b07587b380145e0ece1db7cb9972122a791c074aa877859a5825064eeca928"
+      },
+      {
+        "path": "7f73ace5-82a0-405e-834b-75e155f51b0a_population_distribution.csv",
+        "sha256": "6643b9ea1efb77e8db856a585bbeacf0a01a0bf8cadcce9a311d2c8aacbbc0cf"
+      },
+      {
+        "path": "84a9b5aa-deec-416b-bafa-9e5b2db1c73a_sales_3months_realistic.csv",
+        "sha256": "e485398381b039101a04e642d31cf4e940c08cc2745f9d99dd20c182e4dd98cb"
+      },
+      {
+        "path": "a74189f6-f4d8-499b-98f7-ff36af1592c3_sales_3months_realistic.csv",
+        "sha256": "51b07587b380145e0ece1db7cb9972122a791c074aa877859a5825064eeca928"
+      },
+      {
+        "path": "aa40b027-71e3-42df-97da-974ad6b46c83_sales_3months_realistic.csv",
+        "sha256": "51b07587b380145e0ece1db7cb9972122a791c074aa877859a5825064eeca928"
+      },
+      {
+        "path": "e75fb9d6-79e1-4a61-a51a-e9e773b8ec09_sales_3months_realistic.csv",
+        "sha256": "51b07587b380145e0ece1db7cb9972122a791c074aa877859a5825064eeca928"
+      },
+      {
+        "path": "fb737f24-beab-4f03-b41c-7e76417c6493_sales_3months_realistic.csv",
+        "sha256": "51b07587b380145e0ece1db7cb9972122a791c074aa877859a5825064eeca928"
+      }
+    ],
+    "bi-voice-agent_voice_service_media": [
+      {
+        "path": "workspaces/1/audio/032d126f-38b5-4c64-b571-b78be7ce14d7_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/1dda99ee-fa75-44fb-aa5b-1eba0dc209a3_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/2eaff302-186a-4e27-a38d-3bdb86194719_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/45c5cfa5-7c61-4fc7-8cd2-e1cff029c5c0_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/5785915c-48c4-4c59-94b7-f72e3151a1d9_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/58d7bafd-fab2-4c4e-8147-18070e567cf8_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/5a46811a-6d4d-4cd0-9b05-8111b6e627dc_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/78baa50b-97ad-470d-b783-1e8e36478e1d_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/79ea9ab2-c9b6-4c8d-8513-ce3c3a448d5d_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/7ac2c3d6-9d65-46dc-8247-c2696db56446_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/7fd20289-1199-484a-a4bf-5b923a84cb05_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/8bbbe326-f252-46cc-a0bd-bd3dc0f7d6af_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/8c36cd22-86e5-447c-a49b-62bb1a7cda47_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/ee4823fe-7a56-44a1-bdb9-bcff0161055b_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/1/audio/f8974281-3e9e-4c57-86b3-592546acaf66_Recording (2).m4a",
+        "sha256": "9fdb351ed52425b2265e1da77167c5b3ad8747506a546eac3bb7add6ebb7cd13"
+      },
+      {
+        "path": "workspaces/2026/05/07/text-input/0f0e4dc7-ee89-47f8-bda4-a7a45362cba3.txt",
+        "sha256": "a6c084bb6fc33da79bd3cbafb2e06920ab1b5abb51f63342fba6b54ea1174a64"
+      },
+      {
+        "path": "workspaces/2026/05/08/text-input/4aaa7c6e-f283-4940-8c8c-c86bdcd0cff9.txt",
+        "sha256": "5268a4dc4b7bb6f008d02b43ca96da4eed3534145a8131a06484a94bae09f3d6"
+      },
+      {
+        "path": "workspaces/2026/05/08/text-input/96b13317-34ef-4630-bb6f-ec655cb5c2ef.txt",
+        "sha256": "5268a4dc4b7bb6f008d02b43ca96da4eed3534145a8131a06484a94bae09f3d6"
+      },
+      {
+        "path": "workspaces/2026/05/08/text-input/af713c85-7082-42a1-b118-38e287eba255.txt",
+        "sha256": "c7b1abb67d8954c1a907b0722205b756750d0a7abc69dd9ac393e58305d9ac52"
+      },
+      {
+        "path": "workspaces/2026/05/08/text-input/dfd9c71e-8f3a-445e-8d73-f02bd9b04cb8.txt",
+        "sha256": "5268a4dc4b7bb6f008d02b43ca96da4eed3534145a8131a06484a94bae09f3d6"
+      },
+      {
+        "path": "workspaces/2026/05/08/text-input/f7ce2d6c-758f-410e-b0fe-ad61a3b0ccb2.txt",
+        "sha256": "eff14e89758507da24f158e2b82a5616e1bd4e32061783a893083d1758ab924b"
+      }
+    ],
+    "etl-final_uploaded-files": [
+      {
+        "path": "4a1eea22-7299-4019-bb11-a0dbe84f2b7d_states_all.csv",
+        "sha256": "882cf206a29540fc1fc1e75e6e7cf02d30ee5b2a36be6bf68ae0322dcc4c1ebb"
+      },
+      {
+        "path": "5fa6dbf4-be75-4e68-9a77-1bcecee92e58_test_etl_pipeline.csv",
+        "sha256": "72319b6f7566cbbea4a46d54d03f13ef8e6fbad59d8ac35ea13421627d26f02e"
+      },
+      {
+        "path": "82666aa5-326d-410f-9588-aa7ba9608549_population_distribution.csv",
+        "sha256": "6643b9ea1efb77e8db856a585bbeacf0a01a0bf8cadcce9a311d2c8aacbbc0cf"
+      },
+      {
+        "path": "ad86bb3b-ebec-4151-8d30-2ce48d352dd4_states_all.csv",
+        "sha256": "882cf206a29540fc1fc1e75e6e7cf02d30ee5b2a36be6bf68ae0322dcc4c1ebb"
+      },
+      {
+        "path": "d511f997-5029-48cc-8418-58f243412f1c_pipeline_test.csv",
+        "sha256": "8840ab5ea4f6d1d44471e93c954f3c8d7cbb15b9580e5b061704573dfc76c707"
+      },
+      {
+        "path": "e20c3270-3643-40e0-8055-266c7a8d3324_states_all.csv",
+        "sha256": "882cf206a29540fc1fc1e75e6e7cf02d30ee5b2a36be6bf68ae0322dcc4c1ebb"
+      },
+      {
+        "path": "e781e102-10fa-4b23-952a-5b55cce5dad1_states_all.csv",
+        "sha256": "882cf206a29540fc1fc1e75e6e7cf02d30ee5b2a36be6bf68ae0322dcc4c1ebb"
+      }
+    ]
+  },
+  "local_files": [
+    {
+      "path": "media\\workspaces\\2\\audio\\6c585b90-82dd-4ebf-9711-a9fe57ee6c4a_voice.wav",
+      "sha256": "94ef2d960a1d302d50989922d4f6340981deadc8b353447b4807d0636769c2d0"
+    },
+    {
+      "path": "media\\workspaces\\3\\audio\\400014ce-536c-4cee-8d23-ff4b6015d754_voice.wav",
+      "sha256": "94ef2d960a1d302d50989922d4f6340981deadc8b353447b4807d0636769c2d0"
+    },
+    {
+      "path": "media\\workspaces\\3\\audio\\681dd920-8c67-4676-ac23-17588f6aedff_voice.wav",
+      "sha256": "94ef2d960a1d302d50989922d4f6340981deadc8b353447b4807d0636769c2d0"
+    }
+  ],
+  "backups": "C:\\Users\\massa\\Desktop\\senior 1\\BI-Voice-Agent\\backups\\phase0-20260913T141937Z",
+  "preserve": [
+    "Metabase metadata/cards/dashboards/collections/source credentials",
+    "all database schemas and migration history",
+    "subscription plans and admin bootstrap configuration",
+    "all secrets, model/signature caches",
+    "unknown/orphan Docker volumes and archived legacy ClickHouse stores",
+    "Git-tracked ClickHouse snapshot and user source changes",
+    "phase0_restore_20260913 verification database"
+  ],
+  "external_resources": "CRITICAL \u2014 POSSIBLE PRODUCTION RESOURCE: external provider/source endpoints excluded; never contacted for reset"
+}

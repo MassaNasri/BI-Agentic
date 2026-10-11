@@ -5,30 +5,20 @@ Executes validated SQL queries on ClickHouse.
 Returns results for visualization.
 """
 
-<<<<<<< HEAD
-import clickhouse_connect
 import os
-=======
-import hashlib
->>>>>>> c791036 (final update)
 import logging
 import math
+import re
 from typing import Dict, List, Optional, Any
 
-<<<<<<< HEAD
-from query_api.utils import normalize_sql_table_references
-=======
 try:
     import clickhouse_connect
 except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
     clickhouse_connect = None
 
-from bi_platform_shared.sql import sanitize_sql_for_metabase
-from query_api.utils import (
-    CrossDatabaseViolationError,
-    normalize_sql_table_references,
-)
->>>>>>> c791036 (final update)
+from bi_platform_shared.contracts.query import build_column_metadata
+from query_api.utils import normalize_sql_table_references
+from .result_shape_analyzer import analyze_result_shape
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +36,45 @@ def _normalize_invalid_casts(sql: str) -> str:
     return sql
 
 
+_SIMPLE_TODATE_PATTERN = re.compile(
+    r"\btoDate\s*\(\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*\)",
+    flags=re.IGNORECASE,
+)
+
+
+def _is_clickhouse_date_parse_error(error_msg: str) -> bool:
+    """Return True when ClickHouse reports a date parsing failure."""
+    text = str(error_msg or "").lower()
+    return (
+        "cannot_parse_date" in text
+        or "cannot parse date" in text
+        or "cannot parse date from string" in text
+    )
+
+
+def _rewrite_todate_for_ambiguous_strings(sql: str) -> str:
+    """
+    Rewrite simple toDate(column) calls into a safer parser form.
+
+    This intentionally matches only simple identifiers (e.g. ds, t.ds) to avoid
+    changing complex expressions in unexpected ways.
+    """
+    if not sql:
+        return sql
+
+    def _replace(match: re.Match[str]) -> str:
+        column_expr = match.group(1).strip()
+        return (
+            "toDate("
+            "parseDateTimeBestEffortUSOrNull("
+            f"toString({column_expr})"
+            ")"
+            ")"
+        )
+
+    return _SIMPLE_TODATE_PATTERN.sub(_replace, sql)
+
+
 def sanitize_sql_for_http(sql: str) -> str:
     """
     Sanitize SQL for ClickHouse HTTP execution.
@@ -53,7 +82,7 @@ def sanitize_sql_for_http(sql: str) -> str:
     Removes incompatible syntax:
     - FORMAT Native (not supported via HTTP)
     - Semicolons (causes multi-statement errors)
-    - Invalid cast functions (toFloat64OrNullOrNull → toFloat64OrNull)
+    - Invalid cast functions (toFloat64OrNullOrNull â†’ toFloat64OrNull)
     - Extra whitespace
     
     Args:
@@ -69,7 +98,6 @@ def sanitize_sql_for_http(sql: str) -> str:
     sql = _normalize_invalid_casts(sql)
 
     # Remove FORMAT Native (case-insensitive)
-    import re
     clean_sql = re.sub(r'\s+FORMAT\s+Native\s*', ' ', sql, flags=re.IGNORECASE)
 
     # Remove all semicolons
@@ -84,7 +112,7 @@ def sanitize_sql_for_http(sql: str) -> str:
 
 def sanitize_numeric_value(value: Any) -> Any:
     """
-    🔒 NaN-SAFE: Sanitize a single numeric value to ensure JSON compatibility.
+    ðŸ”’ NaN-SAFE: Sanitize a single numeric value to ensure JSON compatibility.
     
     Replaces NaN, Infinity, and -Infinity with 0 (or None for NULL).
     This ensures values can be safely stored in PostgreSQL JSON/JSONB fields
@@ -100,7 +128,7 @@ def sanitize_numeric_value(value: Any) -> Any:
         value: Any value (numeric, string, None, etc.)
     
     Returns:
-        Sanitized value (NaN/Infinity → 0, None → None, other values unchanged)
+        Sanitized value (NaN/Infinity â†’ 0, None â†’ None, other values unchanged)
     """
     # Handle None/NULL
     if value is None:
@@ -181,7 +209,7 @@ def sanitize_numeric_value(value: Any) -> Any:
 
 def sanitize_query_results(rows: List[Dict]) -> List[Dict]:
     """
-    🔒 NaN-SAFE: Sanitize query results to ensure JSON compatibility.
+    ðŸ”’ NaN-SAFE: Sanitize query results to ensure JSON compatibility.
     
     Recursively sanitizes all numeric values in result rows, replacing
     NaN, Infinity, and -Infinity with 0. This ensures results can be:
@@ -212,6 +240,17 @@ def sanitize_query_results(rows: List[Dict]) -> List[Dict]:
     return sanitized_rows
 
 
+def _column_type_to_string(column_type: Any) -> str:
+    """Normalize clickhouse-connect type objects to stable strings."""
+
+    if column_type is None:
+        return ""
+    name = getattr(column_type, "name", None)
+    if name:
+        return str(name)
+    return str(column_type)
+
+
 class ClickHouseExecutor:
     """
     Execute SELECT queries on ClickHouse using HTTP protocol (port 8123).
@@ -228,8 +267,8 @@ class ClickHouseExecutor:
 
         host = os.getenv('CLICKHOUSE_HOST', 'localhost')
         port_raw = os.getenv('CLICKHOUSE_PORT', '8123')
-        username = os.getenv('CLICKHOUSE_USER', 'user_etl')
-        password = os.getenv('CLICKHOUSE_PASSWORD', 'etl_pass123')
+        username = os.getenv('CLICKHOUSE_USER', '')
+        password = os.getenv('CLICKHOUSE_PASSWORD', '')
         database = os.getenv('CLICKHOUSE_DATABASE', 'default')
 
         try:
@@ -294,23 +333,28 @@ class ClickHouseExecutor:
         self.database = database
         self.client = client
 
-    def execute_query(self, sql: str) -> Dict:
+    def execute_query(self, sql: str, workspace_database: Optional[str] = None) -> Dict:
         """
         Execute SQL query on ClickHouse.
-        
+
         Args:
             sql: SQL query (must be SELECT only)
-        
+            workspace_database: Optional workspace db for SQL normalization
+
         Returns:
             dict: {
                 'success': bool,
                 'rows': list of dicts (query results),
-                'columns': list of column names,
+                'columns': list of column metadata objects,
+                'column_names': list of column names,
+                'column_types': list of ClickHouse native types,
+                'result_shape': semantic result shape metadata,
                 'row_count': int,
                 'execution_time_ms': int,
                 'error': str (if failed)
             }
         """
+        clean_sql = ""
         try:
             import time
             start_time = time.time()
@@ -321,53 +365,103 @@ class ClickHouseExecutor:
             logger.error("=" * 80)
 
             normalized_sql = sql
+            normalize_db = workspace_database or self.database
             # Only normalize SELECT queries; keep admin statements unchanged.
             if sql and sql.strip().upper().startswith("SELECT"):
-                normalized_sql = normalize_sql_table_references(sql, self.database)
-            
+                normalized_sql = normalize_sql_table_references(sql, normalize_db)
+
             # Sanitize SQL for HTTP execution (removes FORMAT Native, semicolons)
             clean_sql = sanitize_sql_for_http(normalized_sql)
-            
-            # 🔍 FINAL SQL BOUNDARY LOGGING (MANDATORY)
-            # This logs the EXACT query sent to ClickHouse
-            logger.error("🚨 FINAL SQL SENT TO CLICKHOUSE:")
-            logger.error("="*80)
+
+            # FINAL SQL boundary logging (mandatory)
+            logger.error("FINAL SQL SENT TO CLICKHOUSE:")
+            logger.error("=" * 80)
             logger.error(clean_sql)
-            logger.error("="*80)
-            
+            logger.error("=" * 80)
+
+            def _result_to_payload(raw_result: Any, *, executed_sql: str, fallback_applied: bool = False, fallback_reason: str = "") -> Dict:
+                execution_time_ms = int((time.time() - start_time) * 1000)
+
+                rows: List[Dict[str, Any]] = []
+                column_names = [str(name) for name in (getattr(raw_result, "column_names", []) or [])]
+                column_types = [
+                    _column_type_to_string(column_type)
+                    for column_type in (getattr(raw_result, "column_types", []) or [])
+                ]
+                column_metadata = build_column_metadata(column_names, column_types)
+
+                for row in raw_result.result_rows:
+                    row_dict: Dict[str, Any] = {}
+                    for i, col_name in enumerate(column_names):
+                        row_dict[col_name] = row[i]
+                    rows.append(row_dict)
+
+                sanitized_rows = sanitize_query_results(rows)
+                result_shape = analyze_result_shape(
+                    executed_sql,
+                    column_metadata,
+                    sanitized_rows,
+                )
+                logger.info("Query successful: %s rows in %sms", len(sanitized_rows), execution_time_ms)
+
+                payload: Dict[str, Any] = {
+                    'success': True,
+                    'rows': sanitized_rows,
+                    'columns': [column.model_dump(mode="json") for column in column_metadata],
+                    'column_names': column_names,
+                    'column_types': column_types,
+                    'result_shape': result_shape.model_dump(mode="json"),
+                    'row_count': len(sanitized_rows),
+                    'execution_time_ms': execution_time_ms,
+                    'executed_sql': executed_sql,
+                }
+                if fallback_applied:
+                    payload['fallback_applied'] = True
+                    payload['fallback_reason'] = fallback_reason
+                return payload
+
             # Execute query using clickhouse-connect
             result = self.client.query(clean_sql)
-            
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            
-            # Convert result to list of dicts
-            rows = []
-            columns = result.column_names
-            
-            for row in result.result_rows:
-                row_dict = {}
-                for i, col_name in enumerate(columns):
-                    row_dict[col_name] = row[i]
-                rows.append(row_dict)
-            
-            # 🔒 NaN-SAFE: Sanitize results to remove NaN/Infinity values
-            # This ensures JSON compatibility and PostgreSQL storage safety
-            sanitized_rows = sanitize_query_results(rows)
-            
-            logger.info(f"Query successful: {len(sanitized_rows)} rows in {execution_time_ms}ms")
-            
-            return {
-                'success': True,
-                'rows': sanitized_rows,
-                'columns': columns,
-                'row_count': len(sanitized_rows),
-                'execution_time_ms': execution_time_ms
-            }
-        
+            return _result_to_payload(result, executed_sql=clean_sql)
+
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"ClickHouse query error: {error_msg}")
-            
+
+            # Resilience retry for string date columns with ambiguous formats.
+            if clean_sql and _is_clickhouse_date_parse_error(error_msg):
+                retry_sql = _rewrite_todate_for_ambiguous_strings(clean_sql)
+                if retry_sql != clean_sql:
+                    logger.warning(
+                        "Date parse error detected; retrying with safer toDate transformation."
+                    )
+                    logger.warning("Retry SQL sent to ClickHouse: %s", retry_sql)
+                    try:
+                        retry_result = self.client.query(retry_sql)
+
+                        logger.info(
+                            "Query successful after date-safe retry: %s rows in %sms",
+                            len(getattr(retry_result, "result_rows", []) or []),
+                            int((time.time() - start_time) * 1000),
+                        )
+                        return _result_to_payload(
+                            retry_result,
+                            executed_sql=retry_sql,
+                            fallback_applied=True,
+                            fallback_reason='date_parse_retry_todate_us_best_effort',
+                        )
+                    except Exception as retry_exc:
+                        retry_error_msg = str(retry_exc)
+                        logger.error(
+                            "ClickHouse query failed after date-safe retry: %s",
+                            retry_error_msg,
+                        )
+                        error_msg = (
+                            f"{error_msg} | retry_with_date_safe_todate_failed: "
+                            f"{retry_error_msg}"
+                        )
+
+            logger.error("ClickHouse query error: %s", error_msg)
+
             # Special handling for port misconfiguration
             if 'Port 9000 is for clickhouse-client' in error_msg or 'Connection refused' in error_msg:
                 return {
@@ -377,12 +471,11 @@ class ClickHouseExecutor:
                         'Ensure ClickHouse is running and CLICKHOUSE_PORT=8123 is set in .env file.'
                     )
                 }
-            
+
             return {
                 'success': False,
                 'error': f"Query execution failed: {error_msg[:200]}"
             }
-    
     def test_connection(self) -> bool:
         """
         Test ClickHouse connection.
@@ -450,4 +543,5 @@ def get_clickhouse_executor() -> ClickHouseExecutor:
     if _clickhouse_executor is None:
         _clickhouse_executor = ClickHouseExecutor()
     return _clickhouse_executor
+
 

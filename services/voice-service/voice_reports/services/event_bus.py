@@ -18,7 +18,7 @@ class KafkaEventPublisher:
         self.enabled = os.getenv("KAFKA_EVENTS_ENABLED", "true").lower() == "true"
         configured_topics = os.getenv(
             "KAFKA_REQUIRED_TOPICS",
-            "report.voice.received,report.intent.generated,report.sql.generated,"
+            "report.voice.received,report.text.received,report.intent.generated,report.sql.generated,"
             "report.query.executed,report.visualization.ready",
         )
         self.required_topics = [

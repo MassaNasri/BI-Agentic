@@ -1,12 +1,7 @@
 """
 Unit tests for rule condition helpers.
 """
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-
-from rule_conditions import (
+from .rule_conditions import (
     always_true,
     always_false,
     field_exists,

@@ -6,8 +6,14 @@ import subprocess
 import json
 import time
 import requests
+import os
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
+if not CLICKHOUSE_USER or not CLICKHOUSE_PASSWORD:
+    raise RuntimeError("CLICKHOUSE_USER and CLICKHOUSE_PASSWORD are required")
 
 class PipelineValidator:
     """Comprehensive pipeline validator"""
@@ -102,7 +108,7 @@ class PipelineValidator:
         # Test connection
         code, stdout, stderr = self.run_command(
             ["docker", "exec", "clickhouse", "clickhouse-client", 
-             "-u", "etl_user", "--password", "etl_pass123", "-d", "etl",
+             "-u", CLICKHOUSE_USER, "--password", CLICKHOUSE_PASSWORD, "-d", "etl",
              "--query", "SELECT 1"]
         )
         
@@ -113,7 +119,7 @@ class PipelineValidator:
         if connected:
             code2, stdout2, _ = self.run_command(
                 ["docker", "exec", "clickhouse", "clickhouse-client",
-                 "-u", "etl_user", "--password", "etl_pass123", "-d", "etl",
+                 "-u", CLICKHOUSE_USER, "--password", CLICKHOUSE_PASSWORD, "-d", "etl",
                  "--query", "SHOW TABLES"]
             )
             if code2 == 0 and stdout2:

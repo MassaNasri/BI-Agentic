@@ -11,7 +11,7 @@ const Input = forwardRef(({
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="mb-2 block text-sm font-medium text-brand-300">
           {label}
         </label>
       )}
@@ -21,7 +21,7 @@ const Input = forwardRef(({
         transition={{ duration: 0.2 }}
       >
         {Icon && (
-          <Icon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Icon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 transform text-brand-400" />
         )}
         <input
           ref={ref}

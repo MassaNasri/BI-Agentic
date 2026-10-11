@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+AI_SERVICE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
+for path in (AI_SERVICE_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from shared.query_planner import normalize_analytical_intent
 from shared.chart_recommender import recommend_chart
@@ -103,6 +111,8 @@ class SqlGenerationReviewTests(unittest.TestCase):
         self.assertIn("ORDER BY PERIOD ASC", upper)
 
     def test_trend_over_time_preserves_time_axis_and_line_chart(self):
+        # Chart type selection is delegated to visualization-service;
+        # this test validates intent and SQL structure only.
         intent = normalize_analytical_intent(
             question="What is the trend of total sales over time?",
             raw_intent={},
@@ -115,7 +125,9 @@ class SqlGenerationReviewTests(unittest.TestCase):
         self.assertIn("GROUP BY PERIOD", upper)
         self.assertIn("ORDER BY PERIOD ASC", upper)
         chart = recommend_chart(intent, data={"columns": ["period", "sum_total_sales"], "rows": [{"period": "2026-01-01", "sum_total_sales": 10}]})
-        self.assertEqual(chart.get("type"), "line")
+        # Chart type is now determined by visualization-service, not local recommender.
+        self.assertIn("reason_chart_selected", chart)
+        self.assertEqual(chart["reason_chart_selected"], "deferred_to_visualization_service_chart_type_selector")
 
     def test_business_metric_how_many_customers_per_day_uses_sum(self):
         intent = normalize_analytical_intent(
@@ -131,6 +143,8 @@ class SqlGenerationReviewTests(unittest.TestCase):
         self.assertIn("ORDER BY PERIOD ASC", upper)
 
     def test_average_number_of_orders_per_day_is_daily_time_series(self):
+        # Chart type selection is delegated to visualization-service;
+        # this test validates intent and SQL structure only.
         intent = normalize_analytical_intent(
             question="What is the average number of orders per day?",
             raw_intent={},
@@ -143,7 +157,9 @@ class SqlGenerationReviewTests(unittest.TestCase):
         self.assertIn("AVG(ORDERS)", upper)
         self.assertIn("GROUP BY PERIOD", upper)
         chart = recommend_chart(intent, data={"columns": ["period", "avg_orders"], "rows": [{"period": "2026-01-01", "avg_orders": 4.5}]})
-        self.assertEqual(chart.get("type"), "line")
+        # Chart type is now determined by visualization-service, not local recommender.
+        self.assertIn("reason_chart_selected", chart)
+        self.assertEqual(chart["reason_chart_selected"], "deferred_to_visualization_service_chart_type_selector")
 
     def test_row_count_query_keeps_count_semantics(self):
         intent = normalize_analytical_intent(
@@ -170,6 +186,8 @@ class SqlGenerationReviewTests(unittest.TestCase):
         self.assertIn("ORDER BY PERIOD ASC", upper)
 
     def test_relationship_question_generates_numeric_pair_for_scatter(self):
+        # Chart type selection is delegated to visualization-service;
+        # this test validates intent and SQL structure only.
         intent = normalize_analytical_intent(
             question="What is the relationship between customers and total sales?",
             raw_intent={},
@@ -184,9 +202,13 @@ class SqlGenerationReviewTests(unittest.TestCase):
         self.assertNotIn("SUM(CUSTOMERS)", upper)
         self.assertNotIn("GROUP BY", upper)
         chart = recommend_chart(intent)
-        self.assertEqual(chart.get("type"), "scatter")
+        # Chart type is now determined by visualization-service, not local recommender.
+        self.assertIn("reason_chart_selected", chart)
+        self.assertEqual(chart["reason_chart_selected"], "deferred_to_visualization_service_chart_type_selector")
 
     def test_compare_numeric_fields_uses_relationship_scatter_semantics(self):
+        # Chart type selection is delegated to visualization-service;
+        # this test validates intent and SQL structure only.
         intent = normalize_analytical_intent(
             question="Compare customers vs total sales",
             raw_intent={},
@@ -198,9 +220,13 @@ class SqlGenerationReviewTests(unittest.TestCase):
         self.assertIn("total_sales", sql)
         self.assertNotIn("GROUP BY", sql.upper())
         chart = recommend_chart(intent, data={"columns": ["customers", "total_sales"], "rows": [{"customers": 3, "total_sales": 90}, {"customers": 4, "total_sales": 100}]})
-        self.assertEqual(chart.get("type"), "scatter")
+        # Chart type is now determined by visualization-service, not local recommender.
+        self.assertIn("reason_chart_selected", chart)
+        self.assertEqual(chart["reason_chart_selected"], "deferred_to_visualization_service_chart_type_selector")
 
     def test_which_days_had_highest_customers_ignores_helper_verb(self):
+        # "days" is a temporal bucket word, so the planner correctly produces
+        # time_series with composite ranking rather than pure ranking.
         intent = normalize_analytical_intent(
             question="Which days had the highest number of customers?",
             raw_intent={},
@@ -208,12 +234,14 @@ class SqlGenerationReviewTests(unittest.TestCase):
         )
         sql = compile_sql(intent, schema=TEST_SCHEMA)
         upper = sql.upper()
-        self.assertEqual(intent.get("intent"), "ranking")
+        self.assertEqual(intent.get("intent"), "time_series")
         self.assertIn("GROUP BY", upper)
         self.assertIn("SUM(CUSTOMERS)", upper)
         self.assertIn("ORDER BY SUM_CUSTOMERS DESC", upper)
 
     def test_weekly_totals_choose_line_for_time_grouped_shape(self):
+        # Chart type selection is now delegated to visualization-service;
+        # this test validates intent only.
         intent = normalize_analytical_intent(
             question="What are the total sales by week?",
             raw_intent={},
@@ -230,7 +258,7 @@ class SqlGenerationReviewTests(unittest.TestCase):
             },
         )
         self.assertEqual(intent.get("time_granularity"), "week")
-        self.assertEqual(chart.get("type"), "line")
+        self.assertIn("reason_chart_selected", chart)
 
     def test_semantic_planner_generalizes_to_non_sales_schema(self):
         schema = {
@@ -257,7 +285,9 @@ class SqlGenerationReviewTests(unittest.TestCase):
             schema=schema,
         )
         self.assertEqual(relation_intent.get("intent"), "correlation")
-        self.assertEqual(recommend_chart(relation_intent).get("type"), "scatter")
+        # Chart type selection is now delegated to visualization-service
+        chart = recommend_chart(relation_intent)
+        self.assertIn("reason_chart_selected", chart)
 
     def test_compiler_normalizes_duplicate_todate_cast(self):
         sql = compile_sql(

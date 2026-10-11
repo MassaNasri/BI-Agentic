@@ -3,12 +3,13 @@ from django.http import HttpResponse
 import logging
 import os
 import time
+import json
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .file_storage import save_uploaded_file
+from .file_storage import save_uploaded_file, save_sqlite_file
 from .file_validator import validate_file_type
 from shared.utils.kafka_producer import KafkaMessageProducer
 from shared.utils.surreal_client import SurrealClient
@@ -25,10 +26,148 @@ from shared.utils.response import make_response
 from shared.utils.metrics import render_metrics
 from shared.utils.db_type_utils import normalize_db_type
 from shared.utils.schema_contract_store import build_schema_contract_store_from_env
+from shared.security.internal_auth import ETLInternalAuthentication, require_etl_scope
+from shared.security.destination_policy import DestinationPolicyError
+from shared.connectors import ConnectorError, connector_registry, safe_connector_error
 
 
 logger = logging.getLogger(__name__)
 _schema_contract_store = None
+
+
+def _connector_response_error(exc):
+    safe = safe_connector_error(exc)
+    return Response(
+        {"success": False, "error": safe.as_dict(), "message": safe.message},
+        status=safe.status_code,
+    )
+
+
+def _request_configuration(request):
+    value = request.data.get("configuration", {})
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ConnectorError("INVALID_CONFIGURATION", "configuration must be valid JSON.") from exc
+    if not isinstance(value, dict):
+        raise ConnectorError("INVALID_CONFIGURATION", "configuration must be an object.")
+    return dict(value)
+
+
+class DatabaseCapabilitiesView(APIView):
+    authentication_classes = [ETLInternalAuthentication]
+
+    def get(self, request):
+        return Response({"success": True, "data": connector_registry.capabilities()})
+
+
+class DatabaseConnectionTestView(APIView):
+    authentication_classes = [ETLInternalAuthentication]
+
+    def post(self, request):
+        scope = require_etl_scope(request)
+        try:
+            connector = connector_registry.get(request.data.get("engine") or request.data.get("db_type"))
+            configuration = _request_configuration(request)
+            configuration["workspace_id"] = scope.workspace_id
+            return Response({"success": True, "data": connector.test_connection(configuration)})
+        except Exception as exc:
+            return _connector_response_error(exc)
+
+
+class DatabaseDiscoveryView(APIView):
+    authentication_classes = [ETLInternalAuthentication]
+
+    def post(self, request):
+        scope = require_etl_scope(request)
+        try:
+            connector = connector_registry.get(request.data.get("engine") or request.data.get("db_type"))
+            configuration = _request_configuration(request)
+            configuration["workspace_id"] = scope.workspace_id
+            data = connector.discover(
+                configuration,
+                schema=request.data.get("schema"),
+                table=request.data.get("table"),
+            )
+            return Response({"success": True, "data": data})
+        except Exception as exc:
+            return _connector_response_error(exc)
+
+
+class SQLitePrepareView(APIView):
+    authentication_classes = [ETLInternalAuthentication]
+
+    def post(self, request):
+        scope = require_etl_scope(request)
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            return _connector_response_error(ConnectorError("INVALID_CONFIGURATION", "A SQLite file is required."))
+        try:
+            token = save_sqlite_file(uploaded, scope.workspace_id)
+            configuration = {"sqlite_token": token, "workspace_id": scope.workspace_id}
+            connector = connector_registry.get("sqlite")
+            test = connector.test_connection(configuration)
+            discovery = connector.discover(configuration)
+            return Response({"success": True, "data": {"sqlite_token": token, "test": test, **discovery}})
+        except Exception as exc:
+            return _connector_response_error(exc)
+
+
+class DatabaseSnapshotView(APIView):
+    authentication_classes = [ETLInternalAuthentication]
+
+    def post(self, request):
+        scope = require_etl_scope(request)
+        try:
+            connector = connector_registry.get(request.data.get("engine") or request.data.get("db_type"))
+            configuration = _request_configuration(request)
+            configuration["workspace_id"] = scope.workspace_id
+            validated = connector.validate_configuration(configuration)
+            selected_tables = request.data.get("tables")
+            if not isinstance(selected_tables, list) or not selected_tables or len(selected_tables) > 20:
+                raise ConnectorError("INVALID_CONFIGURATION", "Select between 1 and 20 tables.")
+            normalized_tables = []
+            available = {
+                (str(item.get("schema") or ""), str(item.get("name"))): item
+                for item in connector.discover(configuration).get("tables", [])
+            }
+            for item in selected_tables:
+                if not isinstance(item, dict):
+                    raise ConnectorError("INVALID_CONFIGURATION", "Each selected table must be an object.")
+                key = (str(item.get("schema") or ""), str(item.get("name") or ""))
+                if key not in available:
+                    raise ConnectorError("TABLE_NOT_FOUND", "A selected table is not available.", status_code=404)
+                normalized_tables.append({"schema": key[0] or None, "name": key[1]})
+
+            event_config = {
+                key: value for key, value in validated.items()
+                if key not in {"resolved_host", "sqlite_path", "workspace_id"}
+            }
+            if "password" in event_config:
+                event_config["password"] = get_encryption_instance().encrypt(str(event_config["password"]))
+                event_config["_password_encrypted"] = True
+            message = {
+                "type": "database",
+                "db_type": connector.key,
+                "configuration": event_config,
+                "selected_tables": normalized_tables,
+                "source_id": str(scope.dataset_id),
+                "schema_version": request.data.get("schema_version"),
+                "chunk_size": max(100, min(int(request.data.get("chunk_size", 1000)), 10000)),
+                **scope.as_message_fields(),
+            }
+            _attach_schema_contract_if_available(message)
+            if not _send_with_retry(KafkaMessageProducer(), "connection_topic", message, "database snapshot"):
+                raise ConnectorError("EXTRACTION_FAILED", "The snapshot job could not be queued.", status_code=503)
+            logger.info(
+                "database_snapshot_queued connector=%s workspace=%s dataset=%s job=%s tables=%s",
+                connector.key, scope.workspace_id, scope.dataset_id, scope.ingestion_job_id,
+                len(normalized_tables),
+            )
+            return Response({"success": True, "data": {"state": "processing", "tables": normalized_tables}}, status=202)
+        except Exception as exc:
+            return _connector_response_error(exc)
 
 
 def _send_with_retry(producer: KafkaMessageProducer, topic: str, message: dict, context: str) -> bool:
@@ -90,7 +229,10 @@ class UploadFileView(APIView):
     Handles file uploads and stores locally, logs metadata.
     """
 
+    authentication_classes = [ETLInternalAuthentication]
+
     def post(self, request):
+        scope = require_etl_scope(request)
         if "file" not in request.FILES:
             return Response(make_response(False, "No file provided"), status=400)
 
@@ -108,7 +250,8 @@ class UploadFileView(APIView):
         surreal.insert("upload_logs", {
             "filename": uploaded_file.name,
             "path": saved_path,
-            "size": uploaded_file.size
+            "size": uploaded_file.size,
+            **scope.as_message_fields(),
         })
 
         # Publish to Kafka connection_topic to trigger ETL pipeline
@@ -120,6 +263,7 @@ class UploadFileView(APIView):
             "path": saved_path,
             "size": uploaded_file.size,
             "schema_version": request.data.get("schema_version"),
+            **scope.as_message_fields(),
         }
         _attach_schema_contract_if_available(connection_message)
         if not _send_with_retry(producer, "connection_topic", connection_message, "file trigger"):
@@ -135,6 +279,7 @@ class UploadFileView(APIView):
             source_id=uploaded_file.name,
             connection_info=connection_message
         )
+        connection_metadata.update(scope.as_message_fields())
         if not _send_with_retry(producer, "metadata_topic", connection_metadata, "file metadata"):
             logger.warning("[CONNECTOR] Failed to publish connection metadata for uploaded file %s", uploaded_file.name)
 
@@ -148,7 +293,10 @@ class ConnectDBView(APIView):
     Tests DB connection and sends DB config to Kafka for detector-service.
     """
 
+    authentication_classes = [ETLInternalAuthentication]
+
     def post(self, request):
+        scope = require_etl_scope(request)
         # Validate payload size
         is_valid_size, size_error = validate_json_payload_size(request.data)
         if not is_valid_size:
@@ -174,7 +322,10 @@ class ConnectDBView(APIView):
         port = request.data["port"]
 
         # 1) test connection
-        success, message = test_db_connection(db_type, host, user, password, database, port)
+        try:
+            success, message = test_db_connection(db_type, host, user, password, database, port)
+        except DestinationPolicyError as exc:
+            return Response(make_response(False, str(exc)), status=400)
 
         if not success:
             return Response(make_response(False, message), status=400)
@@ -196,6 +347,7 @@ class ConnectDBView(APIView):
             "port": port,
             "source_id": database,
             "schema_version": request.data.get("schema_version"),
+            **scope.as_message_fields(),
         }
         _attach_schema_contract_if_available(connection_message)
         if not _send_with_retry(producer, "connection_topic", connection_message, "database trigger"):
@@ -211,6 +363,7 @@ class ConnectDBView(APIView):
             source_id=database,
             connection_info={k: v for k, v in connection_message.items() if k not in ["password", "_password_encrypted"]}
         )
+        connection_metadata.update(scope.as_message_fields())
         if not _send_with_retry(producer, "metadata_topic", connection_metadata, "database metadata"):
             logger.warning("[CONNECTOR] Failed to publish connection metadata for %s://%s/%s", db_type, host, database)
 
@@ -219,7 +372,8 @@ class ConnectDBView(APIView):
         surreal.insert("connection_logs", {
             "db_type": db_type,
             "host": host,
-            "database": database
+            "database": database,
+            **scope.as_message_fields(),
         })
 
         return Response(make_response(True, "DB connected successfully"), status=200)

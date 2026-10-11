@@ -2,6 +2,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
+from uuid import uuid4
 
 
 def _load_module(name: str, path: Path):
@@ -70,6 +71,39 @@ def test_transformer_failed_send_goes_to_dlq():
     assert listener._process_batch([{"source": "src"}]) is True
     sent_topics = [call[0][0] for call in mock_producer.send.call_args_list]
     assert listener.dlq_topic in sent_topics
+    mock_lineage.record_transformations.assert_called_once()
+
+
+def test_transformer_forwards_empty_table_schema_without_fabricating_rows():
+    sys.path.insert(0, str(ROOT / "transformer-service"))
+    from transformer.engine import kafka_listener as kl
+
+    consumer = Mock()
+    producer = Mock()
+    producer.send.return_value = True
+    record = Mock()
+    control = {
+        "source": "w7_d31_sales_public_empty_table",
+        "schema_only": True,
+        "columns": [{"column_name": "id", "data_type": "integer"}],
+        "rows": [],
+        "row_count": 0,
+    }
+    consumer.listen_committable.return_value = iter([(control, record)])
+    with patch.object(kl, "KafkaMessageConsumer", return_value=consumer), patch.object(
+        kl, "KafkaMessageProducer", return_value=producer
+    ), patch.object(kl, "LineageTracker", return_value=Mock()), patch.object(
+        kl.RawRowListener, "_init_quarantine_manager", return_value=None
+    ), patch.object(
+        kl.RawRowListener, "_init_quality_metrics_manager", return_value=None
+    ), patch.object(kl.RawRowListener, "_load_rules", return_value=[]), patch.object(
+        kl, "TransformerService"
+    ):
+        listener = kl.RawRowListener(batch_size=1)
+
+    listener.listen()
+    producer.send.assert_any_call("clean_rows_topic", control)
+    consumer.commit.assert_called_once_with(record)
 
 
 def test_loader_flush_failure_uses_dlq_and_listener_commit_on_success_only():
@@ -153,6 +187,37 @@ def test_transformer_listener_bounds_warning_and_source_stats_memory():
     assert "s1" not in listener.source_stats
 
 
+def test_transformer_metadata_preserves_tenant_job_scope():
+    sys.path.insert(0, str(ROOT / "transformer-service"))
+    from transformer.engine import kafka_listener as kl
+
+    producer = Mock()
+    producer.send.return_value = True
+    with patch.object(kl, "KafkaMessageConsumer", return_value=Mock()), patch.object(
+        kl, "KafkaMessageProducer", return_value=producer
+    ), patch.object(kl, "LineageTracker", return_value=Mock()), patch.object(
+        kl.RawRowListener, "_init_quarantine_manager", return_value=None
+    ), patch.object(
+        kl.RawRowListener, "_init_quality_metrics_manager", return_value=None
+    ), patch.object(kl.RawRowListener, "_load_rules", return_value=[]), patch.object(
+        kl, "TransformerService"
+    ):
+        listener = kl.RawRowListener(batch_size=1)
+
+    listener.source_stats["src"] = {"processed": 1, "success": 1, "failed": 0}
+    listener.source_scopes["src"] = {
+        "workspace_id": 23,
+        "dataset_id": "dataset-91",
+        "ingestion_job_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    }
+    listener._emit_cleaning_metadata("src")
+
+    payload = producer.send.call_args.args[1]
+    assert payload["workspace_id"] == 23
+    assert payload["dataset_id"] == "dataset-91"
+    assert payload["ingestion_job_id"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+
 def test_loader_schema_inference_not_all_string_and_dedup_skips_duplicates():
     sys.path.insert(0, str(ROOT / "loader-service"))
     from loader.engine import kafka_listener as kl
@@ -175,13 +240,18 @@ def test_loader_schema_inference_not_all_string_and_dedup_skips_duplicates():
         mock_loader_logic.return_value = loader_instance
         listener = kl.CleanRowListener(batch_size=10)
 
-    listener.idempotency_manager.is_duplicate = Mock(side_effect=[False, True])
+    key = listener._build_idempotency_key("s", "k1")
+    listener.idempotency_manager.claim_new_keys = Mock(
+        return_value=[kl.IdempotencyClaim(key=key, claim_row_id=uuid4())]
+    )
     msg = {"source": "s", "data": {"id": 1, "name": "a"}, "_batch_id": "b", "_transformed_dedup_key": "k1"}
     assert listener.process_row(msg) == "s"
     assert listener.process_row(msg) == "s"
-    assert len(listener.batch_buffers["s"]) == 1
+    listener._flush_batch("s", "s")
+    assert loader_instance.load_batch_resilient.call_count == 1
+    assert len(loader_instance.load_batch_resilient.call_args.args[1]) == 1
     created_columns = loader_instance.client.create_table.call_args[0][1]
-    assert created_columns["id"] == "Int64"
+    assert created_columns["id"] == "Nullable(Int64)"
 
 
 def test_loader_failed_flush_keeps_buffer_when_dlq_fails():

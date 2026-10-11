@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { toast } from 'react-hot-toast'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { 
   Mic, 
   Upload, 
@@ -30,11 +30,25 @@ import {
   getReportStatusBadgeClass,
   formatReportStatus,
 } from '../../utils/reportStatus'
+import { withNightEmbedAppearance } from '../../utils/embedAppearance'
+import { describeVoiceWorkflowError } from '../../utils/voiceWorkflowError'
 
 function VoiceReportManager() {
   const { user, workspace } = useAuthStore()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const selectedReportIdParam = searchParams.get('reportId')
+  const attachPageId = useMemo(() => {
+    const rawValue = searchParams.get('attachPageId')
+    if (!rawValue) return null
+    const parsedValue = Number(rawValue)
+    if (!Number.isInteger(parsedValue) || parsedValue <= 0) return null
+    return parsedValue
+  }, [searchParams])
+  const returnToPath = useMemo(() => {
+    const rawPath = searchParams.get('returnTo')
+    return rawPath ? String(rawPath) : ''
+  }, [searchParams])
   const [currentReport, setCurrentReport] = useState(null)
   const [reports, setReports] = useState([])
   const [isUploading, setIsUploading] = useState(false)
@@ -64,7 +78,7 @@ function VoiceReportManager() {
 
   const loadReports = async () => {
     try {
-      const response = await voiceReportsAPI.listReports()
+      const response = await voiceReportsAPI.listReports({ lite: true })
       if (response.data.success) {
         setReports(response.data.reports || [])
       }
@@ -213,6 +227,25 @@ function VoiceReportManager() {
       setSelectedFile(null)
       setTextInput('')
       await loadReports()
+      if (attachPageId) {
+        try {
+          const attachResponse = await voiceReportsAPI.createDashboardWidget(attachPageId, {
+            report_id: reportId,
+            width: 6,
+            height: 4,
+          })
+          if (!attachResponse.data?.success) {
+            throw new Error(attachResponse.data?.error || 'Failed to attach report to dashboard page.')
+          }
+          toast.success('Report added to dashboard page.')
+          if (returnToPath) {
+            navigate(returnToPath)
+          }
+        } catch (attachError) {
+          console.error('Failed to auto-attach created report:', attachError)
+          toast.error(attachError.response?.data?.error || attachError.message || 'Failed to attach report to dashboard page.')
+        }
+      }
       return
     }
 
@@ -247,14 +280,9 @@ function VoiceReportManager() {
       await handleSubmissionResult(response, 'voice')
     } catch (error) {
       console.error('Processing error:', error)
-      const errorMessage = error.response?.data?.error || error.message || 'Processing failed'
-      toast.error(`Error: ${errorMessage}`)
-      if (
-        error.response?.status === 403 &&
-        String(error.response?.data?.message || error.response?.data?.error || '')
-          .toLowerCase()
-          .includes('reached your limit')
-      ) {
+      const describedError = describeVoiceWorkflowError(error)
+      toast.error(describedError.message)
+      if (describedError.shouldShowSubscription) {
         setShowSubscriptionModal(true)
       }
     } finally {
@@ -280,14 +308,9 @@ function VoiceReportManager() {
       await handleSubmissionResult(response, 'text')
     } catch (error) {
       console.error('Text processing error:', error)
-      const errorMessage = error.response?.data?.error || error.message || 'Processing failed'
-      toast.error(`Error: ${errorMessage}`)
-      if (
-        error.response?.status === 403 &&
-        String(error.response?.data?.message || error.response?.data?.error || '')
-          .toLowerCase()
-          .includes('reached your limit')
-      ) {
+      const describedError = describeVoiceWorkflowError(error)
+      toast.error(describedError.message)
+      if (describedError.shouldShowSubscription) {
         setShowSubscriptionModal(true)
       }
     } finally {
@@ -393,23 +416,23 @@ function VoiceReportManager() {
       <div className="space-y-6">
         {/* Header */}
         <motion.div variants={fadeIn}>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-3xl font-bold text-white dark:text-white">
             🎙️ Voice-Driven BI Reports
           </h1>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">
+          <p className="mt-2 text-[var(--c-muted)] dark:text-brand-300/60">
             Ask with voice or text and get instant AI-powered visualizations. No SQL knowledge required.
           </p>
         </motion.div>
 
         {/* Input Mode */}
         <motion.div variants={slideInBottom}>
-          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+          <div className="inline-flex rounded-lg border border-brand-700/30 bg-[var(--c-card-bg)] p-1 shadow-sm dark:border-brand-700/40 dark:bg-brand-950">
             <button
               type="button"
               className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 inputMode === 'voice'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'
+                  ? 'bg-brand-500 text-white'
+                  : 'text-[var(--c-muted)] hover:text-white dark:text-brand-200/70 dark:hover:text-white'
               }`}
               onClick={() => setInputMode('voice')}
               disabled={isProcessingRequest}
@@ -420,8 +443,8 @@ function VoiceReportManager() {
               type="button"
               className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 inputMode === 'text'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'
+                  ? 'bg-brand-500 text-white'
+                  : 'text-[var(--c-muted)] hover:text-white dark:text-brand-200/70 dark:hover:text-white'
               }`}
               onClick={() => setInputMode('text')}
               disabled={isProcessingRequest}
@@ -434,7 +457,7 @@ function VoiceReportManager() {
         {/* Input Section */}
         <motion.div variants={slideInBottom}>
           <Card>
-            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
+            <h2 className="text-xl font-semibold mb-4 text-white dark:text-white">
               {inputMode === 'voice' ? 'Upload Audio' : 'Enter Text'}
             </h2>
 
@@ -443,13 +466,13 @@ function VoiceReportManager() {
                 <>
                   <div className="flex items-center gap-4">
                     <label className="flex-1">
-                      <div className="flex items-center justify-center w-full h-32 px-4 transition bg-white border-2 border-gray-300 border-dashed rounded-lg appearance-none cursor-pointer hover:border-blue-500 focus:outline-none dark:bg-gray-800 dark:border-gray-600 dark:hover:border-blue-500">
+                      <div className="flex items-center justify-center w-full h-32 px-4 transition bg-[var(--c-card-bg)] border-2 border-brand-700/40 border-dashed rounded-lg appearance-none cursor-pointer hover:border-brand-400 focus:outline-none dark:bg-brand-900 dark:border-brand-700/40 dark:hover:border-brand-400">
                         <div className="flex flex-col items-center space-y-2">
-                          <Upload className="w-8 h-8 text-gray-600 dark:text-gray-400" />
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
+                          <Upload className="w-8 h-8 text-[var(--c-muted)] dark:text-brand-300/60" />
+                          <span className="text-sm text-[var(--c-muted)] dark:text-brand-300/60">
                             {selectedFile ? selectedFile.name : 'Click to select audio file'}
                           </span>
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-brand-300/80">
                             WAV, MP3, OGG, WebM (max 50MB)
                           </span>
                         </div>
@@ -485,7 +508,7 @@ function VoiceReportManager() {
               ) : (
                 <>
                   <textarea
-                    className="w-full min-h-32 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                    className="w-full min-h-32 rounded-lg border border-brand-700/40 bg-[var(--c-card-bg)] px-4 py-3 text-sm text-white focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-400/20 dark:border-brand-700/40 dark:bg-brand-900 dark:text-white"
                     placeholder="Type your business question..."
                     value={textInput}
                     onChange={(event) => setTextInput(event.target.value)}
@@ -514,12 +537,12 @@ function VoiceReportManager() {
               {inputMode === 'voice' && isUploading && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Uploading...</span>
-                    <span className="text-gray-900 dark:text-white font-medium">{uploadProgress}%</span>
+                    <span className="text-[var(--c-muted)] dark:text-brand-300/60">Uploading...</span>
+                    <span className="text-white dark:text-white font-medium">{uploadProgress}%</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                  <div className="w-full bg-brand-700/30 rounded-full h-2 dark:bg-brand-800/70">
                     <div
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      className="bg-brand-500 h-2 rounded-full transition-all duration-300"
                       style={{ width: `${uploadProgress}%` }}
                     />
                   </div>
@@ -527,10 +550,10 @@ function VoiceReportManager() {
               )}
 
               {processingPhase && (
-                <div className="space-y-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border-2 border-blue-200 dark:border-blue-800">
+                <div className="space-y-3 p-4 bg-brand-900/30 dark:bg-brand-100/20 rounded-lg border-2 border-brand-700/40 dark:border-brand-200">
                   <div className="flex items-center gap-3">
-                    <Loader className="w-5 h-5 text-blue-600 animate-spin" />
-                    <span className="font-semibold text-blue-900 dark:text-blue-100">
+                    <Loader className="w-5 h-5 text-brand-500 animate-spin" />
+                    <span className="font-semibold text-brand-100 dark:text-brand-700/30">
                       {inputMode === 'voice' ? 'Processing Your Audio...' : 'Processing Your Text...'}
                     </span>
                   </div>
@@ -538,47 +561,47 @@ function VoiceReportManager() {
                   <div className="flex items-center gap-2">
                     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 transition-all ${
                       isPrimaryStepActive
-                        ? 'bg-blue-600 text-white shadow-md'
+                        ? 'bg-brand-500 text-white shadow-md'
                         : isPrimaryStepComplete
                         ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                        : 'bg-brand-700/30 text-[var(--c-muted)] dark:bg-brand-800/70 dark:text-brand-300/60'
                     }`}>
                       {inputMode === 'voice' ? <Mic className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
                       <span className="text-xs font-medium">{inputMode === 'voice' ? 'Transcribing' : 'Classifying'}</span>
                     </div>
 
-                    <div className="text-gray-400">-&gt;</div>
+                    <div className="text-brand-300/60">-&gt;</div>
 
                     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 transition-all ${
                       processingPhase === 'generating'
-                        ? 'bg-blue-600 text-white shadow-md'
+                        ? 'bg-brand-500 text-white shadow-md'
                         : processingPhase === 'executing' || processingPhase === 'rendering'
                         ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                        : 'bg-brand-700/30 text-[var(--c-muted)] dark:bg-brand-800/70 dark:text-brand-300/60'
                     }`}>
                       <Code className="w-4 h-4" />
                       <span className="text-xs font-medium">Generating</span>
                     </div>
 
-                    <div className="text-gray-400">-&gt;</div>
+                    <div className="text-brand-300/60">-&gt;</div>
 
                     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 transition-all ${
                       processingPhase === 'executing'
-                        ? 'bg-blue-600 text-white shadow-md'
+                        ? 'bg-brand-500 text-white shadow-md'
                         : processingPhase === 'rendering'
                         ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                        : 'bg-brand-700/30 text-[var(--c-muted)] dark:bg-brand-800/70 dark:text-brand-300/60'
                     }`}>
                       <Database className="w-4 h-4" />
                       <span className="text-xs font-medium">Executing</span>
                     </div>
 
-                    <div className="text-gray-400">-&gt;</div>
+                    <div className="text-brand-300/60">-&gt;</div>
 
                     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 transition-all ${
                       processingPhase === 'rendering'
-                        ? 'bg-blue-600 text-white shadow-md'
-                        : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                        ? 'bg-brand-500 text-white shadow-md'
+                        : 'bg-brand-700/30 text-[var(--c-muted)] dark:bg-brand-800/70 dark:text-brand-300/60'
                     }`}>
                       <BarChart3 className="w-4 h-4" />
                       <span className="text-xs font-medium">Rendering</span>
@@ -602,8 +625,8 @@ function VoiceReportManager() {
         {currentReport && (
           <motion.div variants={slideInBottom}>
             <Card>
-              <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white flex items-center gap-2">
-                <BarChart3 className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-semibold mb-4 text-white dark:text-white flex items-center gap-2">
+                <BarChart3 className="w-6 h-6 text-brand-500" />
                 Your Generated Chart
               </h2>
 
@@ -617,41 +640,41 @@ function VoiceReportManager() {
                         <Database className="w-4 h-4" />
                         <span className="text-sm font-medium">Rows</span>
                       </div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      <p className="text-2xl font-bold text-white dark:text-white">
                         {currentReport.rowCount?.toLocaleString() || 0}
                       </p>
                     </div>
 
-                    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                      <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 mb-1">
+                    <div className="p-4 bg-brand-900/30 dark:bg-brand-100/20 rounded-lg">
+                      <div className="flex items-center gap-2 text-brand-500 dark:text-brand-300 mb-1">
                         <Clock className="w-4 h-4" />
                         <span className="text-sm font-medium">Time</span>
                       </div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      <p className="text-2xl font-bold text-white dark:text-white">
                         {currentReport.executionTime}ms
                       </p>
                     </div>
 
-                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                      <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 mb-1">
+                    <div className="p-4 bg-brand-900/30 dark:bg-brand-100/20 rounded-lg">
+                      <div className="flex items-center gap-2 text-brand-500 dark:text-brand-300 mb-1">
                         <BarChart3 className="w-4 h-4" />
                         <span className="text-sm font-medium">Chart Type</span>
                       </div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white capitalize">
+                      <p className="text-2xl font-bold text-white dark:text-white capitalize">
                         {currentReport.chartType}
                       </p>
                     </div>
 
-                    <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
-                      <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 mb-1">
+                    <div className="p-4 bg-amber-500/15 dark:bg-amber-400/20 rounded-lg">
+                      <div className="flex items-center gap-2 text-amber-400 dark:text-amber-400 mb-1">
                         <CheckCircle className="w-4 h-4" />
                         <span className="text-sm font-medium">Confidence</span>
                       </div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      <p className="text-2xl font-bold text-white dark:text-white">
                         {formatConfidence(currentReport.confidence)}
                       </p>
                       {currentReport.degraded && (
-                        <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                        <p className="mt-1 text-xs font-medium text-amber-400 dark:text-amber-400">
                           Degraded
                         </p>
                       )}
@@ -661,14 +684,15 @@ function VoiceReportManager() {
                   {/* Embedded Visualization */}
                   {currentReport.embedUrl && (
                     <div className="mb-4">
-                      <div className="border-2 border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden shadow-lg">
+                      <div className="rounded-xl border border-brand-600/40 bg-[var(--c-report-bg)] overflow-hidden shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
                         <iframe
-                          src={currentReport.embedUrl}
+                          src={withNightEmbedAppearance(currentReport.embedUrl)}
                           width="100%"
                           height="600"
                           frameBorder="0"
-                          className="bg-white"
+                          className="bg-[var(--c-report-bg)]"
                           title="Data Visualization"
+                          loading="lazy"
                         />
                       </div>
                     </div>
@@ -710,14 +734,14 @@ function VoiceReportManager() {
         {/* Reports History */}
         <motion.div variants={slideInBottom}>
           <Card>
-            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
+            <h2 className="text-xl font-semibold mb-4 text-white dark:text-white">
               Your Reports
             </h2>
 
             {reports.length === 0 ? (
               <div className="text-center py-12">
-                <Mic className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">
+                <Mic className="w-16 h-16 mx-auto text-brand-300/60 mb-4" />
+                <p className="text-brand-300/80 dark:text-brand-300/60">
                   No reports yet. Submit voice or text input to get started!
                 </p>
               </div>
@@ -726,12 +750,12 @@ function VoiceReportManager() {
                 {reports.map((report) => (
                   <div
                     key={report.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                    className="flex items-center justify-between p-4 bg-[rgba(255,255,255,0.04)] dark:bg-brand-900 rounded-lg hover:bg-[rgba(255,255,255,0.07)] dark:hover:bg-brand-800/70 transition-colors cursor-pointer"
                     onClick={() => handleLoadReport(report.id)}
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-1">
-                        <h3 className="font-medium text-gray-900 dark:text-white">
+                        <h3 className="font-medium text-white dark:text-white">
                           Report #{report.id}
                         </h3>
                         <span className={`
@@ -744,7 +768,7 @@ function VoiceReportManager() {
                         </span>
                       </div>
                       {report.row_count && (
-                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                        <p className="text-xs text-brand-300/80 dark:text-brand-300/80 mt-1">
                           <Database className="w-3 h-3 inline mr-1" />
                           {report.row_count.toLocaleString()} rows • 
                           <BarChart3 className="w-3 h-3 inline ml-2 mr-1" />
@@ -777,27 +801,27 @@ function VoiceReportManager() {
         >
           <div className="space-y-4">
             {usageLoading ? (
-              <p className="text-sm text-slate-600">Loading usage...</p>
+              <p className="text-sm text-[var(--c-muted)]">Loading usage...</p>
             ) : usageError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 {usageError}
               </div>
             ) : usageData ? (
               <div className="space-y-3">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Plan</p>
-                  <p className="mt-1 text-sm font-medium text-slate-900">{usageData.planName}</p>
+                <div className="rounded-lg border border-brand-700/30 bg-[rgba(255,255,255,0.04)] p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand-300/80">Plan</p>
+                  <p className="mt-1 text-sm font-medium text-white">{usageData.planName}</p>
                 </div>
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-                  <p className="text-sm font-medium text-blue-900">Usage</p>
-                  <p className="mt-1 text-sm text-blue-800">
+                <div className="rounded-lg border border-brand-700/40 bg-brand-900/30 p-3">
+                  <p className="text-sm font-medium text-brand-100">Usage</p>
+                  <p className="mt-1 text-sm text-brand-200">
                     {usageData.used} / {usageData.limit} requests used
                   </p>
-                  <p className="mt-1 text-sm text-blue-800">{usageData.remaining} remaining</p>
+                  <p className="mt-1 text-sm text-brand-200">{usageData.remaining} remaining</p>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-slate-600">No usage details available.</p>
+              <p className="text-sm text-[var(--c-muted)]">No usage details available.</p>
             )}
 
             <div className="flex items-center justify-end gap-2">

@@ -15,7 +15,6 @@ Usage:
     creator.create_table_from_schema(customer_schema)
 """
 import os
-import sys
 import logging
 import argparse
 import json
@@ -23,14 +22,12 @@ from typing import List, Dict, Optional
 from clickhouse_driver import Client
 from clickhouse_driver.errors import Error as ClickHouseError
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from models.silver_schema import (
+from shared.models.silver_schema import (
     SilverTableSchema,
     SilverColumnDefinition,
     DataType
 )
-from .ch_identifiers import (
+from shared.utils.ch_identifiers import (
     quote_identifier,
     quote_table_name,
     sanitize_identifier,

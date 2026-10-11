@@ -138,6 +138,19 @@ class SignUpSerializer(serializers.Serializer):
 
             if not invited_email or invited_role not in {"analyst", "executive"} or not workspace_id:
                 raise serializers.ValidationError({"invitation_token": "Invalid invitation payload from workspace-service."})
+
+            # An invitation grants workspace membership. It is never an
+            # account-recovery credential for an existing identity.
+            if User.objects.filter(email__iexact=invited_email).exists():
+                raise serializers.ValidationError(
+                    {
+                        "invitation_token": (
+                            "An account already exists for this invitation. "
+                            "Sign in as that account and accept the invitation."
+                        )
+                    },
+                    code="existing_account_auth_required",
+                )
             
             # Override email and role with values from invitation
             # User CANNOT modify these - they come from the invitation
@@ -204,36 +217,18 @@ class SignUpSerializer(serializers.Serializer):
                 'name': invitation_data.get('workspace_name', ''),
             }
             
-            # Check if user already exists with this email
-            existing_user = User.objects.filter(email=invited_email).first()
-            
-            if existing_user:
-                # User already exists - update password and info
-                existing_user.set_password(password)
-                existing_user.name = name
-                existing_user.first_name = first_name
-                existing_user.last_name = last_name
-                existing_user.role = role
-                # Set is_verified=False if not already verified (needs email verification)
-                if not existing_user.is_verified:
-                    existing_user.is_verified = False
-                existing_user.save()
-                
-                user = existing_user
-                # Always send verification email for invited users
-                is_invited = False  # Will trigger verification email in view
-            else:
-                # User doesn't exist - create new user with verified=False (needs email verification)
-                user = User.objects.create_user(
-                    email=invited_email,
-                    password=password,
-                    name=name,
-                    first_name=first_name,
-                    last_name=last_name,
-                    role=role,
-                    is_verified=False  # Invited users must verify email
-                )
-                is_invited = False  # Send verification email
+            # validate() proved this is a new identity. The database uniqueness
+            # constraint also closes the race if an account appears meanwhile.
+            user = User.objects.create_user(
+                email=invited_email,
+                password=password,
+                name=name,
+                first_name=first_name,
+                last_name=last_name,
+                role=role,
+                is_verified=False,
+            )
+            is_invited = False  # Send verification email
 
             try:
                 attached = get_workspace_service_client().attach_user_to_invitation(

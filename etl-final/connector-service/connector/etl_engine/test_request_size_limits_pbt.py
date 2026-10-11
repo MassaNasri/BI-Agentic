@@ -8,11 +8,13 @@ Tests universal properties that should hold for all request size validations:
 - Error messages are consistent and informative
 """
 
+import json
 import unittest
 from unittest.mock import Mock
-from django.test import TestCase, RequestFactory, override_settings
+from django.test import RequestFactory, override_settings
 from django.http import JsonResponse
 from hypothesis import given, strategies as st, settings, assume
+from hypothesis.extra.django import TestCase
 from .middleware import RequestValidationMiddleware
 
 
@@ -171,7 +173,7 @@ class RequestSizeLimitPropertyTest(TestCase):
         response = middleware(request)
         
         # Should have correlation ID in response body
-        response_data = response.json()
+        response_data = json.loads(response.content)
         self.assertIn('correlation_id', response_data)
         self.assertIsNotNone(response_data['correlation_id'])
         self.assertNotEqual(response_data['correlation_id'], '')
@@ -202,7 +204,7 @@ class RequestSizeLimitPropertyTest(TestCase):
         request.META['CONTENT_LENGTH'] = str(content_length)
         
         response = middleware(request)
-        response_data = response.json()
+        response_data = json.loads(response.content)
         
         # Should have error message
         self.assertIn('message', response_data)
