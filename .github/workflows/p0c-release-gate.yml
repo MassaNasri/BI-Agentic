@@ -16,6 +16,7 @@ env:
   OPENROUTER_API_KEY: ""
   CREDENTIAL_SECRET_KEY: "biavora-p0c-test-only-credential-key"
   PYTHONHASHSEED: "0"
+  PYTHONPATH: ${{ github.workspace }}
 
 jobs:
   static-and-compose:
@@ -65,13 +66,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
       - name: Install service test dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip "setuptools<81" wheel
           pip install -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/voice-service/requirements.txt -r services/report-service/requirements.txt -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r services/subscription-service/requirements.txt -r services/notification-service/requirements.txt -r services/ai-service/requirements.txt pytest
       - name: Shared readiness and request IDs
         run: python -m pytest tests/test_health_readiness.py -q --junitxml=test-results/shared-readiness.xml
@@ -122,11 +125,11 @@ jobs:
           cache: pip
       - name: Install ETL test dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r etl-final/shared/requirements.txt -r etl-final/connector-service/requirements.txt -r etl-final/detector-service/requirements.txt -r etl-final/extractor-service/requirements.txt -r etl-final/transformer-service/requirements.txt -r etl-final/loader-service/requirements.txt -r etl-final/metadata-service/requirements.txt pytest hypothesis
+          python -m pip install --upgrade pip "setuptools<81" wheel
+          pip install -r etl-final/shared/requirements.txt -r etl-final/connector-service/requirements.txt -r etl-final/detector-service/requirements.txt -r etl-final/extractor-service/requirements.txt -r etl-final/transformer-service/requirements.txt -r etl-final/loader-service/requirements.txt -r etl-final/metadata-service/requirements.txt -r etl-final/requirements-test.txt
       - name: Maintained ETL suites
         env:
-          PYTHONPATH: ${{ github.workspace }}/etl-final
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/etl-final
         run: |
           python -m pytest etl-final/shared/models etl-final/shared/security -q
           for test_file in etl-final/shared/utils/test_*.py; do
@@ -152,7 +155,7 @@ jobs:
           cache: pip
       - name: Install security regression dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip "setuptools<81" wheel
           pip install -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/voice-service/requirements.txt -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r etl-final/shared/requirements.txt pytest
       - name: Query security regression
         working-directory: services/query-service
@@ -169,7 +172,7 @@ jobs:
           (cd services/workspace-service && python manage.py test workspace.tests_security_invitation --verbosity 1)
       - name: ETL security regression
         env:
-          PYTHONPATH: ${{ github.workspace }}/etl-final
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/etl-final
         run: python -m pytest etl-final/shared/security/test_security_controls.py -q
 
   migration-drift:
@@ -182,16 +185,18 @@ jobs:
           cache: pip
       - name: Install Django service dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip "setuptools<81" wheel
           pip install -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r services/subscription-service/requirements.txt -r services/notification-service/requirements.txt -r services/voice-service/requirements.txt -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/report-service/requirements.txt
       - name: Eight-configuration drift gate
-        run: scripts/check-migration-drift.sh
+        run: bash scripts/check-migration-drift.sh
 
   docker-build:
     needs: [static-and-compose]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Build all maintained images without publishing
         run: |
           cp .env.example .env

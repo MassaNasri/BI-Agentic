@@ -1,0 +1,3 @@
+[submodule "services/ai-service/forecasting/timesfm"]
+	path = services/ai-service/forecasting/timesfm
+	url = https://github.com/google-research/timesfm.git

@@ -1,0 +1,4 @@
+# Test-only dependencies for the maintained ETL suites.
+pytest==7.4.3
+hypothesis==6.151.9
+psutil==6.0.0
