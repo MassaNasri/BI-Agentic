@@ -26,6 +26,7 @@ from preprocessing_high.preprocess_high_task import (
     _apply_business_term_normalization,
     _apply_fuzzy_phrase_corrections,
     _apply_fuzzy_token_corrections,
+    _best_fuzzy_candidate,
     run_preprocess_high,
 )
 from preprocessing_high.schema_loader import LoadedUserSchema
@@ -79,7 +80,10 @@ class PreprocessHighRecoveryTests(unittest.TestCase):
             query="How do customers impact totol sales?",
             loaded_schema=_loaded_schema_fixture(),
         )
+        self.assertIn("customers", corrected.lower())
+        self.assertIn("impact", corrected.lower())
         self.assertIn("total_sales", corrected)
+        self.assertNotIn("customers sales", corrected.lower())
         self.assertTrue(
             any(
                 str(item.get("from", "")).strip().lower() == "totol sales"
@@ -87,6 +91,62 @@ class PreprocessHighRecoveryTests(unittest.TestCase):
                 for item in corrections
             )
         )
+
+    def test_fuzzy_phrase_correction_does_not_collapse_longer_phrase(self):
+        corrected, corrections = _apply_fuzzy_phrase_corrections(
+            query="customers influence totol",
+            loaded_schema=_loaded_schema_fixture(),
+        )
+        self.assertEqual(corrected, "customers influence totol")
+        self.assertFalse(corrections)
+
+    def test_fuzzy_phrase_correction_preserves_temporal_phrase(self):
+        corrected, _ = _apply_fuzzy_phrase_corrections(
+            query="Compare sales and customers over time",
+            loaded_schema=_loaded_schema_fixture(),
+        )
+        self.assertIn("over time", corrected.lower())
+
+    def test_fuzzy_phrase_correction_normalizes_correct_schema_phrase(self):
+        corrected, corrections = _apply_fuzzy_phrase_corrections(
+            query="Show total sales by day",
+            loaded_schema=_loaded_schema_fixture(),
+        )
+        self.assertEqual(corrected, "Show total_sales by day")
+        self.assertTrue(
+            any(
+                str(item.get("from", "")).strip().lower() == "total sales"
+                and str(item.get("to", "")).strip().lower() == "total_sales"
+                for item in corrections
+            )
+        )
+
+    def test_best_fuzzy_candidate_requires_matching_phrase_shape(self):
+        rejected, rejected_score = _best_fuzzy_candidate(
+            "customers impact totol",
+            ["customers", "total sales"],
+        )
+        accepted, accepted_score = _best_fuzzy_candidate(
+            "totol sales",
+            ["customers", "total sales"],
+        )
+        self.assertEqual((rejected, rejected_score), ("", 0.0))
+        self.assertEqual(accepted, "total sales")
+        self.assertGreaterEqual(accepted_score, 84.0)
+
+    @patch("preprocessing_high.preprocess_high_task.rapidfuzz_process", None)
+    @patch("preprocessing_high.preprocess_high_task.fuzz", None)
+    def test_best_fuzzy_candidate_fallback_uses_same_phrase_shape(self):
+        rejected, rejected_score = _best_fuzzy_candidate(
+            "customers impact totol",
+            ["customers", "total sales"],
+        )
+        accepted, accepted_score = _best_fuzzy_candidate(
+            "totol sales",
+            ["customers", "total sales"],
+        )
+        self.assertEqual((rejected, rejected_score), ("", 0.0))
+        self.assertEqual((accepted, accepted_score), ("total sales", 84.0))
 
     def test_fuzzy_token_correction_maps_custmers_to_customers(self):
         corrected, corrections = _apply_fuzzy_token_corrections(

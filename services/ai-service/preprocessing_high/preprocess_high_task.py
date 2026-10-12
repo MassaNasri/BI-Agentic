@@ -211,10 +211,20 @@ def _best_fuzzy_candidate(term: str, candidates: list[str]) -> tuple[str, float]
     if not normalized_term or not candidates:
         return "", 0.0
 
+    term_token_count = len(re.findall(r"[a-z0-9]+", normalized_term.replace("_", " ")))
+    shape_compatible_candidates = [
+        candidate
+        for candidate in candidates
+        if len(re.findall(r"[a-z0-9]+", str(candidate).lower().replace("_", " ")))
+        == term_token_count
+    ]
+    if not shape_compatible_candidates:
+        return "", 0.0
+
     if rapidfuzz_process is not None and fuzz is not None:
         scored = rapidfuzz_process.extract(
             normalized_term,
-            candidates,
+            shape_compatible_candidates,
             scorer=fuzz.WRatio,
             limit=2,
         )
@@ -226,7 +236,12 @@ def _best_fuzzy_candidate(term: str, candidates: list[str]) -> tuple[str, float]
             return "", 0.0
         return str(best_term), float(best_score)
 
-    matches = get_close_matches(normalized_term, candidates, n=1, cutoff=0.84)
+    matches = get_close_matches(
+        normalized_term,
+        shape_compatible_candidates,
+        n=1,
+        cutoff=0.84,
+    )
     if not matches:
         return "", 0.0
     return matches[0], 84.0
