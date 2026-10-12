@@ -64,6 +64,20 @@ jobs:
 
   backend-and-ai:
     runs-on: ubuntu-latest
+    services:
+      visualization-postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: visualization_ci
+          POSTGRES_USER: visualization_ci
+          POSTGRES_PASSWORD: visualization_ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U visualization_ci -d visualization_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,6 +97,12 @@ jobs:
         run: python -m pytest tests -q --junitxml=../../test-results/query.xml
       - name: Visualization tests
         working-directory: services/visualization-service
+        env:
+          DB_NAME: visualization_ci
+          DB_USER: visualization_ci
+          DB_PASSWORD: visualization_ci_test_password
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
         run: python -m pytest visualization_api/tests -q --junitxml=../../test-results/visualization.xml
       - name: Voice tests
         working-directory: services/voice-service
@@ -147,6 +167,20 @@ jobs:
   security-regression:
     needs: [backend-and-ai, etl]
     runs-on: ubuntu-latest
+    services:
+      visualization-postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: visualization_ci
+          POSTGRES_USER: visualization_ci
+          POSTGRES_PASSWORD: visualization_ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U visualization_ci -d visualization_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -162,6 +196,12 @@ jobs:
         run: python -m pytest tests/test_clickhouse_credential_redaction.py tests/test_ingestion_callback_security.py tests/test_security_configuration.py -q
       - name: Visualization security regression
         working-directory: services/visualization-service
+        env:
+          DB_NAME: visualization_ci
+          DB_USER: visualization_ci
+          DB_PASSWORD: visualization_ci_test_password
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
         run: python -m pytest visualization_api/tests/test_security_ownership_and_query_reference.py -q
       - name: Voice security regression
         working-directory: services/voice-service
