@@ -2,7 +2,7 @@
 Voice Reports Views
 
 API endpoints for voice-driven BI system.
-Orchestrates Small Whisper, ClickHouse, and Metabase.
+Orchestrates Small Whisper, the authoritative Query service, and Metabase.
 """
 
 
@@ -45,7 +45,6 @@ from .constants import (
 )
 from .services import (
     get_small_whisper_client,
-    get_clickhouse_executor,
     SQLGuard,
     get_metabase_service,
     get_jwt_service,
@@ -1250,6 +1249,7 @@ class VoiceUploadView(APIView):
             # This ensures we always return a valid report_id
             report = VoiceReport.objects.create(
                 workspace_id=workspace_id,
+                dataset_id=int(binding_context["dataset_id"]),
                 created_by_id=actor_user_id,
                 created_by_email=actor_user_email,
                 audio_file=audio_path,
@@ -1608,6 +1608,7 @@ class TextQueryView(APIView):
 
             report = VoiceReport(
                 workspace_id=workspace_id,
+                dataset_id=int(binding_context["dataset_id"]),
                 created_by_id=actor_user_id,
                 created_by_email=actor_user_email,
                 transcription=transcription_text,
@@ -1865,32 +1866,17 @@ class QueryExecuteView(APIView):
             # Get SQL (final_sql may be edited by analyst)
             sql_to_execute = report.final_sql
             
-            # Validate SQL with SQL Guard
-            guard = SQLGuard(
-                workspace_database=os.getenv('CLICKHOUSE_DATABASE', 'etl')
-            )
-            
-            is_valid, error_msg, clean_sql = guard.validate_and_sanitize(sql_to_execute)
-            
-            if not is_valid:
-                report.status = VoiceReport.STATUS_FAILED
-                report.error_message = f"SQL validation failed: {error_msg}"
-                report.ai_trace = build_report_ai_trace(report)
-                report.save()
-                
-                return Response(
-                    {'success': False, 'error': error_msg},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            report.sql_validated = True
-            report.final_sql = clean_sql
+            # Query is the sole authorization and SQL enforcement boundary.
+            clean_sql = sql_to_execute.strip()
             report.status = VoiceReport.STATUS_PROCESSING
             report.error_message = ''
             report.save()
             
-            # Execute through Query Service (REST), with local fallback for resilience.
-            query_result = self._execute_query_with_query_service(request, clean_sql)
+            query_result = self._execute_query_with_query_service(
+                request,
+                clean_sql,
+                dataset_id=report.dataset_id,
+            )
 
             if not query_result.get('success'):
                 query_error = (
@@ -1913,10 +1899,15 @@ class QueryExecuteView(APIView):
                     {
                         'success': False,
                         'error': 'Query execution failed',
-                        'details': str(query_error)
+                        'details': str(query_error),
+                        'error_code': query_result.get('error_code') or 'INTERNAL_ERROR',
+                        'retryable': bool(query_result.get('retryable')),
                     },
-                    status=status.HTTP_502_BAD_GATEWAY
+                    status=int(query_result.get('http_status') or status.HTTP_502_BAD_GATEWAY),
                 )
+
+            report.sql_validated = True
+            report.final_sql = str(query_result.get('sql') or clean_sql)
             
             base_columns = query_result.get('columns', [])
             base_column_names = (
@@ -2436,6 +2427,13 @@ class QueryExecuteView(APIView):
         auth_header = request.META.get('HTTP_AUTHORIZATION')
         if auth_header:
             headers['Authorization'] = auth_header
+        request_id = str(
+            getattr(request, 'request_id', '')
+            or request.META.get('HTTP_X_REQUEST_ID', '')
+            or ''
+        ).strip()
+        if request_id:
+            headers['X-Request-ID'] = request_id
         return headers
 
     def _response_error_message(self, response, default):
@@ -2447,11 +2445,20 @@ class QueryExecuteView(APIView):
             pass
         return (response.text or default)[:500]
 
-    def _execute_query_with_query_service(self, request, clean_sql):
+    def _execute_query_with_query_service(self, request, clean_sql, *, dataset_id=None):
         query_service_url = os.getenv('QUERY_SERVICE_URL', 'http://query-service:8006').rstrip('/')
+        if dataset_id in (None, '', b''):
+            return {
+                'success': False,
+                'error': 'Report is missing its authorized logical dataset binding.',
+                'error_code': 'FORBIDDEN_DATASET',
+                'retryable': False,
+                'http_status': status.HTTP_409_CONFLICT,
+            }
         payload = {
             'sql': clean_sql,
             'workspace_id': get_user_workspace_id(request),
+            'dataset_id': dataset_id,
         }
 
         try:
@@ -2485,23 +2492,53 @@ class QueryExecuteView(APIView):
                         or result.get('error_message')
                         or 'query_service_execution_failed'
                     ),
+                    'error_code': result.get('error_code') or 'INTERNAL_ERROR',
+                    'retryable': bool(result.get('retryable')),
+                    'http_status': response.status_code,
                 }
 
+            try:
+                error_payload = response.json()
+            except ValueError:
+                error_payload = {}
             return {
                 'success': False,
                 'error': self._response_error_message(response, 'query_service_execution_failed'),
+                'error_code': (
+                    error_payload.get('error_code')
+                    if isinstance(error_payload, dict)
+                    else None
+                ) or 'INTERNAL_ERROR',
+                'retryable': bool(
+                    error_payload.get('retryable')
+                    if isinstance(error_payload, dict)
+                    else response.status_code >= 500
+                ),
+                'http_status': response.status_code,
             }
         except requests.RequestException as exc:
-            logger.warning("Query service unavailable, using local fallback: %s", exc)
-
-        # Fallback keeps behavior stable if query-service is temporarily unavailable.
-        try:
-            executor = get_clickhouse_executor()
-            return executor.execute_query(clean_sql)
-        except Exception as exc:
+            logger.warning(
+                "Query service unavailable; analytical execution failed closed: %s",
+                type(exc).__name__,
+            )
             return {
                 'success': False,
-                'error': f'query_service_and_fallback_failed: {exc}',
+                'error': 'query_service_unavailable',
+                'error_code': 'CLICKHOUSE_UNAVAILABLE',
+                'retryable': True,
+                'http_status': status.HTTP_503_SERVICE_UNAVAILABLE,
+            }
+        except Exception as exc:
+            logger.warning(
+                "Query service returned an invalid execution response: %s",
+                type(exc).__name__,
+            )
+            return {
+                'success': False,
+                'error': 'query_service_invalid_response',
+                'error_code': 'INTERNAL_ERROR',
+                'retryable': True,
+                'http_status': status.HTTP_502_BAD_GATEWAY,
             }
 
     def _build_visualization_settings(self, report, chart_type):
@@ -2642,7 +2679,7 @@ class QueryExecuteView(APIView):
         if not ai_trace_payload:
             ai_trace_payload = build_report_ai_trace(report)
         query_result = report.query_result if isinstance(report.query_result, dict) else {}
-        dataset_id = query_result.get('dataset_id') or request.data.get('dataset_id')
+        dataset_id = report.dataset_id or query_result.get('dataset_id')
         try:
             definition_response = requests.post(
                 f"{os.getenv('QUERY_SERVICE_URL', 'http://query-service:8006').rstrip('/')}/query/definitions/",
@@ -2952,9 +2989,9 @@ class SQLEditView(APIView):
                 )
             
             # Validate new SQL
-            guard = SQLGuard(
-                workspace_database=os.getenv('CLICKHOUSE_DATABASE', 'default')
-            )
+            # This is syntax-only feedback; Query re-authorizes the logical
+            # dataset and exact table set before any execution.
+            guard = SQLGuard()
             
             is_valid, error_msg, clean_sql = guard.validate_and_sanitize(new_sql)
             
@@ -3723,10 +3760,10 @@ class HealthCheckView(APIView):
     permission_classes = []  # Public endpoint
     
     def get(self, request):
-        """Check connectivity to Small Whisper, ClickHouse, and Metabase."""
+        """Check connectivity to Small Whisper, Query, and Metabase."""
         health = {
             'small_whisper': False,
-            'clickhouse': False,
+            'query': False,
             'metabase': False
         }
         
@@ -3738,10 +3775,11 @@ class HealthCheckView(APIView):
         except:
             pass
         
-        # Check ClickHouse
+        # Voice has no ClickHouse client or credential; Query owns that boundary.
         try:
-            executor = get_clickhouse_executor()
-            health['clickhouse'] = executor.test_connection()
+            query_service_url = os.getenv('QUERY_SERVICE_URL', 'http://query-service:8006').rstrip('/')
+            response = requests.get(f"{query_service_url}/health/", timeout=5)
+            health['query'] = response.status_code == 200
         except:
             pass
         

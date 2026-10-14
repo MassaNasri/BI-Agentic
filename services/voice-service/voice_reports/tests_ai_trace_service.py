@@ -2,8 +2,6 @@ import unittest
 import sys
 import types
 
-if "clickhouse_connect" not in sys.modules:
-    sys.modules["clickhouse_connect"] = types.SimpleNamespace(get_client=lambda **_kwargs: None)
 if "jwt" not in sys.modules:
     sys.modules["jwt"] = types.SimpleNamespace(encode=lambda *_args, **_kwargs: "")
 

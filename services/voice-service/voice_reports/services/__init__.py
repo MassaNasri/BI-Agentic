@@ -1,7 +1,5 @@
 from .small_whisper_client import SmallWhisperClient, get_small_whisper_client
 from .clickhouse_executor import (
-    ClickHouseExecutor,
-    get_clickhouse_executor,
     sanitize_query_results,
     sanitize_numeric_value
 )
@@ -20,8 +18,6 @@ from .notification_client import NotificationClient, get_notification_client
 __all__ = [
     'SmallWhisperClient',
     'get_small_whisper_client',
-    'ClickHouseExecutor',
-    'get_clickhouse_executor',
     'sanitize_query_results',
     'sanitize_numeric_value',
     'SQLGuard',

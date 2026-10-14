@@ -5,6 +5,7 @@ import requests
 import logging
 import re
 from django.conf import settings
+from query_api.resource_policy import QueryResourcePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,24 @@ class ClickHouseClient:
         self.password = getattr(settings, 'CLICKHOUSE_PASSWORD', '')
         self.base_url = f'http://{self.host}:{self.port}'
     
-    def execute_query(self, query):
+    def _read_settings(self, *, result_row_limit):
+        policy = getattr(settings, 'QUERY_RESOURCE_POLICY', None)
+        if not isinstance(policy, QueryResourcePolicy):
+            policy = QueryResourcePolicy.from_environment()
+        return policy.clickhouse_settings(result_row_limit=result_row_limit)
+
+    def execute_query(self, query, *, query_settings=None):
         """Execute a query on ClickHouse."""
         try:
             auth = (self.user, self.password) if self.user else None
-            response = requests.post(
-                self.base_url,
-                data=str(query).encode('utf-8'),
-                auth=auth,
-                timeout=(3, 10),
-            )
+            request_kwargs = {
+                'data': str(query).encode('utf-8'),
+                'auth': auth,
+                'timeout': (3, 10),
+            }
+            if query_settings:
+                request_kwargs['params'] = dict(query_settings)
+            response = requests.post(self.base_url, **request_kwargs)
             response.raise_for_status()
             return {'success': True, 'data': response.text}
         except Exception as e:
@@ -77,7 +86,10 @@ class ClickHouseClient:
         limit = max(1, min(int(limit), 100))
         qualified = f"{quote_clickhouse_identifier(database)}.{quote_clickhouse_identifier(table_name)}"
         query = f"SELECT * FROM {qualified} LIMIT {limit} FORMAT JSONEachRow"
-        result = self.execute_query(query)
+        result = self.execute_query(
+            query,
+            query_settings=self._read_settings(result_row_limit=limit),
+        )
         
         if result['success']:
             try:
@@ -94,7 +106,10 @@ class ClickHouseClient:
         """Get schema information for a table."""
         qualified = f"{quote_clickhouse_identifier(database)}.{quote_clickhouse_identifier(table_name)}"
         query = f"DESCRIBE TABLE {qualified} FORMAT JSONEachRow"
-        result = self.execute_query(query)
+        result = self.execute_query(
+            query,
+            query_settings=self._read_settings(result_row_limit=1000),
+        )
         
         if result['success']:
             try:
@@ -111,7 +126,10 @@ class ClickHouseClient:
         """Get row count for a table."""
         qualified = f"{quote_clickhouse_identifier(database)}.{quote_clickhouse_identifier(table_name)}"
         query = f"SELECT COUNT(*) as count FROM {qualified} FORMAT JSONEachRow"
-        result = self.execute_query(query)
+        result = self.execute_query(
+            query,
+            query_settings=self._read_settings(result_row_limit=1),
+        )
         
         if result['success']:
             try:
@@ -135,7 +153,10 @@ class ClickHouseClient:
             f'{quote_clickhouse_string(database_value)} '
             f'AND name = {quote_clickhouse_string(table_value)}'
         )
-        result = self.execute_query(query)
+        result = self.execute_query(
+            query,
+            query_settings=self._read_settings(result_row_limit=1),
+        )
         
         if result['success']:
             try:
@@ -155,7 +176,10 @@ class ClickHouseClient:
             'SELECT name FROM system.tables WHERE database = '
             f'{quote_clickhouse_string(database_value)} FORMAT JSONEachRow'
         )
-        result = self.execute_query(query)
+        result = self.execute_query(
+            query,
+            query_settings=self._read_settings(result_row_limit=1000),
+        )
         
         if result['success']:
             try:

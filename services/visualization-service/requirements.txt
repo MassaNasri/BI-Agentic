@@ -13,11 +13,8 @@ djangorestframework-simplejwt==5.3.0
 # CORS Headers for Frontend Integration
 django-cors-headers==4.3.1
 
-# HTTP Requests (for ETL and ClickHouse communication)
+# HTTP Requests (for internal service communication)
 requests==2.31.0
-
-# ClickHouse HTTP Client (for query execution)
-clickhouse-connect
 
 # Python dotenv for environment variables
 python-dotenv==1.0.0

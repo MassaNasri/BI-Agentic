@@ -10,11 +10,6 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 try:  # pragma: no cover - dependency is present in service images
-    import clickhouse_connect
-except Exception:  # noqa: BLE001
-    clickhouse_connect = None  # type: ignore[assignment]
-
-try:  # pragma: no cover - dependency is present in service images
     import redis
 except Exception:  # noqa: BLE001
     redis = None  # type: ignore[assignment]
@@ -156,18 +151,6 @@ def _redis_client(config: HighPreprocessConfig):
         return redis.Redis.from_url(config.value_index_redis_url, socket_connect_timeout=0.5, socket_timeout=1.0)
     except Exception:  # noqa: BLE001
         return None
-
-
-def _clickhouse_client(config: HighPreprocessConfig, *, database: str):
-    if clickhouse_connect is None:
-        raise RuntimeError("clickhouse_connect is not available")
-    return clickhouse_connect.get_client(
-        host=config.clickhouse_host,
-        port=config.clickhouse_port,
-        username=config.clickhouse_user,
-        password=config.clickhouse_password,
-        database=database,
-    )
 
 
 def _query_rows(client: Any, sql: str) -> list[Any]:
@@ -328,18 +311,19 @@ def load_value_index(
     if not indexable_columns:
         return {}
 
-    try:
-        client = clickhouse_client or _clickhouse_client(config, database=database)
-    except Exception as exc:  # noqa: BLE001
+    # Foundation-A removes AI's authority to construct a product-data
+    # ClickHouse client. A future BIA-021 authorized Query/Schema tool may
+    # inject a bounded provider here; until then this feature fails closed.
+    if clickhouse_client is None:
         _log(
             logger=logger,
             log_event=log_event,
             level=logging.WARNING,
-            message="Value index ClickHouse connection failed",
+            message="Value index provider unavailable",
             database=database,
-            error=str(exc),
         )
         return {}
+    client = clickhouse_client
 
     value_index: dict[str, list[dict[str, Any]]] = {}
     max_cardinality = int(config.value_index_max_cardinality_threshold)

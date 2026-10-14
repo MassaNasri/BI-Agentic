@@ -52,6 +52,7 @@ class WorkspaceDatasetBinding:
     manager_id: int
     clickhouse_db: str
     table_name: str
+    allowed_tables: frozenset[str]
     etl_status: str
 
 
@@ -79,6 +80,7 @@ def resolve_workspace_dataset_binding(
     dataset_id: object = None,
     table_name: object = None,
     verify_physical: bool = True,
+    require_dataset_id: bool = False,
     database_model=None,
     table_exists: Callable[[str, str], dict] | None = None,
 ) -> WorkspaceDatasetBinding:
@@ -101,6 +103,13 @@ def resolve_workspace_dataset_binding(
                 f"Dataset {requested_dataset_id} no longer exists in query-service metadata.",
                 details={"workspace_id": workspace_id_int, "dataset_id": requested_dataset_id},
             )
+    elif require_dataset_id:
+        raise WorkspaceDatasetBindingError(
+            "dataset_id_required",
+            "A logical dataset_id is required for analytical queries.",
+            http_status=400,
+            details={"workspace_id": workspace_id_int},
+        )
     else:
         database = (
             database_model.objects.filter(workspace_id=workspace_id_int)
@@ -143,7 +152,20 @@ def resolve_workspace_dataset_binding(
 
     clickhouse_db = str(getattr(database, "clickhouse_database", "") or "").strip()
     stored_table_name = str(getattr(database, "clickhouse_table_name", "") or "").strip()
-    if not clickhouse_db or not stored_table_name:
+    allowed_tables: list[str] = []
+    if stored_table_name:
+        allowed_tables.append(stored_table_name)
+    source_tables = getattr(database, "source_tables", None)
+    if isinstance(source_tables, (list, tuple)):
+        for source_table in source_tables:
+            if not isinstance(source_table, dict):
+                continue
+            destination = str(source_table.get("destination_table") or "").strip()
+            status = str(source_table.get("status") or "completed").strip().lower()
+            if destination and status == "completed":
+                allowed_tables.append(destination)
+    allowed_tables = list(dict.fromkeys(allowed_tables))
+    if not clickhouse_db or not allowed_tables:
         raise WorkspaceDatasetBindingError(
             "dataset_metadata_invalid",
             f"Dataset {database.pk} has incomplete ClickHouse metadata.",
@@ -151,7 +173,7 @@ def resolve_workspace_dataset_binding(
         )
 
     requested_table_name = str(table_name or "").strip()
-    if requested_table_name and requested_table_name != stored_table_name:
+    if requested_table_name and requested_table_name not in allowed_tables:
         raise WorkspaceDatasetBindingError(
             "dataset_table_mismatch",
             "The requested table does not match the dataset metadata.",
@@ -167,20 +189,21 @@ def resolve_workspace_dataset_binding(
 
             client = ClickHouseClient()
             table_exists = client.table_exists
-        result = table_exists(clickhouse_db, stored_table_name)
-        if not result.get("success"):
-            raise WorkspaceDatasetBindingError(
-                "dataset_source_unavailable",
-                "ClickHouse could not validate the dataset table.",
-                http_status=503,
-                details={"workspace_id": workspace_id_int, "dataset_id": int(database.pk)},
-            )
-        if not result.get("exists"):
-            raise WorkspaceDatasetBindingError(
-                "dataset_physical_table_missing",
-                "The dataset metadata points to a ClickHouse table that does not exist.",
-                details={"workspace_id": workspace_id_int, "dataset_id": int(database.pk)},
-            )
+        for allowed_table in allowed_tables:
+            result = table_exists(clickhouse_db, allowed_table)
+            if not result.get("success"):
+                raise WorkspaceDatasetBindingError(
+                    "dataset_source_unavailable",
+                    "ClickHouse could not validate the dataset table.",
+                    http_status=503,
+                    details={"workspace_id": workspace_id_int, "dataset_id": int(database.pk)},
+                )
+            if not result.get("exists"):
+                raise WorkspaceDatasetBindingError(
+                    "dataset_physical_table_missing",
+                    "The dataset metadata points to a ClickHouse table that does not exist.",
+                    details={"workspace_id": workspace_id_int, "dataset_id": int(database.pk)},
+                )
 
     return WorkspaceDatasetBinding(
         workspace_id=workspace_id_int,
@@ -188,6 +211,7 @@ def resolve_workspace_dataset_binding(
         manager_id=int(database.manager),
         clickhouse_db=clickhouse_db,
         table_name=stored_table_name,
+        allowed_tables=frozenset(allowed_tables),
         etl_status=etl_status,
     )
 

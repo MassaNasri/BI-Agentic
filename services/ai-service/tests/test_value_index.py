@@ -118,6 +118,16 @@ def test_indexes_only_safe_low_cardinality_string_columns():
     assert "`email`" not in joined_queries
 
 
+def test_enabled_runtime_without_authorized_provider_fails_closed():
+    index = vi.load_value_index(
+        loaded_schema=_schema(("city", "String")),
+        config=_config(),
+        logger=logging.getLogger(__name__),
+    )
+
+    assert index == {}
+
+
 def test_cache_hit_avoids_additional_clickhouse_requests():
     loaded_schema = _schema(("city", "String"))
     client = _FakeClickHouseClient({"city": ["Damascus"]})

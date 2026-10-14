@@ -37,6 +37,11 @@ services:
       VISUALIZATION_SERVICE_URL: ${VISUALIZATION_SERVICE_URL:-http://visualization-service:8007}
       SUBSCRIPTION_SERVICE_URL: ${SUBSCRIPTION_SERVICE_URL:-http://subscription-service:8008}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL:-http://notification-service:8010}
+      CLICKHOUSE_HOST: ""
+      CLICKHOUSE_PORT: ""
+      CLICKHOUSE_USER: ""
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DATABASE: ""
       GATEWAY_RATE_LIMIT_REQUESTS: ${GATEWAY_RATE_LIMIT_REQUESTS:-120}
       GATEWAY_RATE_LIMIT_WINDOW_SECONDS: ${GATEWAY_RATE_LIMIT_WINDOW_SECONDS:-6}
       GATEWAY_UPSTREAM_TIMEOUT_SECONDS: ${GATEWAY_UPSTREAM_TIMEOUT_SECONDS:-360}
@@ -133,16 +138,17 @@ services:
       - ./.env
     environment:
       SERVICE_NAME: report-service
-      READINESS_TCP_TARGETS: clickhouse:8123
+      READINESS_TCP_TARGETS: ""
       READINESS_HTTP_URLS: http://etl-metadata:8000/api/ready/,http://query-service:8006/health/,http://metabase:3000/api/health
       APP_ENV: ${APP_ENV:-development}
-      CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_HOST: ""
+      CLICKHOUSE_PORT: ""
+      CLICKHOUSE_USER: ""
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DATABASE: ""
       METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
       METABASE_URL: http://metabase:3000
     depends_on:
-      clickhouse:
-        condition: service_healthy
       etl-metadata:
         condition: service_healthy
       query-service:
@@ -176,7 +182,7 @@ services:
       - "C:/Users/massa/.cache/huggingface/hub/models--google--timesfm-2.5-200m-pytorch/snapshots/1d952420fba87f3c6dee4f240de0f1a0fbc790e3:/models/timesfm"
     environment:
       SERVICE_NAME: voice-service
-      READINESS_TCP_TARGETS: clickhouse:8123,kafka:9092
+      READINESS_TCP_TARGETS: kafka:9092
       READINESS_HTTP_URLS: http://ai-service:8005/health/,http://query-service:8006/health/,http://visualization-service:8007/health/,http://subscription-service:8008/health/,http://metabase:3000/api/health
       APP_ENV: ${APP_ENV:-development}
       SMALL_WHISPER_URL: http://ai-service:8005
@@ -187,8 +193,12 @@ services:
       QUERY_SERVICE_URL: ${QUERY_SERVICE_URL:-http://query-service:8006}
       VISUALIZATION_SERVICE_URL: ${VISUALIZATION_SERVICE_URL:-http://visualization-service:8007}
       SUBSCRIPTION_SERVICE_URL: ${SUBSCRIPTION_SERVICE_URL:-http://subscription-service:8008}
-      CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: "8123"
+      # Defense in depth: the shared env file must not grant Voice ClickHouse authority.
+      CLICKHOUSE_HOST: ""
+      CLICKHOUSE_PORT: ""
+      CLICKHOUSE_USER: ""
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DATABASE: ""
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       METABASE_URL: http://metabase:3000
     depends_on:
@@ -199,8 +209,6 @@ services:
       visualization-service:
         condition: service_healthy
       subscription-service:
-        condition: service_healthy
-      clickhouse:
         condition: service_healthy
       kafka:
         condition: service_healthy
@@ -240,6 +248,7 @@ services:
       PYTHONPATH: /app
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
+      PREPROCESS_HIGH_VALUE_INDEX_ENABLED: "false"
       WHISPER_MODEL_NAME: ${WHISPER_MODEL_NAME:-small}
       WHISPER_CACHE_DIR: ${WHISPER_CACHE_DIR:-/root/.cache/whisper}
       WHISPER_TASK: ${WHISPER_TASK:-transcribe}
@@ -295,6 +304,14 @@ services:
       APP_ENV: ${APP_ENV:-development}
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
+      QUERY_MAX_EXECUTION_SECONDS: ${QUERY_MAX_EXECUTION_SECONDS:-30}
+      QUERY_MAX_ROWS: ${QUERY_MAX_ROWS:-10000}
+      QUERY_MAX_RESULT_BYTES: ${QUERY_MAX_RESULT_BYTES:-5242880}
+      QUERY_MAX_BYTES_TO_READ: ${QUERY_MAX_BYTES_TO_READ:-1073741824}
+      QUERY_MAX_MEMORY_USAGE: ${QUERY_MAX_MEMORY_USAGE:-536870912}
+      QUERY_WORKSPACE_CONCURRENCY: ${QUERY_WORKSPACE_CONCURRENCY:-2}
+      QUERY_PAGE_SIZE: ${QUERY_PAGE_SIZE:-500}
+      QUERY_MAX_PAGE_SIZE: ${QUERY_MAX_PAGE_SIZE:-1000}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ETL_SERVICE_URL: ${ETL_SERVICE_URL:-http://etl-connector:8000}
       METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
@@ -340,6 +357,11 @@ services:
       VISUALIZATION_CHART_SELECTOR_OLLAMA_URL: http://host.docker.internal:11434/api/generate
       VISUALIZATION_CHART_SELECTOR_OLLAMA_MODEL: gemma3:1b
       METABASE_URL: http://metabase:3000
+      CLICKHOUSE_HOST: ""
+      CLICKHOUSE_PORT: ""
+      CLICKHOUSE_USER: ""
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DATABASE: ""
     depends_on:
       query-service:
         condition: service_healthy

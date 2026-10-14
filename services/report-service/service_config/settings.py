@@ -21,7 +21,7 @@ if not SECRET_KEY:
     raise ImproperlyConfigured('DJANGO_SECRET_KEY is required outside an explicit non-production profile.')
 if APP_ENV == 'production' and any(marker in SECRET_KEY.lower() for marker in ('change_me', 'change-me', 'replace-with', 'django-insecure')):
     raise ImproperlyConfigured('Production DJANGO_SECRET_KEY is a placeholder.')
-if APP_ENV == 'production' and not all(os.getenv(name, '').strip() for name in ('DB_PASSWORD', 'CLICKHOUSE_PASSWORD', 'METABASE_SECRET_KEY', 'METABASE_PASSWORD')):
+if APP_ENV == 'production' and not all(os.getenv(name, '').strip() for name in ('DB_PASSWORD', 'METABASE_SECRET_KEY', 'METABASE_PASSWORD')):
     raise ImproperlyConfigured('Database and Metabase credentials are required in production.')
 
 
@@ -136,12 +136,6 @@ SIMPLE_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 }
-
-CLICKHOUSE_HOST = os.getenv('CLICKHOUSE_HOST', 'clickhouse')
-CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '8123'))
-CLICKHOUSE_USER = os.getenv('CLICKHOUSE_USER', '')
-CLICKHOUSE_PASSWORD = os.getenv('CLICKHOUSE_PASSWORD', '')
-CLICKHOUSE_DATABASE = os.getenv('CLICKHOUSE_DATABASE', 'etl')
 
 METABASE_URL = os.getenv('METABASE_URL', 'http://metabase:3000')
 METABASE_USERNAME = os.getenv('METABASE_USERNAME', '')

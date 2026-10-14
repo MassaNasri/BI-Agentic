@@ -5,6 +5,7 @@ from django.core.exceptions import ImproperlyConfigured
 from datetime import timedelta
 
 from dotenv import load_dotenv
+from query_api.resource_policy import QueryResourcePolicy
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
@@ -146,6 +147,9 @@ CLICKHOUSE_PORT = int(os.getenv('CLICKHOUSE_PORT', '8123'))
 CLICKHOUSE_USER = os.getenv('CLICKHOUSE_USER', '')
 CLICKHOUSE_PASSWORD = os.getenv('CLICKHOUSE_PASSWORD', '')
 CLICKHOUSE_DATABASE = os.getenv('CLICKHOUSE_DATABASE', 'etl')
+
+# Foundation-A: one validated, fail-fast policy for every product query.
+QUERY_RESOURCE_POLICY = QueryResourcePolicy.from_environment()
 
 ETL_SERVICE_URL = os.getenv('ETL_SERVICE_URL', 'http://etl-platform:8001')
 

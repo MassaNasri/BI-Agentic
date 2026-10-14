@@ -44,7 +44,16 @@ def test_multiple_statements_are_rejected_even_when_first_is_select():
 def test_non_select_statements_are_rejected_by_ast():
     guard = SQLGuard()
 
-    for sql in ("INSERT INTO sales VALUES (1)", "DROP TABLE sales", "SHOW TABLES"):
+    for sql in (
+        "INSERT INTO sales VALUES (1)",
+        "UPDATE sales SET amount = 0",
+        "DELETE FROM sales",
+        "DROP TABLE sales",
+        "ALTER TABLE sales ADD COLUMN secret String",
+        "CREATE TABLE stolen (id UInt64) ENGINE = Memory",
+        "TRUNCATE TABLE sales",
+        "SHOW TABLES",
+    ):
         is_valid, message, _sanitized = guard.validate_and_sanitize(sql)
         assert is_valid is False
         assert "Only SELECT/WITH queries are allowed" in message
@@ -62,12 +71,16 @@ def test_system_database_access_is_blocked():
 def test_table_functions_are_blocked():
     guard = SQLGuard()
 
-    is_valid, message, _sanitized = guard.validate_and_sanitize(
-        "SELECT * FROM s3('https://example.com/file.csv')"
-    )
-
-    assert is_valid is False
-    assert "Blocked table/function source" in message
+    for sql in (
+        "SELECT * FROM s3('https://example.com/file.csv')",
+        "SELECT * FROM merge('etl', '.*')",
+        "SELECT * FROM futureUnknownTableFunction('tenant-data')",
+        "SELECT dictGet('tenant_dictionary', 'secret', 1)",
+        "SELECT joinGet('tenant_join', 'secret', 1)",
+    ):
+        is_valid, message, _sanitized = guard.validate_and_sanitize(sql)
+        assert is_valid is False
+        assert "Blocked table/function source" in message
 
 
 def test_workspace_database_is_enforced_and_cte_aliases_are_not_rewritten():
@@ -112,3 +125,45 @@ def test_individually_quoted_qualified_table_is_not_wrapped_as_one_identifier():
 
     assert is_valid, message
     assert sanitized == "SELECT * FROM etl.sales"
+
+
+def test_product_guard_requires_non_empty_table_binding():
+    guard = SQLGuard(
+        workspace_database="etl",
+        allowed_tables=set(),
+        require_allowed_tables=True,
+    )
+
+    is_valid, message, _sanitized = guard.validate_and_sanitize("SELECT * FROM sales")
+
+    assert is_valid is False
+    assert message.startswith("allowed_tables_required")
+
+
+def test_exact_allowlist_handles_quotes_aliases_joins_ctes_and_subqueries():
+    guard = SQLGuard(
+        workspace_database="etl",
+        allowed_tables={"sales", "customers"},
+        require_allowed_tables=True,
+    )
+    valid_sql = (
+        'WITH recent AS (SELECT * FROM `etl`.`sales`) '
+        'SELECT c.id FROM recent r JOIN "customers" c ON r.customer_id = c.id '
+        'WHERE c.id IN (SELECT customer_id FROM sales)'
+    )
+
+    is_valid, message, _sanitized = guard.validate_and_sanitize(valid_sql)
+    assert is_valid, message
+
+    bypasses = (
+        "SELECT * FROM secret",
+        "SELECT * FROM etl.secret",
+        "SELECT * FROM sales JOIN secret ON sales.id = secret.id",
+        "SELECT * FROM sales WHERE id IN (SELECT id FROM secret)",
+        "WITH hidden AS (SELECT * FROM secret) SELECT * FROM hidden",
+        'SELECT * FROM `secret`',
+    )
+    for sql in bypasses:
+        is_valid, message, _sanitized = guard.validate_and_sanitize(sql)
+        assert is_valid is False
+        assert message.startswith("unauthorized_table")

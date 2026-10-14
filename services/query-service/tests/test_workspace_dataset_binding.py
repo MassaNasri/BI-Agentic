@@ -64,6 +64,7 @@ def _record(**overrides):
         "manager": 4,
         "clickhouse_database": "etl",
         "clickhouse_table_name": "sales",
+        "source_tables": [],
         "etl_status": "completed",
     }
     values.update(overrides)
@@ -83,6 +84,38 @@ def test_valid_binding_checks_physical_table():
     assert binding.dataset_id == 4
     assert binding.workspace_id == 3
     assert binding.table_name == "sales"
+    assert binding.allowed_tables == frozenset({"sales"})
+
+
+def test_required_logical_dataset_id_fails_closed():
+    with pytest.raises(WorkspaceDatasetBindingError) as raised:
+        resolve_workspace_dataset_binding(
+            3,
+            require_dataset_id=True,
+            database_model=_database_model(_record()),
+        )
+
+    assert raised.value.code == "dataset_id_required"
+
+
+def test_multi_table_dataset_produces_exact_non_empty_allowlist():
+    binding = resolve_workspace_dataset_binding(
+        3,
+        dataset_id=4,
+        verify_physical=False,
+        require_dataset_id=True,
+        database_model=_database_model(
+            _record(
+                source_tables=[
+                    {"destination_table": "sales", "status": "completed"},
+                    {"destination_table": "customers", "status": "completed"},
+                    {"destination_table": "ignored", "status": "failed"},
+                ]
+            )
+        ),
+    )
+
+    assert binding.allowed_tables == frozenset({"sales", "customers"})
 
 
 def test_missing_workspace_binding_is_structured_422():
@@ -137,3 +170,32 @@ def test_explicit_table_must_match_metadata():
         )
 
     assert raised.value.code == "dataset_table_mismatch"
+
+
+@pytest.mark.parametrize("etl_status", ("failed", "deleted", "inactive", ""))
+def test_inactive_or_failed_dataset_is_rejected(etl_status):
+    with pytest.raises(WorkspaceDatasetBindingError) as raised:
+        resolve_workspace_dataset_binding(
+            3,
+            dataset_id=4,
+            require_dataset_id=True,
+            verify_physical=False,
+            database_model=_database_model(_record(etl_status=etl_status)),
+        )
+
+    assert raised.value.code == "dataset_metadata_invalid"
+
+
+def test_empty_dataset_binding_is_rejected():
+    with pytest.raises(WorkspaceDatasetBindingError) as raised:
+        resolve_workspace_dataset_binding(
+            3,
+            dataset_id=4,
+            require_dataset_id=True,
+            verify_physical=False,
+            database_model=_database_model(
+                _record(clickhouse_table_name="", source_tables=[])
+            ),
+        )
+
+    assert raised.value.code == "dataset_metadata_invalid"

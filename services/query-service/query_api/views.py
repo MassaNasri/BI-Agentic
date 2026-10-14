@@ -5,12 +5,11 @@ from rest_framework.views import APIView
 from django.utils import timezone
 from datetime import timedelta
 
-from query_api.application.query_execution import execute_sql_payload
-from query_api.services import SQLGuard, get_clickhouse_executor, sanitize_query_results
+from query_api.application.query_execution import execute_sql_payload, validate_sql_payload
+from query_api.resource_policy import build_workspace_query_id
+from query_api.services import SQLGuard, get_clickhouse_executor
 from query_api.services.workspace_db_resolver import (
-    WorkspaceClickhouseDbResolutionError,
     WorkspaceDatasetBindingError,
-    resolve_workspace_clickhouse_db,
     resolve_workspace_dataset_binding,
 )
 from database.models import AuthorizedQueryDefinition
@@ -54,11 +53,17 @@ def _authorized_workspace_id(request) -> int:
 
 
 def _workspace_scope_error_response(exc: WorkspaceRequestScopeError) -> Response:
+    if exc.http_status == status.HTTP_401_UNAUTHORIZED:
+        error_code = "UNAUTHORIZED"
+    elif exc.http_status == status.HTTP_403_FORBIDDEN:
+        error_code = "FORBIDDEN_DATASET"
+    else:
+        error_code = "VALIDATION_REJECTED"
     return Response(
         {
             "success": False,
             "error": str(exc),
-            "error_code": exc.code.upper(),
+            "error_code": error_code,
             "code": exc.code,
         },
         status=exc.http_status,
@@ -81,7 +86,7 @@ class QueryHealthView(APIView):
             payload = {
                 'success': False,
                 'service': 'query-service',
-                'error': str(exc),
+                'error': 'analytical_data_service_unavailable',
             }
 
         return Response(payload, status=status.HTTP_200_OK)
@@ -91,39 +96,14 @@ class QueryValidateInternalView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        sql = request.data.get('sql', '')
         try:
             workspace_id = _authorized_workspace_id(request)
         except WorkspaceRequestScopeError as exc:
             return _workspace_scope_error_response(exc)
-        try:
-            workspace_database = resolve_workspace_clickhouse_db(workspace_id).clickhouse_db
-        except WorkspaceClickhouseDbResolutionError as exc:
-            return Response(
-                {'success': False, 'error': str(exc), 'error_code': exc.code},
-                status=exc.http_status,
-            )
-
-        guard = SQLGuard(workspace_database=workspace_database)
-        is_valid, error_msg, clean_sql = guard.validate_and_sanitize(sql)
-
-        if not is_valid:
-            return Response(
-                {
-                    'success': False,
-                    'error': error_msg,
-                    'sql': clean_sql,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return Response(
-            {
-                'success': True,
-                'sql': clean_sql,
-            },
-            status=status.HTTP_200_OK,
-        )
+        payload = dict(request.data)
+        payload['workspace_id'] = workspace_id
+        result, http_status, _binding = validate_sql_payload(payload)
+        return Response(result, status=http_status)
 
 
 class QueryExecuteInternalView(APIView):
@@ -136,8 +116,45 @@ class QueryExecuteInternalView(APIView):
             return _workspace_scope_error_response(exc)
         payload = dict(request.data)
         payload["workspace_id"] = workspace_id
+        payload["request_id"] = str(getattr(request, "request_id", "") or "")
         result, http_status = execute_sql_payload(payload)
         return Response(result, status=http_status)
+
+
+class QueryCancelInternalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            workspace_id = _authorized_workspace_id(request)
+            query_id = build_workspace_query_id(workspace_id, request.data.get('request_id'))
+        except WorkspaceRequestScopeError as exc:
+            return _workspace_scope_error_response(exc)
+        except (TypeError, ValueError):
+            return Response(
+                {
+                    'success': False,
+                    'error': 'A valid request_id is required for cancellation.',
+                    'error_code': 'VALIDATION_REJECTED',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = get_clickhouse_executor().cancel_query(query_id)
+        except Exception:
+            result = {
+                'success': False,
+                'error': 'Query cancellation is temporarily unavailable.',
+                'error_code': 'CLICKHOUSE_UNAVAILABLE',
+            }
+        return Response(
+            result,
+            status=(
+                status.HTTP_200_OK
+                if result.get('success')
+                else status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+        )
 
 
 class QueryDefinitionCreateView(APIView):
@@ -149,7 +166,9 @@ class QueryDefinitionCreateView(APIView):
             binding = resolve_workspace_dataset_binding(
                 workspace_id,
                 dataset_id=request.data.get('dataset_id'),
+                table_name=request.data.get('table_name'),
                 verify_physical=False,
+                require_dataset_id=True,
             )
         except WorkspaceRequestScopeError as exc:
             return _workspace_scope_error_response(exc)
@@ -160,7 +179,11 @@ class QueryDefinitionCreateView(APIView):
                 {'success': False, 'error': 'Dataset authorization dependency failed.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        guard = SQLGuard(workspace_database=binding.clickhouse_db)
+        guard = SQLGuard(
+            workspace_database=binding.clickhouse_db,
+            allowed_tables=binding.allowed_tables,
+            require_allowed_tables=True,
+        )
         valid, error, clean_sql = guard.validate_and_sanitize(request.data.get('sql', ''))
         if not valid:
             return Response({'success': False, 'error': error}, status=status.HTTP_400_BAD_REQUEST)
@@ -196,11 +219,29 @@ class QueryDefinitionVisualizationView(APIView):
                 {'success': False, 'error': 'Authorized query definition not found or expired.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        validation, validation_status, _binding = validate_sql_payload({
+            'workspace_id': workspace_id,
+            'dataset_id': definition.dataset_id,
+            'sql': definition.normalized_sql,
+        })
+        if validation_status != status.HTTP_200_OK:
+            return Response(
+                {
+                    'success': False,
+                    'error': 'Authorized query definition is no longer valid.',
+                    'error_code': validation.get('error_code') or 'FORBIDDEN_DATASET',
+                },
+                status=(
+                    status.HTTP_503_SERVICE_UNAVAILABLE
+                    if validation_status >= 500
+                    else status.HTTP_403_FORBIDDEN
+                ),
+            )
         return Response({
             'success': True,
             'query_definition_id': str(definition.id),
             'workspace_id': definition.workspace_id,
             'dataset_id': definition.dataset_id,
-            'sql': definition.normalized_sql,
+            'sql': validation['sql'],
             'expires_at': definition.expires_at,
         })

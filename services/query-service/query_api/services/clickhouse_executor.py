@@ -9,6 +9,10 @@ import os
 import logging
 import math
 import re
+import hashlib
+import json
+import time
+import threading
 from typing import Dict, List, Optional, Any
 
 try:
@@ -17,6 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
     clickhouse_connect = None
 
 from bi_platform_shared.contracts.query import build_column_metadata
+from query_api.resource_policy import QueryResourcePolicy
 from query_api.utils import normalize_sql_table_references
 from .result_shape_analyzer import analyze_result_shape
 
@@ -286,7 +291,7 @@ class ClickHouseExecutor:
                 "Update your .env file: CLICKHOUSE_PORT=8123"
             )
 
-        logger.info("Connecting to ClickHouse: %s:%s user=%s", host, port, username)
+        logger.info("Initializing authoritative ClickHouse query client")
 
         try:
             client = clickhouse_connect.get_client(
@@ -296,34 +301,30 @@ class ClickHouseExecutor:
                 password=password,
                 database=database
             )
-            version_result = client.query("SELECT version()")
+            version_result = client.query(
+                "SELECT version()",
+                settings=QueryResourcePolicy.from_environment().clickhouse_settings(
+                    result_row_limit=1
+                ),
+            )
             version = (
                 version_result.result_rows[0][0]
                 if version_result.result_rows and version_result.result_rows[0]
                 else "unknown"
             )
-            logger.info("ClickHouse connection verified. version=%s database=%s", version, database)
+            logger.info("ClickHouse query client verified version=%s", version)
         except Exception as exc:
             error_msg = str(exc)
             logger.error(
-                "ClickHouse initialization failed for %s:%s user=%s database=%s: %s",
-                host,
-                port,
-                username,
-                database,
-                error_msg
+                "ClickHouse query client initialization failed error_type=%s",
+                type(exc).__name__,
             )
             if 'AUTHENTICATION_FAILED' in error_msg or 'Authentication failed' in error_msg:
                 raise RuntimeError(
-                    "ClickHouse authentication failed. Verify CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, "
-                    "and CLICKHOUSE_DATABASE values. "
-                    f"Loaded config host={host}, port={port}, user={username}, database={database}. "
-                    f"Original error: {error_msg}"
+                    "ClickHouse authentication failed. Verify the query-service credential configuration."
                 ) from exc
             raise RuntimeError(
-                "ClickHouse connection initialization failed. "
-                f"Loaded config host={host}, port={port}, user={username}, database={database}. "
-                f"Original error: {error_msg}"
+                "ClickHouse query client initialization failed."
             ) from exc
 
         self.host = host
@@ -333,7 +334,16 @@ class ClickHouseExecutor:
         self.database = database
         self.client = client
 
-    def execute_query(self, sql: str, workspace_database: Optional[str] = None) -> Dict:
+    def execute_query(
+        self,
+        sql: str,
+        workspace_database: Optional[str] = None,
+        *,
+        policy: QueryResourcePolicy | None = None,
+        page: object = None,
+        page_size: object = None,
+        query_id: str = "",
+    ) -> Dict:
         """
         Execute SQL query on ClickHouse.
 
@@ -355,14 +365,16 @@ class ClickHouseExecutor:
             }
         """
         clean_sql = ""
+        policy = policy or QueryResourcePolicy.from_environment()
         try:
-            import time
             start_time = time.time()
 
-            logger.error("RAW SQL BEFORE NORMALIZATION:")
-            logger.error("=" * 80)
-            logger.error(sql)
-            logger.error("=" * 80)
+            if not str(sql or "").lstrip().upper().startswith(("SELECT", "WITH")):
+                return {
+                    "success": False,
+                    "error": "Only read-only SELECT/WITH queries may be executed.",
+                    "error_code": "VALIDATION_REJECTED",
+                }
 
             normalized_sql = sql
             normalize_db = workspace_database or self.database
@@ -372,14 +384,33 @@ class ClickHouseExecutor:
 
             # Sanitize SQL for HTTP execution (removes FORMAT Native, semicolons)
             clean_sql = sanitize_sql_for_http(normalized_sql)
+            normalized_page, effective_page_size, offset = policy.page_options(
+                page=page,
+                page_size=page_size,
+            )
+            fetch_limit = effective_page_size + 1
+            paged_sql = (
+                "SELECT * FROM ("
+                f"{clean_sql}"
+                ") AS _biavora_page "
+                f"LIMIT {fetch_limit} OFFSET {offset}"
+            )
+            settings_applied = policy.clickhouse_settings(result_row_limit=fetch_limit)
+            query_settings = dict(settings_applied)
+            if query_id:
+                # clickhouse-connect 0.15 treats query_id as a per-query HTTP
+                # transport parameter when supplied through settings. Its
+                # transport_settings argument is a raw HTTP-header mapping.
+                query_settings["query_id"] = query_id
+            sql_hash = hashlib.sha256(clean_sql.encode("utf-8")).hexdigest()
 
-            # FINAL SQL boundary logging (mandatory)
-            logger.error("FINAL SQL SENT TO CLICKHOUSE:")
-            logger.error("=" * 80)
-            logger.error(clean_sql)
-            logger.error("=" * 80)
-
-            def _result_to_payload(raw_result: Any, *, executed_sql: str, fallback_applied: bool = False, fallback_reason: str = "") -> Dict:
+            def _result_to_payload(
+                raw_result: Any,
+                *,
+                executed_sql: str,
+                fallback_applied: bool = False,
+                fallback_reason: str = "",
+            ) -> Dict:
                 execution_time_ms = int((time.time() - start_time) * 1000)
 
                 rows: List[Dict[str, Any]] = []
@@ -390,19 +421,55 @@ class ClickHouseExecutor:
                 ]
                 column_metadata = build_column_metadata(column_names, column_types)
 
-                for row in raw_result.result_rows:
+                raw_rows = list(getattr(raw_result, "result_rows", []) or [])
+                truncated = len(raw_rows) > effective_page_size
+                for row in raw_rows[:effective_page_size]:
                     row_dict: Dict[str, Any] = {}
                     for i, col_name in enumerate(column_names):
                         row_dict[col_name] = row[i]
                     rows.append(row_dict)
 
                 sanitized_rows = sanitize_query_results(rows)
+                output_bytes = len(
+                    json.dumps(
+                        sanitized_rows,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        default=str,
+                    ).encode("utf-8")
+                )
+                if output_bytes > policy.max_result_bytes:
+                    return {
+                        "success": False,
+                        "error": "Query result exceeded the authorized response size.",
+                        "error_code": "QUERY_LIMIT_EXCEEDED",
+                        "execution_time_ms": execution_time_ms,
+                        "output_bytes": output_bytes,
+                        "settings_applied": settings_applied,
+                        "query_id": query_id,
+                        "sql_hash": sql_hash,
+                    }
                 result_shape = analyze_result_shape(
                     executed_sql,
                     column_metadata,
                     sanitized_rows,
                 )
-                logger.info("Query successful: %s rows in %sms", len(sanitized_rows), execution_time_ms)
+                summary = dict(getattr(raw_result, "summary", {}) or {})
+                scanned_rows = summary.get("read_rows")
+                read_bytes = summary.get("read_bytes")
+                next_page = (
+                    normalized_page + 1
+                    if truncated and offset + effective_page_size < policy.max_rows
+                    else None
+                )
+                logger.info(
+                    "clickhouse_query_completed query_id=%s sql_hash=%s duration_ms=%s rows=%s output_bytes=%s",
+                    query_id,
+                    sql_hash,
+                    execution_time_ms,
+                    len(sanitized_rows),
+                    output_bytes,
+                )
 
                 payload: Dict[str, Any] = {
                     'success': True,
@@ -413,7 +480,21 @@ class ClickHouseExecutor:
                     'result_shape': result_shape.model_dump(mode="json"),
                     'row_count': len(sanitized_rows),
                     'execution_time_ms': execution_time_ms,
-                    'executed_sql': executed_sql,
+                    'scanned_rows': int(scanned_rows) if scanned_rows is not None else None,
+                    'bytes_read': int(read_bytes) if read_bytes is not None else None,
+                    'output_bytes': output_bytes,
+                    'settings_applied': settings_applied,
+                    'query_id': query_id or str(summary.get("query_id") or ""),
+                    'sql_hash': sql_hash,
+                    'pagination': {
+                        'page': normalized_page,
+                        'page_size': effective_page_size,
+                        'returned_count': len(sanitized_rows),
+                        'truncated': truncated,
+                        'next_page': next_page,
+                        'limit_reached': bool(truncated and next_page is None),
+                        'max_rows': policy.max_rows,
+                    },
                 }
                 if fallback_applied:
                     payload['fallback_applied'] = True
@@ -421,8 +502,11 @@ class ClickHouseExecutor:
                 return payload
 
             # Execute query using clickhouse-connect
-            result = self.client.query(clean_sql)
-            return _result_to_payload(result, executed_sql=clean_sql)
+            result = self.client.query(
+                paged_sql,
+                settings=query_settings,
+            )
+            return _result_to_payload(result, executed_sql=paged_sql)
 
         except Exception as e:
             error_msg = str(e)
@@ -434,9 +518,17 @@ class ClickHouseExecutor:
                     logger.warning(
                         "Date parse error detected; retrying with safer toDate transformation."
                     )
-                    logger.warning("Retry SQL sent to ClickHouse: %s", retry_sql)
                     try:
-                        retry_result = self.client.query(retry_sql)
+                        retry_paged_sql = (
+                            "SELECT * FROM ("
+                            f"{retry_sql}"
+                            ") AS _biavora_page "
+                            f"LIMIT {fetch_limit} OFFSET {offset}"
+                        )
+                        retry_result = self.client.query(
+                            retry_paged_sql,
+                            settings=query_settings,
+                        )
 
                         logger.info(
                             "Query successful after date-safe retry: %s rows in %sms",
@@ -445,36 +537,98 @@ class ClickHouseExecutor:
                         )
                         return _result_to_payload(
                             retry_result,
-                            executed_sql=retry_sql,
+                            executed_sql=retry_paged_sql,
                             fallback_applied=True,
                             fallback_reason='date_parse_retry_todate_us_best_effort',
                         )
                     except Exception as retry_exc:
                         retry_error_msg = str(retry_exc)
-                        logger.error(
-                            "ClickHouse query failed after date-safe retry: %s",
-                            retry_error_msg,
-                        )
-                        error_msg = (
-                            f"{error_msg} | retry_with_date_safe_todate_failed: "
-                            f"{retry_error_msg}"
-                        )
+                        error_msg = retry_error_msg
 
-            logger.error("ClickHouse query error: %s", error_msg)
-
-            # Special handling for port misconfiguration
-            if 'Port 9000 is for clickhouse-client' in error_msg or 'Connection refused' in error_msg:
-                return {
-                    'success': False,
-                    'error': (
-                        'ClickHouse connection error. '
-                        'Ensure ClickHouse is running and CLICKHOUSE_PORT=8123 is set in .env file.'
-                    )
-                }
-
+            lowered_error = error_msg.lower()
+            if any(token in lowered_error for token in ("timeout", "max_execution_time", "time limit")):
+                error_code = "QUERY_TIMEOUT"
+                safe_error = "Query execution exceeded the authorized timeout."
+            elif any(token in lowered_error for token in ("cancelled", "canceled", "query was cancelled", "query was canceled")):
+                error_code = "QUERY_CANCELLED"
+                safe_error = "Query execution was cancelled."
+            elif any(
+                token in lowered_error
+                for token in (
+                    "max_result_rows",
+                    "max_result_bytes",
+                    "max_bytes_to_read",
+                    "max_memory_usage",
+                    "memory limit",
+                    "too many rows",
+                    "too_many_rows_or_bytes",
+                    "too_many_bytes",
+                    "limit for result exceeded",
+                    "limit for bytes to read exceeded",
+                    "limit for rows or bytes to read exceeded",
+                    "limit exceeded",
+                )
+            ):
+                error_code = "QUERY_LIMIT_EXCEEDED"
+                safe_error = "Query execution exceeded an authorized resource limit."
+            elif any(
+                token in lowered_error
+                for token in ("connection refused", "connection reset", "network", "unavailable", "timed out")
+            ):
+                error_code = "CLICKHOUSE_UNAVAILABLE"
+                safe_error = "The analytical data service is temporarily unavailable."
+            else:
+                error_code = "INTERNAL_ERROR"
+                safe_error = "Query execution failed."
+            logger.warning(
+                "clickhouse_query_failed query_id=%s error_code=%s error_type=%s",
+                query_id,
+                error_code,
+                type(e).__name__,
+            )
             return {
                 'success': False,
-                'error': f"Query execution failed: {error_msg[:200]}"
+                'error': safe_error,
+                'error_code': error_code,
+                'aborted_due_to_timeout': error_code == "QUERY_TIMEOUT",
+                'settings_applied': settings_applied if 'settings_applied' in locals() else {},
+                'query_id': query_id,
+                'sql_hash': hashlib.sha256(clean_sql.encode("utf-8")).hexdigest() if clean_sql else None,
+            }
+
+    def cancel_query(self, query_id: str) -> Dict:
+        query_id = str(query_id or "").strip()
+        if not re.fullmatch(r"biavora-w[1-9][0-9]*-[a-f0-9]{32}", query_id):
+            return {
+                "success": False,
+                "error": "Invalid cancellation request.",
+                "error_code": "VALIDATION_REJECTED",
+            }
+        try:
+            active_result = self.client.query(
+                "SELECT count() FROM system.processes "
+                "WHERE query_id = {query_id:String} AND user = currentUser()",
+                parameters={"query_id": query_id},
+            )
+            active_count = int(active_result.result_rows[0][0])
+            if active_count == 0:
+                return {"success": True, "cancelled": False, "query_id": query_id}
+            self.client.command(
+                "KILL QUERY WHERE query_id = %(query_id)s AND user = currentUser() SYNC",
+                parameters={"query_id": query_id},
+            )
+            logger.info("clickhouse_query_cancel_requested query_id=%s", query_id)
+            return {"success": True, "cancelled": True, "query_id": query_id}
+        except Exception as exc:
+            logger.warning(
+                "clickhouse_query_cancel_failed query_id=%s error_type=%s",
+                query_id,
+                type(exc).__name__,
+            )
+            return {
+                "success": False,
+                "error": "Query cancellation is temporarily unavailable.",
+                "error_code": "CLICKHOUSE_UNAVAILABLE",
             }
     def test_connection(self) -> bool:
         """
@@ -484,8 +638,12 @@ class ClickHouseExecutor:
             bool: True if connected
         """
         try:
-            result = self.execute_query("SELECT 1 as test")
-            return result['success']
+            policy = QueryResourcePolicy.from_environment()
+            result = self.client.query(
+                "SELECT 1 AS test",
+                settings=policy.clickhouse_settings(result_row_limit=1),
+            )
+            return bool(getattr(result, "result_rows", None))
         except Exception:
             return False
     
@@ -534,14 +692,17 @@ class ClickHouseExecutor:
         return {}
 
 
-# Singleton instance
-_clickhouse_executor = None
+# clickhouse-connect sessions reject concurrent queries. Django may serve two
+# requests on different threads, especially the query and its cancellation, so
+# each request thread needs its own session.
+_clickhouse_executor_local = threading.local()
 
 def get_clickhouse_executor() -> ClickHouseExecutor:
-    """Get or create ClickHouse executor singleton."""
-    global _clickhouse_executor
-    if _clickhouse_executor is None:
-        _clickhouse_executor = ClickHouseExecutor()
-    return _clickhouse_executor
+    """Get or create the ClickHouse executor for the current request thread."""
+    executor = getattr(_clickhouse_executor_local, "executor", None)
+    if executor is None:
+        executor = ClickHouseExecutor()
+        _clickhouse_executor_local.executor = executor
+    return executor
 
 

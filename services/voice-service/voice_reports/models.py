@@ -71,6 +71,12 @@ class VoiceReport(models.Model):
 
     # Ownership & scope
     workspace_id = models.CharField(max_length=64, db_index=True)
+    dataset_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Logical Query-service dataset identifier used for authorization",
+    )
     created_by_id = models.CharField(max_length=64, db_index=True)
     created_by_email = models.EmailField(blank=True, default="")
 

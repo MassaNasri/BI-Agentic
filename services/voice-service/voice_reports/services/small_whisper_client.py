@@ -257,7 +257,11 @@ class SmallWhisperClient:
                 try:
                     result = response.json()
                 except ValueError:
-                    logger.error("Small Whisper returned non-JSON body: %s", response.text[:500])
+                    logger.error(
+                        "Small Whisper returned non-JSON body status=%s body_len=%s",
+                        response.status_code,
+                        len(response.text or ""),
+                    )
                     return {
                         "success": False,
                         "error": "Small Whisper returned invalid JSON response",

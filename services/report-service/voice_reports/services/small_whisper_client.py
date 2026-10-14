@@ -147,7 +147,11 @@ class SmallWhisperClient:
                 result = response.json()
             except ValueError as e:
                 logger.error(f"❌ Failed to parse JSON response: {str(e)}")
-                logger.error(f"Response text: {response.text[:500]}")
+                logger.error(
+                    "Small Whisper returned non-JSON body status=%s body_len=%s",
+                    response.status_code,
+                    len(response.text or ""),
+                )
                 return {
                     'success': False,
                     'error': 'Small Whisper returned invalid JSON response'
@@ -184,7 +188,7 @@ class SmallWhisperClient:
             question_type = reasoning.get('question_type', 'unknown')
             needs_sql = reasoning.get('needs_sql', False)
             
-            logger.info(f"📝 Transcription: {text[:100]}...")
+            logger.info("Transcription received text_len=%s", len(text or ""))
             logger.info(f"🔍 Question Type: {question_type}")
             logger.info(f"🔍 Needs SQL: {needs_sql}")
             
@@ -244,7 +248,7 @@ class SmallWhisperClient:
             confidence = llm_data.get('confidence', 0.5)
             
             if sql:
-                logger.info(f"🔍 SQL Generated: {sql[:100]}...")
+                logger.info("SQL generated sql_len=%s", len(sql))
             else:
                 logger.info("ℹ️ No SQL generated")
             

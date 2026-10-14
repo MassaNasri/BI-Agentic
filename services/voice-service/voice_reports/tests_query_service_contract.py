@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-if "clickhouse_connect" not in sys.modules:
-    sys.modules["clickhouse_connect"] = types.SimpleNamespace(get_client=lambda **_kwargs: None)
+import requests
+
 if "jwt" not in sys.modules:
     sys.modules["jwt"] = types.SimpleNamespace(encode=lambda *_args, **_kwargs: "")
 
@@ -174,6 +174,7 @@ class QueryServiceContractTests(unittest.TestCase):
             result = QueryExecuteView()._execute_query_with_query_service(
                 request,
                 "SELECT count() AS total",
+                dataset_id=7,
             )
 
         self.assertTrue(result["success"])
@@ -198,10 +199,73 @@ class QueryServiceContractTests(unittest.TestCase):
             result = QueryExecuteView()._execute_query_with_query_service(
                 request,
                 "SELECT count() AS total",
+                dataset_id=7,
             )
 
         self.assertFalse(result["success"])
         self.assertEqual(result["error"], "query_service_execution_failed")
+
+    def test_query_request_includes_logical_dataset_and_no_physical_identifier(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"success": True, "rows": []}
+        request = Mock()
+        request.META = {"HTTP_AUTHORIZATION": "Bearer test"}
+        request.request_id = "request-123"
+
+        with (
+            patch("voice_reports.views.requests.post", return_value=response) as post,
+            patch("voice_reports.views.get_user_workspace_id", return_value="3"),
+        ):
+            result = QueryExecuteView()._execute_query_with_query_service(
+                request,
+                "SELECT * FROM sales",
+                dataset_id=4,
+            )
+
+        self.assertTrue(result["success"])
+        sent = post.call_args.kwargs["json"]
+        self.assertEqual(sent["workspace_id"], "3")
+        self.assertEqual(sent["dataset_id"], 4)
+        self.assertNotIn("workspace_database", sent)
+        self.assertNotIn("physical_table_name", sent)
+        self.assertEqual(post.call_args.kwargs["headers"]["X-Request-ID"], "request-123")
+
+    def test_query_outage_fails_closed_without_local_executor(self):
+        request = Mock()
+        request.META = {}
+
+        with (
+            patch(
+                "voice_reports.views.requests.post",
+                side_effect=requests.ConnectionError("query unavailable"),
+            ),
+            patch("voice_reports.views.get_user_workspace_id", return_value="1"),
+        ):
+            result = QueryExecuteView()._execute_query_with_query_service(
+                request,
+                "SELECT * FROM sales",
+                dataset_id=7,
+            )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "CLICKHOUSE_UNAVAILABLE")
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["http_status"], 503)
+
+    def test_missing_report_dataset_fails_before_network(self):
+        request = Mock()
+        request.META = {}
+        with patch("voice_reports.views.requests.post") as post:
+            result = QueryExecuteView()._execute_query_with_query_service(
+                request,
+                "SELECT * FROM sales",
+                dataset_id=None,
+            )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "FORBIDDEN_DATASET")
+        post.assert_not_called()
 
 
 if __name__ == "__main__":

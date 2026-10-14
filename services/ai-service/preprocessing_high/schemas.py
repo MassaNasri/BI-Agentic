@@ -123,7 +123,9 @@ class HighPreprocessConfig:
     user_database_template: str
     schema_cache_ttl_seconds: int
     default_user_id: str
-    value_index_enabled: bool = True
+    # Foundation-A keeps AI from issuing product data reads outside Query.
+    # Re-enable only after BIA-021 routes value lookup through an authorized tool.
+    value_index_enabled: bool = False
     value_index_max_cardinality_threshold: int = 500
     value_index_max_values_per_column: int = 500
     value_index_cache_ttl_seconds: int = 300
@@ -145,7 +147,7 @@ class HighPreprocessConfig:
             user_database_template=os.getenv("PREPROCESS_HIGH_DATABASE_TEMPLATE", "").strip(),
             schema_cache_ttl_seconds=max(0, _env_int("PREPROCESS_HIGH_SCHEMA_CACHE_TTL_SECONDS", 60)),
             default_user_id=os.getenv("PREPROCESS_HIGH_DEFAULT_USER_ID", "default_user"),
-            value_index_enabled=_env_bool("PREPROCESS_HIGH_VALUE_INDEX_ENABLED", True),
+            value_index_enabled=_env_bool("PREPROCESS_HIGH_VALUE_INDEX_ENABLED", False),
             value_index_max_cardinality_threshold=max(
                 1,
                 _env_int("PREPROCESS_HIGH_VALUE_INDEX_MAX_CARDINALITY_THRESHOLD", 500),

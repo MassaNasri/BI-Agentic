@@ -1,25 +1,38 @@
-"""SQL execution flow for query-service (Phase 7 / CRIT-05).
-
-The previous implementation accepted client-supplied ``workspace_database``
-fields and silently fell back to ``"etl"`` when the field was missing. Phase
-7 of the audit forbids both: every call into ``execute_sql_payload`` must
-arrive with a workspace-derived database, otherwise it returns HTTP 400.
-"""
+"""Authoritative logical-dataset analytical query execution."""
 
 from __future__ import annotations
 
 import logging
+import os
+import time
 from typing import Any
+from uuid import uuid4
 
+from django.conf import settings
+
+from query_api.resource_policy import QueryResourcePolicy, build_workspace_query_id
 from query_api.services import (
     SQLGuard,
-    WorkspaceClickhouseDbResolutionError,
+    WorkspaceDatasetBinding,
+    WorkspaceDatasetBindingError,
     get_clickhouse_executor,
-    resolve_workspace_clickhouse_db,
+    resolve_workspace_dataset_binding,
     sanitize_query_results,
+)
+from query_api.services.workspace_concurrency import (
+    WorkspaceConcurrencyLimitExceeded,
+    WorkspaceConcurrencyUnavailable,
+    workspace_query_lease,
 )
 
 logger = logging.getLogger(__name__)
+
+_CLIENT_PHYSICAL_FIELDS = {
+    "workspace_database",
+    "database_name",
+    "clickhouse_database",
+    "physical_table_name",
+}
 
 
 def _failed_payload(
@@ -29,14 +42,6 @@ def _failed_payload(
     error_code: str,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return a stable failure payload.
-
-    Phase 8 — the response always carries the full ``QueryExecutionResult``
-    metadata (``column_types``, ``scanned_rows``, ``output_bytes``,
-    ``aborted_due_to_timeout``, ``settings_applied``) so the caller does
-    not have to special-case the failure shape.
-    """
-
     payload: dict[str, Any] = {
         "success": False,
         "status": "failed",
@@ -47,147 +52,346 @@ def _failed_payload(
         "column_types": [],
         "row_count": 0,
         "scanned_rows": None,
+        "bytes_read": None,
         "output_bytes": None,
         "empty_result": False,
         "execution_time_ms": 0,
-        "aborted_due_to_timeout": False,
+        "aborted_due_to_timeout": error_code == "QUERY_TIMEOUT",
         "settings_applied": {},
+        "pagination": None,
         "error": error,
         "error_code": error_code,
         "error_message": error,
         "result_shape": None,
+        "retryable": error_code in {
+            "QUERY_TIMEOUT",
+            "QUERY_CANCELLED",
+            "CLICKHOUSE_UNAVAILABLE",
+            "INTERNAL_ERROR",
+        },
     }
     if extra:
         payload.update(extra)
     return payload
 
 
-def _resolve_workspace_database(payload: dict[str, Any]) -> tuple[str, dict[str, Any] | None, int]:
-    """Resolve and validate the ClickHouse database for this request.
+def _policy() -> QueryResourcePolicy:
+    configured = getattr(settings, "QUERY_RESOURCE_POLICY", None)
+    return configured if isinstance(configured, QueryResourcePolicy) else QueryResourcePolicy.from_environment()
 
-    Workspace scope is authoritative: normal requests must provide a
-    ``workspace_id`` that resolves server-side. An explicit
-    ``workspace_database`` is accepted only from trusted internal callers that
-    set ``trusted_internal_workspace_database=true``.
-    """
 
-    workspace_id = payload.get("workspace_id")
-    if workspace_id not in (None, "", b""):
-        try:
-            resolution = resolve_workspace_clickhouse_db(workspace_id)
-        except WorkspaceClickhouseDbResolutionError as exc:
-            logger.warning(
-                "execute_sql_payload_workspace_unresolved code=%s message=%s",
-                exc.code,
-                str(exc),
-            )
-            failed = _failed_payload(
-                sql=str(payload.get("sql", "")).strip(),
-                error=str(exc),
-                error_code=exc.code.upper(),
-            )
-            return "", failed, int(exc.http_status or 400)
-
-        return resolution.clickhouse_db, None, 200
-
-    explicit_db = str(payload.get("workspace_database") or "").strip()
-    if explicit_db and str(payload.get("trusted_internal_workspace_database") or "").lower() == "true":
-        return explicit_db, None, 200
-
-    failed = _failed_payload(
-        sql=str(payload.get("sql", "")).strip(),
-        error="workspace_id is required for query execution.",
-        error_code="WORKSPACE_ID_REQUIRED",
+def _binding_failure(
+    payload: dict[str, Any],
+    exc: WorkspaceDatasetBindingError,
+) -> tuple[dict[str, Any], int]:
+    if exc.code == "dataset_id_required":
+        code, message, http_status = (
+            "FORBIDDEN_DATASET",
+            "A logical dataset_id is required for analytical queries.",
+            400,
+        )
+    elif exc.code == "dataset_not_ready":
+        code, message, http_status = (
+            "FORBIDDEN_DATASET",
+            "The authorized dataset is not ready for analytical queries.",
+            409,
+        )
+    elif exc.code == "dataset_source_unavailable":
+        code, message, http_status = (
+            "CLICKHOUSE_UNAVAILABLE",
+            "The analytical data service is temporarily unavailable.",
+            503,
+        )
+    else:
+        code, message, http_status = (
+            "FORBIDDEN_DATASET",
+            "The requested dataset is not authorized for this workspace.",
+            403,
+        )
+    return (
+        _failed_payload(
+            sql=str(payload.get("sql") or "").strip(),
+            error=message,
+            error_code=code,
+        ),
+        http_status,
     )
-    return "", failed, 400
 
 
-def execute_sql_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
-    sql = str(payload.get("sql", "") or "").strip()
+def resolve_authorized_query_binding(
+    payload: dict[str, Any],
+) -> tuple[WorkspaceDatasetBinding | None, dict[str, Any] | None, int]:
+    for field in _CLIENT_PHYSICAL_FIELDS:
+        if payload.get(field) not in (None, "", b""):
+            return (
+                None,
+                _failed_payload(
+                    sql=str(payload.get("sql") or "").strip(),
+                    error="Physical storage identifiers are not accepted by the query API.",
+                    error_code="VALIDATION_REJECTED",
+                ),
+                400,
+            )
+    try:
+        binding = resolve_workspace_dataset_binding(
+            payload.get("workspace_id"),
+            dataset_id=payload.get("dataset_id"),
+            table_name=payload.get("table_name"),
+            verify_physical=False,
+            require_dataset_id=True,
+        )
+    except WorkspaceDatasetBindingError as exc:
+        failed, http_status = _binding_failure(payload, exc)
+        return None, failed, http_status
+    except Exception as exc:
+        logger.error("query_binding_dependency_failed error_type=%s", type(exc).__name__)
+        return (
+            None,
+            _failed_payload(
+                sql=str(payload.get("sql") or "").strip(),
+                error="Dataset authorization is temporarily unavailable.",
+                error_code="INTERNAL_ERROR",
+            ),
+            503,
+        )
 
-    workspace_database, failure, failure_status = _resolve_workspace_database(payload)
-    if failure is not None:
-        return failure, failure_status
+    if not binding.allowed_tables:
+        return (
+            None,
+            _failed_payload(
+                sql=str(payload.get("sql") or "").strip(),
+                error="The authorized dataset has no queryable table binding.",
+                error_code="FORBIDDEN_DATASET",
+            ),
+            403,
+        )
+    return binding, None, 200
 
-    if ";" in sql[:-1]:
+
+def validate_sql_payload(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], int, WorkspaceDatasetBinding | None]:
+    sql = str(payload.get("sql") or "").strip()
+    binding, failure, failure_status = resolve_authorized_query_binding(payload)
+    if failure is not None or binding is None:
+        return failure or {}, failure_status, None
+
+    guard = SQLGuard(
+        workspace_database=binding.clickhouse_db,
+        allowed_tables=binding.allowed_tables,
+        require_allowed_tables=True,
+    )
+    is_valid, error_msg, clean_sql = guard.validate_and_sanitize(sql)
+    if not is_valid:
+        forbidden = error_msg.startswith(
+            ("database_mismatch", "cross_db_violation", "unauthorized_table")
+        )
+        error_code = "FORBIDDEN_DATASET" if forbidden else "VALIDATION_REJECTED"
         return (
             _failed_payload(
-                sql=sql,
-                error="Only single SELECT/WITH statements are allowed.",
-                error_code="MULTI_STATEMENT_NOT_ALLOWED",
+                sql=clean_sql,
+                error=(
+                    "The query references a table outside the authorized dataset."
+                    if forbidden
+                    else error_msg
+                ),
+                error_code=error_code,
+                extra={"workspace_id": binding.workspace_id, "dataset_id": binding.dataset_id},
+            ),
+            403 if forbidden else 400,
+            binding,
+        )
+    return (
+        {
+            "success": True,
+            "status": "validated",
+            "sql": clean_sql,
+            "workspace_id": binding.workspace_id,
+            "dataset_id": binding.dataset_id,
+        },
+        200,
+        binding,
+    )
+
+
+def _executor_failure_status(error_code: str) -> int:
+    return {
+        "VALIDATION_REJECTED": 400,
+        "FORBIDDEN_DATASET": 403,
+        "QUERY_TIMEOUT": 504,
+        "QUERY_LIMIT_EXCEEDED": 422,
+        "QUERY_CANCELLED": 409,
+        "CLICKHOUSE_UNAVAILABLE": 503,
+        "INTERNAL_ERROR": 500,
+    }.get(error_code, 500)
+
+
+def _audit(
+    *,
+    request_id: str,
+    binding: WorkspaceDatasetBinding,
+    outcome: str,
+    duration_ms: int,
+    rows: int,
+    output_bytes: int | None,
+    error_code: str | None,
+) -> None:
+    logger.info(
+        "analytical_query request_id=%s workspace_id=%s dataset_id=%s outcome=%s "
+        "duration_ms=%s rows=%s output_bytes=%s error_code=%s service_version=%s",
+        request_id,
+        binding.workspace_id,
+        binding.dataset_id,
+        outcome,
+        duration_ms,
+        rows,
+        output_bytes,
+        error_code or "",
+        os.getenv("SERVICE_VERSION", "foundation-a"),
+    )
+
+
+def execute_sql_payload(
+    payload: dict[str, Any],
+    *,
+    lease_factory=None,
+) -> tuple[dict[str, Any], int]:
+    started = time.monotonic()
+    validation, http_status, binding = validate_sql_payload(payload)
+    if http_status != 200 or binding is None:
+        return validation, http_status
+
+    resource_policy = _policy()
+    try:
+        page, page_size, _offset = resource_policy.page_options(
+            page=payload.get("page"),
+            page_size=payload.get("page_size"),
+        )
+    except ValueError as exc:
+        return (
+            _failed_payload(
+                sql=validation["sql"],
+                error=str(exc),
+                error_code="VALIDATION_REJECTED",
+                extra={"workspace_id": binding.workspace_id, "dataset_id": binding.dataset_id},
             ),
             400,
         )
 
-    guard = SQLGuard(workspace_database=workspace_database)
-    is_valid, error_msg, clean_sql = guard.validate_and_sanitize(sql)
-    if not is_valid:
-        cross_db = error_msg.startswith("database_mismatch") or error_msg.startswith("cross_db_violation")
-        return (
-            _failed_payload(
-                sql=clean_sql,
-                error=error_msg,
-                error_code=(
-                    "CROSS_DB_VIOLATION" if cross_db else "SQL_VALIDATION_FAILED"
-                ),
-            ),
-            403 if cross_db else 400,
-        )
-
-    executor = get_clickhouse_executor()
+    request_id = str(payload.get("request_id") or uuid4()).strip()
+    query_id = build_workspace_query_id(binding.workspace_id, request_id)
+    lease = lease_factory or workspace_query_lease
     try:
-        result = executor.execute_query(
-            clean_sql,
-            workspace_database=workspace_database,
-        )
-    except TypeError:
-        # Backward-compatibility for legacy test doubles/executors that do not
-        # yet accept the workspace_database kwarg.
-        result = executor.execute_query(clean_sql)
-    if not result.get("success"):
-        result_error_code = str(result.get("error_code") or "").upper()
-        if result_error_code == "CROSS_DB_VIOLATION":
-            return (
-                _failed_payload(
-                    sql=clean_sql,
-                    error=result.get("error", "cross_db_violation"),
-                    error_code="CROSS_DB_VIOLATION",
-                ),
-                403,
+        with lease(binding.workspace_id, resource_policy.workspace_concurrency):
+            executor = get_clickhouse_executor()
+            result = executor.execute_query(
+                validation["sql"],
+                workspace_database=binding.clickhouse_db,
+                policy=resource_policy,
+                page=page,
+                page_size=page_size,
+                query_id=query_id,
             )
-        return (
-            _failed_payload(
-                sql=clean_sql,
-                error=result.get("error", "query_failed"),
-                error_code="QUERY_EXECUTION_FAILED",
-            ),
-            502,
+    except WorkspaceConcurrencyLimitExceeded:
+        result = {
+            "success": False,
+            "error": "The workspace has reached its concurrent query limit.",
+            "error_code": "QUERY_LIMIT_EXCEEDED",
+        }
+        http_status = 429
+    except WorkspaceConcurrencyUnavailable as exc:
+        logger.error("query_concurrency_unavailable error_type=%s", type(exc).__name__)
+        result = {
+            "success": False,
+            "error": "Query admission control is temporarily unavailable.",
+            "error_code": "INTERNAL_ERROR",
+        }
+        http_status = 503
+    except Exception as exc:
+        logger.error("query_executor_unavailable error_type=%s", type(exc).__name__)
+        result = {
+            "success": False,
+            "error": "The analytical data service is temporarily unavailable.",
+            "error_code": "CLICKHOUSE_UNAVAILABLE",
+        }
+        http_status = 503
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    if not result.get("success"):
+        error_code = str(result.get("error_code") or "INTERNAL_ERROR").upper()
+        if http_status == 200:
+            http_status = _executor_failure_status(error_code)
+        failure = _failed_payload(
+            sql=validation["sql"],
+            error=str(result.get("error") or "Query execution failed."),
+            error_code=error_code,
+            extra={
+                "workspace_id": binding.workspace_id,
+                "dataset_id": binding.dataset_id,
+                "request_id": request_id,
+                "query_id": query_id,
+                "execution_time_ms": int(result.get("execution_time_ms") or duration_ms),
+                "output_bytes": result.get("output_bytes"),
+                "settings_applied": dict(result.get("settings_applied") or {}),
+                "sql_hash": result.get("sql_hash"),
+            },
         )
+        _audit(
+            request_id=request_id,
+            binding=binding,
+            outcome="failed",
+            duration_ms=duration_ms,
+            rows=0,
+            output_bytes=failure.get("output_bytes"),
+            error_code=error_code,
+        )
+        return failure, http_status
 
     rows = sanitize_query_results(result.get("rows", []))
     row_count = int(result.get("row_count", len(rows)) or 0)
-    return (
-        {
-            "success": True,
-            "status": "success",
-            "sql": clean_sql,
-            "rows": rows,
-            "columns": result.get("columns", []),
-            "column_names": result.get("column_names", []),
-            "column_types": result.get("column_types", []) or [],
-            "row_count": row_count,
-            "scanned_rows": result.get("scanned_rows"),
-            "output_bytes": result.get("output_bytes"),
-            "empty_result": row_count == 0,
-            "execution_time_ms": int(result.get("execution_time_ms", 0) or 0),
-            "aborted_due_to_timeout": bool(result.get("aborted_due_to_timeout", False)),
-            "settings_applied": dict(result.get("settings_applied") or {}),
-            "sql_hash": result.get("sql_hash"),
-            "error": None,
-            "error_code": None,
-            "error_message": None,
-            "workspace_database": workspace_database,
-            "result_shape": result.get("result_shape"),
-        },
-        200,
+    response = {
+        "success": True,
+        "status": "success",
+        "sql": validation["sql"],
+        "rows": rows,
+        "columns": result.get("columns", []),
+        "column_names": result.get("column_names", []),
+        "column_types": result.get("column_types", []) or [],
+        "row_count": row_count,
+        "scanned_rows": result.get("scanned_rows"),
+        "bytes_read": result.get("bytes_read"),
+        "output_bytes": result.get("output_bytes"),
+        "empty_result": row_count == 0,
+        "execution_time_ms": int(result.get("execution_time_ms", duration_ms) or 0),
+        "aborted_due_to_timeout": False,
+        "settings_applied": dict(result.get("settings_applied") or {}),
+        "sql_hash": result.get("sql_hash"),
+        "request_id": request_id,
+        "query_id": result.get("query_id") or query_id,
+        "workspace_id": binding.workspace_id,
+        "dataset_id": binding.dataset_id,
+        "pagination": result.get("pagination"),
+        "truncated": bool((result.get("pagination") or {}).get("truncated")),
+        "error": None,
+        "error_code": None,
+        "error_message": None,
+        "retryable": False,
+        "result_shape": result.get("result_shape"),
+    }
+    _audit(
+        request_id=request_id,
+        binding=binding,
+        outcome="success",
+        duration_ms=duration_ms,
+        rows=row_count,
+        output_bytes=response.get("output_bytes"),
+        error_code=None,
     )
+    return response, 200
+
+
+__all__ = [
+    "execute_sql_payload",
+    "resolve_authorized_query_binding",
+    "validate_sql_payload",
+]

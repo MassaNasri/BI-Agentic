@@ -57,6 +57,15 @@ BLOCKED_TABLE_FUNCTIONS = {
     "s3",
     "url",
 }
+BLOCKED_DATA_LOOKUP_FUNCTION_PREFIXES = (
+    "dictget",
+    "dicthas",
+    "dictisin",
+    "dictgethierarchy",
+    "dictgetchildren",
+    "dictgetdescendants",
+    "joinget",
+)
 BLOCKED_MASKED_PATTERNS = (
     (re.compile(r"\bINTO\s+OUTFILE\b", re.IGNORECASE), "INTO OUTFILE is not allowed"),
     (re.compile(r"\bINTO\s+DUMPFILE\b", re.IGNORECASE), "INTO DUMPFILE is not allowed"),
@@ -149,9 +158,20 @@ def _table_identifier(table: exp.Table) -> tuple[str, str, str]:
 class SQLGuard:
     """Validate and sanitize SQL using parser/AST allowlisting."""
 
-    def __init__(self, workspace_database: str | None = None, allowed_tables: set[str] | None = None):
+    def __init__(
+        self,
+        workspace_database: str | None = None,
+        allowed_tables: set[str] | frozenset[str] | None = None,
+        *,
+        require_allowed_tables: bool = False,
+    ):
         self.workspace_database = str(workspace_database or "").strip()
-        self.allowed_tables = {table.lower() for table in (allowed_tables or set()) if table}
+        self.allowed_tables = {
+            str(table).strip().strip("`\"").split(".")[-1].strip("`\"").lower()
+            for table in (allowed_tables or set())
+            if str(table).strip()
+        }
+        self.require_allowed_tables = bool(require_allowed_tables)
 
     def validate_sql(self, sql: str) -> Tuple[bool, str, Dict[str, Any]]:
         sql_clean = str(sql or "").strip()
@@ -162,6 +182,9 @@ class SQLGuard:
         }
         if not sql_clean:
             return False, "SQL query is empty", details
+        if self.require_allowed_tables and not self.allowed_tables:
+            details["checks_failed"].append("allowed_tables_required")
+            return False, "allowed_tables_required: authorized table binding is empty", details
 
         masked = _mask_literals_and_comments(sql_clean)
         for pattern, message in BLOCKED_MASKED_PATTERNS:
@@ -190,17 +213,27 @@ class SQLGuard:
         cte_aliases = _cte_aliases(statement)
         for function in statement.find_all(exp.Func):
             function_name = str(function.name or function.sql_name() or "").strip().lower()
-            if function_name in BLOCKED_TABLE_FUNCTIONS:
+            if function_name in BLOCKED_TABLE_FUNCTIONS or function_name.startswith(
+                BLOCKED_DATA_LOOKUP_FUNCTION_PREFIXES
+            ):
                 details["checks_failed"].append(f"blocked_function:{function_name}")
                 return False, f"Blocked table/function source: {function_name}", details
 
         for anonymous in statement.find_all(exp.Anonymous):
             function_name = str(anonymous.name or "").strip().lower()
-            if function_name in BLOCKED_TABLE_FUNCTIONS:
+            if function_name in BLOCKED_TABLE_FUNCTIONS or function_name.startswith(
+                BLOCKED_DATA_LOOKUP_FUNCTION_PREFIXES
+            ):
                 details["checks_failed"].append(f"blocked_function:{function_name}")
                 return False, f"Blocked table/function source: {function_name}", details
 
         for table in statement.find_all(exp.Table):
+            if isinstance(table.this, exp.Func):
+                function_name = str(
+                    table.this.name or table.this.sql_name() or "table_function"
+                ).strip().lower()
+                details["checks_failed"].append(f"blocked_table_function:{function_name}")
+                return False, f"Blocked table/function source: {function_name}", details
             _catalog, db, name = _table_identifier(table)
             if not name:
                 continue
