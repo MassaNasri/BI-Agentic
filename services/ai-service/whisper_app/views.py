@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+from bi_platform_shared.uploads import validate_upload, UploadRejected, AUDIO_MAX_BYTES, probe_audio_duration
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -95,6 +96,10 @@ def transcribe_view(request):
     audio_file = request.FILES.get("audio")
     if not audio_file:
         return JsonResponse({"error": "No audio file provided"}, status=400)
+    try:
+        extension = validate_upload(audio_file, 'audio')
+    except UploadRejected as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
     user_id = (request.POST.get("user_id") or "").strip()
     manager_id = (request.POST.get("manager_id") or "").strip()
     dataset_id = (request.POST.get("dataset_id") or "").strip()
@@ -103,12 +108,31 @@ def transcribe_view(request):
     report_id = (request.POST.get("report_id") or "").strip()
     table_name = (request.POST.get("table_name") or "").strip()
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        for chunk in audio_file.chunks():
-            tmp.write(chunk)
-        tmp_path = tmp.name
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, prefix='biavora-audio-', suffix=extension) as tmp:
+            tmp_path = tmp.name
+            total = 0
+            for chunk in audio_file.chunks():
+                total += len(chunk)
+                if total > AUDIO_MAX_BYTES:
+                    raise UploadRejected("Audio upload exceeds size limit.")
+                tmp.write(chunk)
+    except UploadRejected as exc:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        return JsonResponse({"error": str(exc)}, status=400)
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        logger.error("Audio staging failed")
+        return JsonResponse({"error": "Audio staging failed."}, status=500)
 
     try:
+        try:
+            probe_audio_duration(tmp_path)
+        except UploadRejected as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
         pipeline_result = whisper_transcription_preprocess_intent_flow(
             audio_path=tmp_path,
             user_id=(user_id or None),
@@ -138,8 +162,8 @@ def transcribe_view(request):
             else {}
         )
     except Exception as exc:
-        logger.exception("Whisper transcription pipeline failed")
-        return JsonResponse({"error": str(exc)}, status=500)
+        logger.error("Whisper transcription pipeline failed error_type=%s", type(exc).__name__)
+        return JsonResponse({"error": "Transcription failed."}, status=500)
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

@@ -21,8 +21,12 @@ if not SECRET_KEY:
     raise ImproperlyConfigured('DJANGO_SECRET_KEY is required outside an explicit non-production profile.')
 if APP_ENV == 'production' and any(marker in SECRET_KEY.lower() for marker in ('change_me', 'change-me', 'replace-with', 'django-insecure')):
     raise ImproperlyConfigured('Production DJANGO_SECRET_KEY is a placeholder.')
+from bi_platform_shared.security_config import validate_production_secrets
+validate_production_secrets(APP_ENV, SECRET_KEY)
 if APP_ENV == 'production' and not all(os.getenv(name, '').strip() for name in ('DB_PASSWORD', 'METABASE_SECRET_KEY', 'METABASE_PASSWORD')):
     raise ImproperlyConfigured('Database and Metabase credentials are required in production.')
+if APP_ENV == 'production' and not os.getenv('AI_SERVICE_INTERNAL_API_KEY', '').strip():
+    raise ImproperlyConfigured('AI_SERVICE_INTERNAL_API_KEY is required in production.')
 
 
 def _env_bool(name, default=False):
@@ -112,6 +116,7 @@ STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+PRIVATE_UPLOAD_ROOT = BASE_DIR / 'private_uploads'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {

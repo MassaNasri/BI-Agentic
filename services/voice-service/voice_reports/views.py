@@ -16,6 +16,7 @@ from django.http import Http404
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from django.core.files.base import ContentFile
+from django.conf import settings
 import logging
 import os
 import time
@@ -23,6 +24,7 @@ import uuid
 from urllib.parse import urlsplit
 import requests
 from bi_platform_shared.sql import sanitize_sql_for_metabase
+from bi_platform_shared.uploads import validate_upload, UploadRejected, AUDIO_MAX_BYTES
 from bi_platform_shared.contracts.chart import (
     chart_shape_support_failure as shared_chart_shape_support_failure,
     is_chart_shape_supported,
@@ -714,11 +716,31 @@ def build_default_pipeline_trace() -> dict:
     }
 
 
+def _redact_private_trace_paths(value):
+    """Keep AI diagnostics without exposing transient server file locations."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                '[redacted]'
+                if str(key).lower().endswith(('_path', 'path'))
+                else _redact_private_trace_paths(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_private_trace_paths(item) for item in value]
+    if isinstance(value, str) and any(
+        marker in value for marker in ('/app/private_uploads/', '/tmp/', 'biavora-audio-')
+    ):
+        return '[redacted]'
+    return value
+
+
 def normalize_pipeline_trace(payload) -> dict:
     fallback = build_default_pipeline_trace()
     if not isinstance(payload, dict):
         return fallback
-    normalized = dict(payload)
+    normalized = _redact_private_trace_paths(payload)
     normalized.setdefault("request_metadata", {})
     normalized.setdefault("overall_status", {"status": "unknown"})
     normalized.setdefault(
@@ -1121,6 +1143,10 @@ class VoiceUploadView(APIView):
                 )
             
             audio_file = request.FILES['audio']
+            try:
+                extension = validate_upload(audio_file, 'audio')
+            except UploadRejected as exc:
+                return Response({'success': False, 'error': str(exc)}, status=400)
             identity = extract_identity_context(request)
             workspace_id = get_user_workspace_id(request)
             actor_user_id = str(identity.user_id or getattr(request.user, "id", "") or "").strip()
@@ -1186,30 +1212,46 @@ class VoiceUploadView(APIView):
                 )
             
             # Save audio file
-            audio_dir = f'media/workspaces/{workspace_id}/audio'
-            os.makedirs(audio_dir, exist_ok=True)
+            audio_dir = os.path.join(settings.PRIVATE_UPLOAD_ROOT, str(int(workspace_id)))
+            os.makedirs(audio_dir, mode=0o700, exist_ok=True)
             
             # Generate unique filename
-            filename = f"{uuid.uuid4()}_{audio_file.name}"
+            filename = f"{uuid.uuid4().hex}{extension}"
             audio_path = os.path.join(audio_dir, filename)
             
-            with open(audio_path, 'wb+') as destination:
-                for chunk in audio_file.chunks():
-                    destination.write(chunk)
+            fd = os.open(audio_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(fd, 'wb') as destination:
+                    total = 0
+                    for chunk in audio_file.chunks():
+                        total += len(chunk)
+                        if total > AUDIO_MAX_BYTES:
+                            raise UploadRejected('Audio upload exceeds size limit.')
+                        destination.write(chunk)
+            except Exception as exc:
+                os.unlink(audio_path)
+                if isinstance(exc, UploadRejected):
+                    return Response({'success': False, 'error': str(exc)}, status=400)
+                raise
             
             logger.info(f"Audio file saved: {audio_path}")
             
             # Call Small Whisper (STATELESS - no user context needed)
             whisper_client = get_small_whisper_client()
-            whisper_result = whisper_client.process_audio(
-                audio_file=audio_path,
-                user_id=actor_user_id,
-                workspace_id=binding_context.get("workspace_id"),
-                manager_id=binding_context.get("manager_id"),
-                dataset_id=binding_context.get("dataset_id"),
-                source_id=binding_context.get("source_id"),
-                table_name=binding_context.get("table_name"),
-            )
+            try:
+                whisper_result = whisper_client.process_audio(
+                    audio_file=audio_path,
+                    user_id=actor_user_id,
+                    workspace_id=binding_context.get("workspace_id"),
+                    manager_id=binding_context.get("manager_id"),
+                    dataset_id=binding_context.get("dataset_id"),
+                    source_id=binding_context.get("source_id"),
+                    table_name=binding_context.get("table_name"),
+                )
+            finally:
+                os.unlink(audio_path)
+
+            whisper_result = _redact_private_trace_paths(whisper_result)
             
             if not whisper_result['success']:
                 return Response(
@@ -1252,7 +1294,7 @@ class VoiceUploadView(APIView):
                 dataset_id=int(binding_context["dataset_id"]),
                 created_by_id=actor_user_id,
                 created_by_email=actor_user_email,
-                audio_file=audio_path,
+                audio_file='',
                 transcription=whisper_result['text'],
                 intent_json=whisper_result.get('intent'),
                 generated_sql=generated_sql or '',
@@ -1461,9 +1503,9 @@ class VoiceUploadView(APIView):
             })
         
         except Exception as e:
-            logger.error(f"Error in VoiceUploadView: {e}", exc_info=True)
+            logger.error("Voice upload failed error_type=%s", type(e).__name__)
             return Response(
-                {'success': False, 'error': str(e)},
+                {'success': False, 'error': 'Voice processing failed.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -1571,6 +1613,7 @@ class TextQueryView(APIView):
                 source_id=binding_context.get("source_id"),
                 table_name=binding_context.get("table_name"),
             )
+            text_result = _redact_private_trace_paths(text_result)
 
             if not text_result.get('success'):
                 return Response(

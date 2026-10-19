@@ -10,7 +10,9 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from .file_storage import save_uploaded_file, save_sqlite_file
+from . import file_storage
 from .file_validator import validate_file_type
+from shared.security.upload_policy import validate_upload, UploadRejected
 from shared.utils.kafka_producer import KafkaMessageProducer
 from shared.utils.surreal_client import SurrealClient
 from shared.utils.metadata_schema import MetadataSchema
@@ -103,15 +105,33 @@ class SQLitePrepareView(APIView):
         uploaded = request.FILES.get("file")
         if uploaded is None:
             return _connector_response_error(ConnectorError("INVALID_CONFIGURATION", "A SQLite file is required."))
+        token = None
+        prepared = False
         try:
+            validate_upload(uploaded, 'sqlite')
             token = save_sqlite_file(uploaded, scope.workspace_id)
             configuration = {"sqlite_token": token, "workspace_id": scope.workspace_id}
             connector = connector_registry.get("sqlite")
             test = connector.test_connection(configuration)
             discovery = connector.discover(configuration)
+            prepared = True
             return Response({"success": True, "data": {"sqlite_token": token, "test": test, **discovery}})
+        except (UploadRejected, ValueError) as exc:
+            return _connector_response_error(ConnectorError("INVALID_UPLOAD", str(exc)))
+        except ConnectorError as exc:
+            if token and exc.code == 'CONNECTION_FAILED':
+                return _connector_response_error(ConnectorError('INVALID_UPLOAD', 'SQLite database could not be read.'))
+            return _connector_response_error(exc)
         except Exception as exc:
             return _connector_response_error(exc)
+        finally:
+            # A file that failed test/discovery must not remain available as a
+            # prepared token. Successful files are retained for snapshot work.
+            if token and not prepared:
+                try:
+                    os.unlink(os.path.join(file_storage.BASE_DIR, token))
+                except FileNotFoundError:
+                    pass
 
 
 class DatabaseSnapshotView(APIView):
@@ -140,6 +160,14 @@ class DatabaseSnapshotView(APIView):
                     raise ConnectorError("TABLE_NOT_FOUND", "A selected table is not available.", status_code=404)
                 normalized_tables.append({"schema": key[0] or None, "name": key[1]})
 
+            if connector.key == "sqlite":
+                try:
+                    file_storage.refresh_queued_sqlite_file(
+                        validated["sqlite_token"], scope.workspace_id,
+                    )
+                except ValueError as exc:
+                    raise ConnectorError("TOKEN_EXPIRED", str(exc), status_code=410) from exc
+
             event_config = {
                 key: value for key, value in validated.items()
                 if key not in {"resolved_host", "sqlite_path", "workspace_id"}
@@ -157,6 +185,14 @@ class DatabaseSnapshotView(APIView):
                 "chunk_size": max(100, min(int(request.data.get("chunk_size", 1000)), 10000)),
                 **scope.as_message_fields(),
             }
+            if connector.key == "sqlite":
+                # Query ends a SQLite processing attempt within one hour; the
+                # staged source remains private for 24 hours from this dispatch.
+                message["snapshot_queued_at"] = time.time()
+                message["snapshot_max_queue_delay_seconds"] = min(
+                    max(30, int(request.data.get("max_queue_delay_seconds", 240))),
+                    3600,
+                )
             _attach_schema_contract_if_available(message)
             if not _send_with_retry(KafkaMessageProducer(), "connection_topic", message, "database snapshot"):
                 raise ConnectorError("EXTRACTION_FAILED", "The snapshot job could not be queued.", status_code=503)
@@ -237,22 +273,31 @@ class UploadFileView(APIView):
             return Response(make_response(False, "No file provided"), status=400)
 
         uploaded_file = request.FILES["file"]
+        try:
+            validate_upload(uploaded_file, 'dataset')
+        except UploadRejected as exc:
+            return Response(make_response(False, str(exc)), status=400)
         
-        # Validate file type (whitelist: CSV, Excel, Parquet)
+        # Validate the active CSV/XLSX matrix and scan before storing.
         is_valid, error_message = validate_file_type(uploaded_file)
         if not is_valid:
             return Response(make_response(False, error_message), status=400)
         
-        saved_path = save_uploaded_file(uploaded_file)
+        saved_path = save_uploaded_file(uploaded_file, scope.workspace_id)
 
         # Log metadata to SurrealDB
-        surreal = SurrealClient()
-        surreal.insert("upload_logs", {
-            "filename": uploaded_file.name,
-            "path": saved_path,
-            "size": uploaded_file.size,
-            **scope.as_message_fields(),
-        })
+        try:
+            surreal = SurrealClient()
+            surreal.insert("upload_logs", {
+                "filename": uploaded_file.name,
+                "path": saved_path,
+                "size": uploaded_file.size,
+                **scope.as_message_fields(),
+            })
+        except Exception:
+            if os.path.exists(saved_path):
+                os.unlink(saved_path)
+            raise
 
         # Publish to Kafka connection_topic to trigger ETL pipeline
         producer = KafkaMessageProducer()
@@ -267,11 +312,13 @@ class UploadFileView(APIView):
         }
         _attach_schema_contract_if_available(connection_message)
         if not _send_with_retry(producer, "connection_topic", connection_message, "file trigger"):
+            if os.path.exists(saved_path):
+                os.unlink(saved_path)
             return Response(
                 make_response(False, "Failed to publish file trigger to Kafka"),
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        print(f"[CONNECTOR] Published file upload to connection_topic: {uploaded_file.name}")
+        logger.info("[CONNECTOR] Published private file upload workspace=%s", scope.workspace_id)
         
         # Emit connection metadata
         connection_metadata = MetadataSchema.create_connection_metadata(
@@ -284,7 +331,7 @@ class UploadFileView(APIView):
             logger.warning("[CONNECTOR] Failed to publish connection metadata for uploaded file %s", uploaded_file.name)
 
         return Response(make_response(True, "File uploaded successfully", {
-            "saved_path": saved_path
+            "state": "processing",
         }), status=200)
 
 

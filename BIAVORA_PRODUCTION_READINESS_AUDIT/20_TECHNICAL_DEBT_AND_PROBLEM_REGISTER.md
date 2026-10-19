@@ -16,15 +16,15 @@ Reconciled defect counts: **4 BLOCKER, 7 CRITICAL, 13 HIGH, 10 MEDIUM, 2 LOW = 3
 |---|---|---|---|---|---|
 | BIA-001 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-14) | Query requires a logical dataset and enforces its exact server-resolved non-empty table set | SE+BOTH / W1 |
 | BIA-002 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-14) | Voice fails closed through Query; local product-data ClickHouse execution capability was removed | SE / W1 |
-| BIA-003 | DEFECT / BLOCKER | P0 | SPLIT | Simulation can activate a subscription; disable now, integrate provider before paid launch | SE / W1 + W11 |
+| BIA-003 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-15) | Production activation is disabled; sandbox is test/development only, with server-owned state and idempotency | SE / W1 + W11 |
 | BIA-004 | DEFECT / BLOCKER | P1 | RECLASSIFY priority | Compose and development servers are not a production runtime | SE / W10–13 |
 | BIA-005 | DEFECT / CRITICAL | P0 | RECLASSIFY scope | Shared PostgreSQL role/schema ownership; enforce critical logical owners, not servers-per-service | SE / W1–3 |
-| BIA-006 | DEFECT / CRITICAL | P0 | KEEP_AS_IS | Historically committed secret material requires verified rotation/invalidation | SE / W1 |
+| BIA-006 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-18) | Owner attests historical values were development-only and revoked/replaced; current-tree scan, startup validation, and redaction pass | SE / W1 |
 | BIA-007 | DEFECT / CRITICAL | P1 | RECLASSIFY priority | Kafka, Redis, ClickHouse need production identity/TLS boundaries | SE / W2–10 |
 | BIA-008 | DEFECT / CRITICAL | P0 | RECLASSIFY architecture | Source ownership and credential lifecycle are unsafe; create logical Integration domain first | SE / W1–3 |
 | BIA-009 | DEFECT / CRITICAL | P0 | RECLASSIFY evidence | Durable job model exists as an unwired/broken skeleton; active flows remain non-durable | BOTH / W2–3 |
 | BIA-010 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-14) | Live ClickHouse bounds/cancellation and real PostgreSQL multi-worker admission/recovery are verified | SE / W1–2 |
-| BIA-011 | DEFECT / CRITICAL | P0 | KEEP_AS_IS | Voice upload boundary lacks production validation, quarantine, and retention | SE / W1–2 |
+| BIA-011 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-18) | Live CSV/XLSX/SQLite/audio, ClamAV, tenant isolation, private-path redaction, bounded TTL, and cleanup pass | SE / W1-W2 |
 | BIA-012 | FEATURE | P1 | CONVERT_TO_FEATURE | PostgreSQL-first continuous CDC foundation | SE / W3–6 |
 | BIA-013 | DEFECT / HIGH | P1 | KEEP_AS_IS | Report service is a proxy over Voice plus an unwired duplicate | SE / W2–4 |
 | BIA-014 | DEFECT / HIGH | P1 | KEEP_AS_IS | Source model permits one source per manager and destructive replacement | SE / W2–4 |
@@ -69,7 +69,7 @@ Reconciled defect counts: **4 BLOCKER, 7 CRITICAL, 13 HIGH, 10 MEDIUM, 2 LOW = 3
 
 ### BIA-003 — production financial integrity
 
-`services/subscription-service/subscription/views.py::SubscribeView` directly creates an active subscription and successful Payment. `frontend/src/components/SubscriptionPlansPanel.jsx` states payment is simulated and sends no provider token. **Accept now:** production configuration cannot activate access through simulation. **Accept before paid launch:** hosted/tokenized provider, signed idempotent webhooks, state/reconciliation/refund/failure paths, and staging evidence.
+**Closed for containment; reverified 2026-10-18.** `PAYMENT_MODE=disabled` is the default and the only valid production mode; startup and request guards reject sandbox activation in production. The sole activation path is a manager/admin-authorized development/test sandbox event with a UUID idempotency key and server-owned payment amount/status. Exact Workspace response identity is checked, and sandbox/legacy records are excluded from reported revenue. Migration `subscription.0003` was applied to the local live PostgreSQL database after verifying zero existing subscription rows; the 11-test PostgreSQL suite covered forward/reverse/reapply and negative/idempotency behavior. A live forged payment request returned HTTP 503. **Paid launch remains separate planned work:** hosted/tokenized provider, signed idempotent webhooks, reconciliation, refunds/failures, and staging evidence. See `37_FOUNDATION_B_EXTERNAL_BOUNDARY_IMPLEMENTATION.md`.
 
 ### BIA-005 — critical logical data ownership
 
@@ -77,7 +77,7 @@ Auth, Workspace, Query, Voice, Report, Visualization, Subscription, and Notifica
 
 ### BIA-006 — historical secret exposure
 
-Git history contains `.env.microservices` revisions. Values were not printed during audit. **Accept:** inventory, rotate/invalidate, scan history/artifacts/logs, document owners/evidence, prevent recurrence, and use managed secret references.
+**Closed 2026-10-18 on owner operational attestation plus technical verification.** The owner confirms all identified historical values were development-only, none was a production credential, applicable provider/platform credentials were revoked/deleted/replaced, and the historical ETL encryption key has no production ciphertext dependency. Current-tree pinned Gitleaks scanning, production placeholder/startup checks, CI scan dependency, recursive log redaction, and tenant credential protection pass. Historical text may remain in Git history, but is not evidence that an old credential is still valid. History purge is recommended optional hygiene, not a closure requirement; no history rewrite occurred. Provider-side revocation was owner-attested rather than independently rechecked. See `37_FOUNDATION_B_EXTERNAL_BOUNDARY_IMPLEMENTATION.md`.
 
 ### BIA-008 — safe source foundation
 
@@ -93,7 +93,7 @@ Active Voice views and AI Dagster calls are synchronous. `VoicePipelineJob` and 
 
 ### BIA-011 — upload boundary
 
-`VoiceUploadView` writes uploaded chunks to workspace media before transcription without boundary MIME/magic/size/malware/quarantine/TTL enforcement. Frontend 50 MB messaging is not a backend security control. **Accept:** streaming size/type/magic validation, safe names, quarantine/malware/decompression checks, tenant storage ACL, retention/deletion, rate limits, and adversarial tests.
+**Closed 2026-10-18.** Public Gateway CSV, XLSX, and SQLite uploads completed through Query, Connector, Kafka, Extractor, Loader, and ClickHouse with cross-workspace denials and staged-source cleanup. Live ClamAV clean/EICAR/outage checks passed; Connector, Voice, and AI startup cleanup removed old generated files while retaining fresh and unrelated files. A valid WAV completed public Voice → AI under the configured small model (HTTP 200); malformed WAV returned 400 and both private audio areas were empty after processing. Recursive AI trace redaction removed an internal audio path found by the live gate. SQLite prepare has a 24-hour token TTL, snapshot dispatch refreshes the staging clock, and Query/Extractor enforce a 30–3,600 second queue/processing window; near-expiry and stale-token live probes passed. Filename, content, size, archive, duration, tenant, and private-storage tests passed. See `37_FOUNDATION_B_EXTERNAL_BOUNDARY_IMPLEMENTATION.md`.
 
 ## Feature—not-defect policy
 

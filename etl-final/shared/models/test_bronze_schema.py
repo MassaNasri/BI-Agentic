@@ -103,7 +103,7 @@ class TestBronzeRow:
         )
         
         # Same data should produce same dedup key
-        assert row1.dedup_key == row2.dedup_key
+        assert row1.dedup_key == row2.dedup_key  # gitleaks:allow deterministic row hash assertion
     
     def test_dedup_key_uniqueness(self):
         """Test that different data produces different dedup keys."""

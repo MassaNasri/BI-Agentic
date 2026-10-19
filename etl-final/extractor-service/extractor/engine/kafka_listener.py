@@ -9,6 +9,8 @@ import threading
 import time
 import hashlib
 import json
+import re
+from pathlib import Path
 from collections import deque
 import pandas as pd
 from datetime import datetime, timezone
@@ -41,6 +43,23 @@ from .database_extraction_strategy import DatabaseExtractionStrategy
 from .extraction_strategy import ExtractionConfig
 
 logger = logging.getLogger(__name__)
+
+
+def cleanup_completed_sqlite_upload(configuration, workspace_id):
+    """Delete only the completed workspace's generated SQLite staging file."""
+    token = str(configuration.get('sqlite_token') or '')
+    try:
+        workspace = int(workspace_id)
+    except (TypeError, ValueError):
+        return False
+    if workspace <= 0 or not re.fullmatch(rf'sqlite_{workspace}_[0-9a-f]{{32}}\.db', token):
+        return False
+    root = Path(os.getenv('ETL_SQLITE_ROOT', '/app/uploaded_files')).resolve()
+    candidate = root / token
+    if candidate.is_symlink() or not candidate.is_file() or candidate.resolve().parent != root:
+        return False
+    candidate.unlink()
+    return True
 
 
 def database_table_source(scope_fields, database_name, schema, table):
@@ -247,7 +266,7 @@ class ConnectionListener:
                 except Exception as exc:
                     logger.error("[EXTRACTOR ERROR] openpyxl is required for Excel extraction: %s", exc)
                     return False
-                workbook = load_workbook(filename=file_path, read_only=True, data_only=True)
+                workbook = load_workbook(filename=file_path, read_only=True, data_only=True, keep_links=False)
                 worksheet = workbook.active
                 rows_iter = worksheet.iter_rows(values_only=True)
                 headers = next(rows_iter, None) or []
@@ -443,7 +462,19 @@ class ConnectionListener:
                 rows_failed,
                 rows_skipped,
             )
-            return send_failures == 0 and rows_failed == 0
+            completed = send_failures == 0 and rows_failed == 0
+            if completed:
+                # Only remove files from the connector's generated private
+                # workspace directory. Never delete an event-supplied path
+                # outside that staging area.
+                from pathlib import Path
+                import os
+                root = Path('/app/uploaded_files').resolve()
+                candidate = Path(file_path).resolve()
+                workspace = str(scope_fields.get('workspace_id') or '')
+                if workspace.isdigit() and root / workspace in candidate.parents and candidate.is_file():
+                    os.unlink(candidate)
+            return completed
         except Exception as e:
             if ERRORS_TOTAL:
                 ERRORS_TOTAL.labels(service="extractor", stage="extract").inc()
@@ -462,12 +493,31 @@ class ConnectionListener:
         scope_fields = MetadataSchema.scope_fields(message)
         
         connection = None
+        snapshot_succeeded = False
+        db_type = None
+        db_config = {}
         try:
             start_time = datetime.now()
             db_type = normalize_db_type(message.get("db_type"))
             if db_type is None:
                 logger.error("[EXTRACTOR ERROR] Unsupported database type: %s", message.get("db_type"))
                 return False
+            if db_type == 'sqlite':
+                try:
+                    queued_at = float(message.get('snapshot_queued_at'))
+                    max_queue_delay = int(message.get('snapshot_max_queue_delay_seconds'))
+                except (TypeError, ValueError):
+                    queued_at = 0
+                    max_queue_delay = 0
+                age_seconds = time.time() - queued_at
+                if (queued_at <= 0 or not 30 <= max_queue_delay <= 3600
+                        or age_seconds < -60 or age_seconds > max_queue_delay):
+                    logger.error(
+                        "sqlite_snapshot_queue_expired workspace=%s dataset=%s job=%s",
+                        scope_fields.get('workspace_id'), scope_fields.get('dataset_id'),
+                        scope_fields.get('ingestion_job_id'),
+                    )
+                    return False
 
             db_config = dict(message.get("configuration") or {})
             if not db_config:
@@ -799,7 +849,8 @@ class ConnectionListener:
             if PROCESS_LATENCY:
                 duration = (datetime.now() - start_time).total_seconds()
                 PROCESS_LATENCY.labels(service="extractor", stage="extract").observe(duration)
-            return send_failures == 0 and rows_failed == 0
+            snapshot_succeeded = send_failures == 0 and rows_failed == 0
+            return snapshot_succeeded
             
         except Exception as e:
             if ERRORS_TOTAL:
@@ -814,6 +865,8 @@ class ConnectionListener:
         finally:
             if connection:
                 connection.close()
+            if snapshot_succeeded and db_type == 'sqlite':
+                cleanup_completed_sqlite_upload(db_config, scope_fields.get('workspace_id'))
 
     def listen(self):
         """Listen to connection_topic and process messages"""

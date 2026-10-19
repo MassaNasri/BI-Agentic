@@ -42,7 +42,7 @@ class TestIdempotencyKey:
         
         assert key.source_id == "source_001"
         assert key.batch_id == "batch_001"
-        assert key.row_hash == "abc123def456"
+        assert key.row_hash == "abc123def456"  # gitleaks:allow fixed non-secret test hash
     
     def test_to_dedup_key(self):
         """Test generating composite deduplication key."""

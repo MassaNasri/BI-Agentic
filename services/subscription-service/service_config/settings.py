@@ -21,8 +21,23 @@ if not SECRET_KEY:
     raise ImproperlyConfigured('DJANGO_SECRET_KEY is required outside an explicit non-production profile.')
 if APP_ENV == 'production' and any(marker in SECRET_KEY.lower() for marker in ('change_me', 'change-me', 'replace-with', 'django-insecure')):
     raise ImproperlyConfigured('Production DJANGO_SECRET_KEY is a placeholder.')
+from bi_platform_shared.security_config import validate_production_secrets
+validate_production_secrets(APP_ENV, SECRET_KEY)
 if APP_ENV == 'production' and not os.getenv('DB_PASSWORD', '').strip():
     raise ImproperlyConfigured('DB_PASSWORD is required in production.')
+
+# A real payment provider is not integrated. Paid activation is disabled by
+# default; the sandbox is only for explicit local/test use.
+PAYMENT_MODE = os.getenv('PAYMENT_MODE', 'disabled').strip().lower()
+if PAYMENT_MODE not in {'disabled', 'sandbox'}:
+    raise ImproperlyConfigured('PAYMENT_MODE must be disabled or sandbox.')
+if APP_ENV == 'production' and PAYMENT_MODE != 'disabled':
+    raise ImproperlyConfigured('Production payment simulation is forbidden.')
+if APP_ENV == 'production' and (
+    len(SECRET_KEY) < 32 or SECRET_KEY.lower() in {'password', 'admin', 'changeme', 'secret', '123456'}
+    or os.getenv('DB_PASSWORD', '').strip().lower() in {'password', 'admin', 'changeme', 'secret', '123456'}
+):
+    raise ImproperlyConfigured('Production security credentials are weak or placeholders.')
 
 
 def _env_bool(name, default=False):

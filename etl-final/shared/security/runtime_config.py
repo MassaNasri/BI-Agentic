@@ -7,7 +7,13 @@ import sys
 from django.core.exceptions import ImproperlyConfigured
 
 
-_PLACEHOLDERS = {"", "change-me", "changeme", "secret", "default", "password"}
+_PLACEHOLDERS = {"", "change-me", "change_me", "changeme", "secret", "default", "password", "admin", "test", "example", "dummy", "dev-secret", "insecure", "123456"}
+_PLACEHOLDER_PREFIXES = ("change_me", "change-me", "replace-with", "django-insecure", "example-", "dummy-", "test-only", "nonproduction")
+
+
+def _weak(value: str) -> bool:
+    lowered = value.strip().lower()
+    return lowered in _PLACEHOLDERS or lowered.startswith(_PLACEHOLDER_PREFIXES)
 
 
 @dataclass(frozen=True)
@@ -32,11 +38,10 @@ def load_runtime_security(service_name: str, *, require_credential_key: bool = F
     secret_key = os.getenv("DJANGO_SECRET_KEY", "").strip()
     if not secret_key and profile in {"development", "test"}:
         secret_key = f"{service_name}-{profile}-only-secret"
-    lowered_secret = secret_key.lower()
-    if not secret_key or lowered_secret in _PLACEHOLDERS or any(
-        marker in lowered_secret for marker in ("change_me", "change-me", "replace-with", "django-insecure")
-    ):
+    if not secret_key or (profile == "production" and _weak(secret_key)) or secret_key.lower() in _PLACEHOLDERS:
         raise ImproperlyConfigured("DJANGO_SECRET_KEY is missing or unsafe.")
+    if profile == "production" and len(secret_key) < 32:
+        raise ImproperlyConfigured("Production DJANGO_SECRET_KEY is too short.")
 
     debug = os.getenv("DJANGO_DEBUG", "false").strip().lower() in {"1", "true", "yes"}
     hosts = tuple(host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip())
@@ -49,7 +54,15 @@ def load_runtime_security(service_name: str, *, require_credential_key: bool = F
         for name in ("ETL_INTERNAL_API_KEY", "CLICKHOUSE_PASSWORD", "SURREAL_USER", "SURREAL_PASS")
     ):
         raise ImproperlyConfigured("ETL identity and datastore credentials are required in production.")
+    if profile == "production":
+        for name in ("ETL_INTERNAL_API_KEY", "CLICKHOUSE_PASSWORD", "SURREAL_USER", "SURREAL_PASS", "CREDENTIAL_SECRET_KEY"):
+            value = os.getenv(name, "").strip()
+            if _weak(value) or (name == "CREDENTIAL_SECRET_KEY" and len(value) < 32):
+                raise ImproperlyConfigured(f"Production {name} is weak or a placeholder.")
     if require_credential_key and not os.getenv("CREDENTIAL_SECRET_KEY", "").strip() and profile != "test":
         raise ImproperlyConfigured("CREDENTIAL_SECRET_KEY is required for this ETL service.")
+    if profile == "production":
+        from shared.security.log_redaction import install_secret_redaction
+        install_secret_redaction(os.environ)
 
     return RuntimeSecurityConfig(profile, secret_key, debug, hosts)

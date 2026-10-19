@@ -42,6 +42,13 @@ if not SECRET_KEY:
     raise ImproperlyConfigured("DJANGO_SECRET_KEY is required outside an explicit non-production profile.")
 if APP_ENV == "production" and any(marker in SECRET_KEY.lower() for marker in ("change_me", "change-me", "replace-with", "django-insecure")):
     raise ImproperlyConfigured("Production DJANGO_SECRET_KEY is a placeholder.")
+from bi_platform_shared.security_config import validate_production_secrets
+validate_production_secrets(APP_ENV, SECRET_KEY)
+if APP_ENV == "production":
+    if os.getenv("AI_SERVICE_REQUIRE_INTERNAL_AUTH", "true").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise ImproperlyConfigured("AI internal API authentication is required in production.")
+    if not os.getenv("AI_SERVICE_INTERNAL_API_KEY", "").strip():
+        raise ImproperlyConfigured("AI_SERVICE_INTERNAL_API_KEY is required in production.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 _raw_debug = os.getenv("DJANGO_DEBUG", os.getenv("DEBUG", "false"))

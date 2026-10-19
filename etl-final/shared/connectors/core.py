@@ -17,6 +17,7 @@ from enum import Enum
 import os
 import re
 import socket
+import time as wall_time
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence
 from uuid import UUID
 
@@ -521,6 +522,7 @@ class SQLiteConnector(BaseDatabaseConnector):
     fields = (Field("sqlite_token", "SQLite database file", "file"),)
     placeholder = "?"
     _token = re.compile(r"^sqlite_(?P<workspace>[1-9][0-9]*)_[0-9a-f]{32}\.db$")
+    staging_ttl_seconds = 24 * 60 * 60
 
     def validate_configuration(self, raw):
         cfg = dict(raw or {})
@@ -532,9 +534,12 @@ class SQLiteConnector(BaseDatabaseConnector):
         if expected_workspace is not None and int(match.group("workspace")) != int(expected_workspace):
             raise ConnectorError("PERMISSION_DENIED", "The SQLite file belongs to another workspace.", status_code=403)
         root = Path(os.getenv("ETL_SQLITE_ROOT", "/app/uploaded_files")).resolve()
-        path = (root / token).resolve()
-        if root not in path.parents or not path.is_file():
+        candidate = root / token
+        path = candidate.resolve()
+        if candidate.is_symlink() or path.parent != root or not path.is_file():
             raise ConnectorError("DATABASE_NOT_FOUND", "The prepared SQLite file was not found.", status_code=404)
+        if wall_time.time() - path.stat().st_mtime >= self.staging_ttl_seconds:
+            raise ConnectorError("TOKEN_EXPIRED", "The prepared SQLite file expired. Upload it again.", status_code=410)
         cfg.update({"db_type": self.key, "sqlite_path": str(path)})
         return cfg
 

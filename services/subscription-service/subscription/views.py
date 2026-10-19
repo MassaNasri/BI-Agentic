@@ -4,6 +4,8 @@ from datetime import timedelta
 from decimal import Decimal
 import logging
 import os
+import hashlib
+import uuid
 from typing import Any
 
 import requests
@@ -100,14 +102,19 @@ def _http_get_json(url: str, *, request, timeout: tuple[float, float] = (3.0, 10
     return int(response.status_code), payload
 
 
-def _normalize_workspace_payload(payload: dict[str, Any], workspace_id: int) -> dict[str, Any]:
+def _normalize_workspace_payload(payload: dict[str, Any], workspace_id: int) -> dict[str, Any] | None:
     workspace_obj = payload.get("workspace") if isinstance(payload.get("workspace"), dict) else {}
     owner = payload.get("owner") if isinstance(payload.get("owner"), dict) else workspace_obj.get("owner")
     if not isinstance(owner, dict):
         owner = {}
-    normalized_id = payload.get("id") or workspace_obj.get("id") or workspace_id
+    try:
+        normalized_id = int(payload.get("id") or workspace_obj.get("id"))
+    except (TypeError, ValueError):
+        return None
+    if normalized_id != workspace_id:
+        return None
     return {
-        "id": int(normalized_id),
+        "id": normalized_id,
         "name": workspace_obj.get("name") or payload.get("name") or "",
         "owner": {
             "id": owner.get("id"),
@@ -297,6 +304,14 @@ class SubscribeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        if settings.PAYMENT_MODE != 'sandbox' or settings.APP_ENV not in {'development', 'test'}:
+            return Response(
+                {"success": False, "message": "Paid activation is unavailable until a payment provider is configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        # Reject every client attempt to declare payment outcome or amount.
+        if set(request.data) - {'workspace_id', 'plan_id', 'payment_method'}:
+            return Response({"success": False, "message": "Client payment state is not accepted."}, status=400)
         serializer = SubscribeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -325,7 +340,27 @@ class SubscribeView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
+        raw_key = str(request.headers.get('Idempotency-Key', '')).strip()
+        try:
+            uuid.UUID(raw_key)
+        except (ValueError, AttributeError):
+            return Response({"success": False, "message": "A UUID Idempotency-Key header is required."}, status=400)
+        request_key = hashlib.sha256(f"{workspace_id}:{user_id}:{raw_key}".encode()).hexdigest()
+
         with transaction.atomic():
+            # PostgreSQL row lock serializes subscription changes per workspace.
+            FreeTierUsage.objects.get_or_create(workspace_id=workspace_id)
+            FreeTierUsage.objects.select_for_update().get(workspace_id=workspace_id)
+            previous = Payment.objects.select_related('subscription__plan').filter(request_key=request_key).first()
+            if previous:
+                if previous.subscription and previous.subscription.plan_id == plan.id and previous.payment_method == payment_method:
+                    return Response({
+                        "success": True,
+                        "message": "Sandbox activation already processed.",
+                        "subscription": SubscriptionSerializer(previous.subscription).data,
+                        "payment": PaymentSerializer(previous).data,
+                    }, status=200)
+                return Response({"success": False, "message": "Idempotency key was used for another request."}, status=409)
             today = timezone.now().date()
             Subscription.objects.filter(workspace_id=workspace_id, is_active=True).update(
                 is_active=False,
@@ -350,10 +385,12 @@ class SubscribeView(APIView):
                 amount=plan.price_monthly,
                 payment_method=payment_method,
                 status=Payment.STATUS_SUCCESS,
+                source=Payment.SOURCE_SANDBOX,
+                request_key=request_key,
             )
 
         logger.info(
-            "Subscription activated workspace=%s plan=%s user=%s payment=%s",
+            "Sandbox subscription activated workspace=%s plan=%s user=%s payment=%s",
             workspace_id,
             plan.id,
             user_id,
@@ -519,7 +556,9 @@ class AdminStatsView(APIView):
         if denied is not None:
             return denied
 
-        successful_payments = Payment.objects.filter(status=Payment.STATUS_SUCCESS)
+        # The only payment records today are legacy simulations or sandbox
+        # events. Neither is authoritative evidence of collected revenue.
+        successful_payments = Payment.objects.none()
         revenue = successful_payments.aggregate(total=Coalesce(Sum("amount"), Decimal("0.00")))["total"]
         free_tier_usage = FreeTierUsage.objects.aggregate(total=Coalesce(Sum("requests_used"), 0))["total"]
         subscribed_usage = Subscription.objects.aggregate(total=Coalesce(Sum("voice_requests_used"), 0))["total"]

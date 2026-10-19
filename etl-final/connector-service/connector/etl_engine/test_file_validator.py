@@ -229,11 +229,11 @@ class TestValidateFileType(unittest.TestCase):
         self.assertTrue(is_valid)
         self.assertEqual(error, '')
     
-    def test_valid_xls_file(self):
+    def test_xls_is_not_in_active_upload_matrix(self):
         mock_file = self.create_mock_file('data.xls', 'application/vnd.ms-excel')
         is_valid, error = validate_file_type(mock_file)
-        self.assertTrue(is_valid)
-        self.assertEqual(error, '')
+        self.assertFalse(is_valid)
+        self.assertIn('not allowed', error)
     
     def test_valid_xlsx_file(self):
         mock_file = self.create_mock_file(
@@ -244,11 +244,11 @@ class TestValidateFileType(unittest.TestCase):
         self.assertTrue(is_valid)
         self.assertEqual(error, '')
     
-    def test_valid_parquet_file(self):
+    def test_parquet_is_not_in_active_upload_matrix(self):
         mock_file = self.create_mock_file('data.parquet', 'application/octet-stream')
         is_valid, error = validate_file_type(mock_file)
-        self.assertTrue(is_valid)
-        self.assertEqual(error, '')
+        self.assertFalse(is_valid)
+        self.assertIn('not allowed', error)
     
     def test_invalid_extension_txt(self):
         mock_file = self.create_mock_file('data.txt', 'text/plain')
@@ -478,8 +478,8 @@ class TestVirusScanningIntegration(unittest.TestCase):
     @patch('etl_engine.file_validator.is_virus_scan_enabled')
     @patch('etl_engine.file_validator.scan_file')
     @patch('etl_engine.file_validator.VirusScanError', Exception)
-    def test_scan_error_logged_but_not_blocking(self, mock_scan, mock_enabled):
-        """Test that scan errors are logged but don't block upload."""
+    def test_scan_error_blocks_upload(self, mock_scan, mock_enabled):
+        """An unavailable scanner must not accept unscanned content."""
         from etl_engine.file_validator import VirusScanError
         
         mock_enabled.return_value = True
@@ -487,9 +487,9 @@ class TestVirusScanningIntegration(unittest.TestCase):
         
         mock_file = self._create_mock_file('data.csv')
         
-        # Should still pass (fail-open for availability)
         is_valid, error = validate_file_type(mock_file)
-        self.assertTrue(is_valid)
+        self.assertFalse(is_valid)
+        self.assertIn('unavailable', error)
 
 
 if __name__ == '__main__':

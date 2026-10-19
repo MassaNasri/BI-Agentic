@@ -1,5 +1,7 @@
+import os
 import sqlite3
 import sys
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -209,6 +211,20 @@ def test_sqlite_token_is_workspace_scoped(tmp_path, monkeypatch):
     with pytest.raises(ConnectorError) as caught:
         connector_registry.get("sqlite").validate_configuration({"sqlite_token": token, "workspace_id": 8})
     assert caught.value.code == "PERMISSION_DENIED"
+
+
+def test_sqlite_token_expires_before_late_snapshot(tmp_path, monkeypatch):
+    token = "sqlite_7_" + "c" * 32 + ".db"
+    path = tmp_path / token
+    path.write_bytes(b"SQLite format 3\x00")
+    old = time.time() - 86401
+    os.utime(path, (old, old))
+    monkeypatch.setenv("ETL_SQLITE_ROOT", str(tmp_path))
+    with pytest.raises(ConnectorError) as caught:
+        connector_registry.get("sqlite").validate_configuration(
+            {"sqlite_token": token, "workspace_id": 7}
+        )
+    assert caught.value.code == "TOKEN_EXPIRED"
 
 
 def test_password_is_never_reflected_by_safe_error():

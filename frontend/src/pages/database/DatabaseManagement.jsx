@@ -732,7 +732,7 @@ function UploadArea({ isDragging, isUploading, uploadProgress, onDragOver, onDra
                   <span className="text-[var(--c-muted)]"> or drag and drop</span>
                 </label>
                 <p className="text-sm text-brand-300/80 mt-2">
-                  CSV, XLSX, or XLS files
+                  CSV or XLSX files (up to 50 MB)
                 </p>
               </div>
 

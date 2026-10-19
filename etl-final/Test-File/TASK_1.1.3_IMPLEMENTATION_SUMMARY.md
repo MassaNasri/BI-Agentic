@@ -222,7 +222,7 @@ Credential encryption is working correctly:
     "type": "database",
     "host": "localhost",
     "user": "admin",
-    "password": "gAAAAABplBts0PNuUpC18_tyPJT9CtEZEgeHqF4goMlN5-eIo1...",  # ✅ ENCRYPTED!
+    "password": "REDACTED_ENCRYPTED_EXAMPLE...",  # ✅ ENCRYPTED!
     "_password_encrypted": True,
     "database": "mydb"
 }

@@ -26,7 +26,6 @@ class DatabaseSerializer(serializers.ModelSerializer):
             'manager_email',
             'filename',
             'file_size',
-            'file_path',
             'source_kind',
             'source_engine',
             'source_tables',

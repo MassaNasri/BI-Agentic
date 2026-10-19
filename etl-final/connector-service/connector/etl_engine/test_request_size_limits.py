@@ -24,6 +24,21 @@ class RequestSizeLimitTest(TestCase):
         """Set up test fixtures."""
         self.factory = RequestFactory()
         self.get_response = Mock(return_value=JsonResponse({'success': True}))
+
+    @override_settings(MAX_REQUEST_SIZE=10 * 1024 * 1024)
+    def test_upload_routes_have_bounded_limits_matching_file_policy(self):
+        middleware = RequestValidationMiddleware(self.get_response)
+        for path, accepted, rejected in (
+            ('/api/upload/', 50 * 1024 * 1024, 52 * 1024 * 1024),
+            ('/api/databases/sqlite/prepare/', 100 * 1024 * 1024, 102 * 1024 * 1024),
+        ):
+            request = self.factory.post(path, data={'key': 'value'})
+            request.META['CONTENT_LENGTH'] = str(accepted)
+            self.assertEqual(middleware(request).status_code, 200)
+            self.get_response.reset_mock()
+            request.META['CONTENT_LENGTH'] = str(rejected)
+            self.assertEqual(middleware(request).status_code, 413)
+            self.get_response.assert_not_called()
     
     @override_settings(MAX_REQUEST_SIZE=1024)  # 1KB limit for testing
     def test_request_within_size_limit(self):

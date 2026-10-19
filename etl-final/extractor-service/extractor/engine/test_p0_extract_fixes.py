@@ -1,4 +1,8 @@
 import unittest
+import os
+import time
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -25,6 +29,32 @@ class TestRowExtractorP0Fixes(unittest.TestCase):
 
 
 class TestExtractorListenerP0Fixes(unittest.TestCase):
+    def test_delayed_sqlite_event_cannot_process_after_queue_window(self):
+        listener, _, _ = self._build_listener()
+        with patch.object(listener.db_connector, 'get_connector') as connector:
+            self.assertFalse(listener.process_database({
+                'db_type': 'sqlite',
+                'snapshot_queued_at': time.time() - 301,
+                'snapshot_max_queue_delay_seconds': 300,
+                'configuration': {'sqlite_token': 'sqlite_23_' + 'a' * 32 + '.db'},
+                'workspace_id': 23,
+            }))
+        connector.assert_not_called()
+
+    def test_completed_sqlite_cleanup_requires_exact_workspace_and_generated_name(self):
+        with TemporaryDirectory() as root, patch.dict(os.environ, {'ETL_SQLITE_ROOT': root}):
+            own = Path(root) / ('sqlite_23_' + 'a' * 32 + '.db')
+            other = Path(root) / ('sqlite_24_' + 'b' * 32 + '.db')
+            unrelated = Path(root) / 'notes.db'
+            for path in (own, other, unrelated):
+                path.write_bytes(b'SQLite format 3\x00')
+            self.assertFalse(kl.cleanup_completed_sqlite_upload({'sqlite_token': other.name}, 23))
+            self.assertFalse(kl.cleanup_completed_sqlite_upload({'sqlite_token': unrelated.name}, 23))
+            self.assertTrue(kl.cleanup_completed_sqlite_upload({'sqlite_token': own.name}, 23))
+            self.assertFalse(own.exists())
+            self.assertTrue(other.exists())
+            self.assertTrue(unrelated.exists())
+
     def _build_listener(self):
         mock_consumer = Mock()
         mock_producer = Mock()

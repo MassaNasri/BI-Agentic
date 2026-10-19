@@ -13,5 +13,5 @@ COPY services/voice-service/ /app/
 
 EXPOSE 8004
 
-CMD ["sh", "-c", "python manage.py runserver 0.0.0.0:8004"]
+CMD ["sh", "-c", "(while true; do python -m bi_platform_shared.audio_cleanup voice; sleep 3600; done) & exec python manage.py runserver 0.0.0.0:8004"]
 

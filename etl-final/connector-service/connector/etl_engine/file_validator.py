@@ -2,10 +2,10 @@
 File validation utilities for the connector service.
 
 Implements security-focused file validation including:
-- File type whitelisting (CSV, Excel, Parquet)
+- File type whitelisting (CSV and XLSX)
 - Extension validation
 - MIME type validation
-- File size limits (configurable, default 1GB)
+- File size limits (50 MiB ceiling)
 - Virus scanning (ClamAV or mock)
 """
 
@@ -18,17 +18,15 @@ from .virus_scanner import scan_file, VirusScanError, is_virus_scan_enabled
 
 
 # Whitelist of allowed file extensions
-ALLOWED_EXTENSIONS = {'.csv', '.xls', '.xlsx', '.parquet'}
+ALLOWED_EXTENSIONS = {'.csv', '.xlsx'}
 
 # Mapping of extensions to expected MIME types
 MIME_TYPE_MAPPING = {
     '.csv': {'text/csv', 'text/plain', 'application/csv'},
-    '.xls': {'application/vnd.ms-excel', 'application/octet-stream'},
     '.xlsx': {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/octet-stream'
-    },
-    '.parquet': {'application/octet-stream', 'application/x-parquet'}
+    }
 }
 
 
@@ -37,9 +35,9 @@ def get_max_file_size() -> int:
     Get the maximum allowed file size from settings.
     
     Returns:
-        Maximum file size in bytes (default: 1GB)
+        Maximum file size in bytes (50 MiB ceiling)
     """
-    return getattr(settings, 'MAX_FILE_SIZE', 1073741824)  # 1GB default
+    return min(getattr(settings, 'MAX_FILE_SIZE', 50 * 1024 * 1024), 50 * 1024 * 1024)
 
 
 def format_file_size(size_bytes: int) -> str:
@@ -155,12 +153,12 @@ def validate_file_type(uploaded_file, skip_virus_scan: bool = False) -> Tuple[bo
                 return False, f"Virus detected: {virus_name}"
         
         except VirusScanError as e:
-            # Log error but don't block upload if scanning fails
-            # This prevents DoS if virus scanner is down
+            # A scanner outage must not turn an untrusted upload into an
+            # unscanned accepted source.
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f"Virus scan failed for {filename}: {e}")
-            # Optionally: return False, f"Virus scan failed: {e}"
+            logger.error("Virus scan failed error_type=%s", type(e).__name__)
+            return False, "Upload scanning is unavailable."
         
         finally:
             # Clean up temporary file

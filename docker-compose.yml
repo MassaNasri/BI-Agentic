@@ -393,6 +393,7 @@ services:
       SERVICE_NAME: subscription-service
       READINESS_HTTP_URLS: http://workspace-service:8002/health/
       APP_ENV: ${APP_ENV:-development}
+      PAYMENT_MODE: ${PAYMENT_MODE:-disabled}
     depends_on:
       workspace-service:
         condition: service_healthy

@@ -19,6 +19,16 @@ env:
   PYTHONPATH: ${{ github.workspace }}
 
 jobs:
+  current-tree-secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan checked-out source without exposing findings
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" \
+            ghcr.io/gitleaks/gitleaks@sha256:b5918eb91b8d2473cec722f066abb4352e4ffdc4ec9f4283ec143aba9ec9ebc4 \
+            dir --redact --no-banner --log-level error /repo
+
   static-and-compose:
     runs-on: ubuntu-latest
     steps:
@@ -92,6 +102,8 @@ jobs:
           pip install -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/voice-service/requirements.txt -r services/report-service/requirements.txt -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r services/subscription-service/requirements.txt -r services/notification-service/requirements.txt -r services/ai-service/requirements.txt pytest
       - name: Shared readiness and request IDs
         run: python -m pytest tests/test_health_readiness.py -q --junitxml=test-results/shared-readiness.xml
+      - name: Foundation-B shared boundary tests
+        run: python -m pytest tests/test_secret_config.py tests/test_upload_policy.py tests/test_audio_cleanup.py -q
       - name: Query tests
         working-directory: services/query-service
         run: python -m pytest tests -q --junitxml=../../test-results/query.xml
@@ -106,7 +118,7 @@ jobs:
         run: python -m pytest visualization_api/tests -q --junitxml=../../test-results/visualization.xml
       - name: Voice tests
         working-directory: services/voice-service
-        run: python -m pytest voice_reports/tests_ai_trace_service.py voice_reports/tests_query_execute_metabase_fallback.py voice_reports/tests_query_service_contract.py voice_reports/tests_security_workspace_authorization.py -q --junitxml=../../test-results/voice.xml
+        run: python -m pytest voice_reports/tests_ai_trace_service.py voice_reports/tests_query_execute_metabase_fallback.py voice_reports/tests_query_service_contract.py voice_reports/tests_security_workspace_authorization.py voice_reports/tests_upload_security.py -q --junitxml=../../test-results/voice.xml
       - name: Report tests
         working-directory: services/report-service
         run: python -m pytest voice_reports/tests_sql_normalization.py -q --junitxml=../../test-results/report.xml
@@ -126,7 +138,7 @@ jobs:
           reasoning_app/tests.py shared/tests_sql_review.py tests/test_bi_generalized_semantics_pipeline.py tests/test_bi_hardening.py
           tests/test_bi_semantic_layer.py tests/test_bi_semantic_reasoning_integration.py tests/test_bi_temporal_semantics.py
           tests/test_forecasting_pipeline.py tests/test_pipeline_integration.py tests/test_preprocessing_high_recovery.py
-          tests/test_preprocessing_low_semantic_guard.py tests/test_tiered_resolution.py tests/test_value_index.py whisper_app/tests.py
+          tests/test_preprocessing_low_semantic_guard.py tests/test_tiered_resolution.py tests/test_value_index.py tests/test_voice_upload_duration.py whisper_app/tests.py
           -q --junitxml=../../test-results/ai.xml
       - name: Upload test reports
         if: always()
@@ -244,7 +256,7 @@ jobs:
 
   release-gate:
     if: always()
-    needs: [static-and-compose, frontend, backend-and-ai, etl, security-regression, migration-drift, docker-build]
+    needs: [current-tree-secret-scan, static-and-compose, frontend, backend-and-ai, etl, security-regression, migration-drift, docker-build]
     runs-on: ubuntu-latest
     steps:
       - name: Require every P0-C job
@@ -252,4 +264,4 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "P0-C job results: ${RESULTS}"
-          test "${RESULTS}" = "success success success success success success success"
+          test "${RESULTS}" = "success success success success success success success success"

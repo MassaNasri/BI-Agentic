@@ -15,6 +15,7 @@ from django.http import JsonResponse
 from django.conf import settings
 from collections import defaultdict
 from threading import Lock
+from shared.security.upload_policy import DATA_MAX_BYTES, SQLITE_MAX_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +51,18 @@ class RequestValidationMiddleware:
         )
         
         # Validate request size
+        # Multipart overhead needs a small allowance above the validated file
+        # ceiling. Other API requests keep the smaller general-purpose limit.
+        request_limit = {
+            '/api/upload/': DATA_MAX_BYTES + 1024 * 1024,
+            '/api/databases/sqlite/prepare/': SQLITE_MAX_BYTES + 1024 * 1024,
+        }.get(request.path, self.max_request_size)
         content_length = request.META.get('CONTENT_LENGTH')
         if content_length:
             try:
                 content_length = int(content_length)
-                if content_length > self.max_request_size:
-                    max_mb = self.max_request_size / (1024 * 1024)
+                if content_length > request_limit:
+                    max_mb = request_limit / (1024 * 1024)
                     actual_mb = content_length / (1024 * 1024)
                     logger.warning(
                         f"[{correlation_id}] Request size {actual_mb:.2f}MB exceeds limit {max_mb:.2f}MB",

@@ -54,11 +54,14 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800
 
 # File validation settings
 import os
-MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 1073741824))  # Default: 1GB (1024*1024*1024)
+MAX_FILE_SIZE = min(int(os.environ.get('MAX_FILE_SIZE', 50 * 1024 * 1024)), 50 * 1024 * 1024)
 
 # Virus scanning settings
-VIRUS_SCAN_ENABLED = os.environ.get('VIRUS_SCAN_ENABLED', 'True').lower() in ('true', '1', 'yes')
+VIRUS_SCAN_ENABLED = os.environ.get('VIRUS_SCAN_ENABLED', 'True' if APP_ENV == 'production' else 'False').lower() in ('true', '1', 'yes')
 VIRUS_SCAN_BACKEND = os.environ.get('VIRUS_SCAN_BACKEND', 'clamav')  # 'clamav' or 'mock'
+if APP_ENV == 'production' and (not VIRUS_SCAN_ENABLED or VIRUS_SCAN_BACKEND != 'clamav'):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('Production upload scanning must use ClamAV and fail closed.')
 CLAMAV_HOST = os.environ.get('CLAMAV_HOST', 'clamav')
 CLAMAV_PORT = int(os.environ.get('CLAMAV_PORT', 3310))
 CLAMAV_TIMEOUT = int(os.environ.get('CLAMAV_TIMEOUT', 30))

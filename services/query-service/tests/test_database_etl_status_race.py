@@ -57,6 +57,21 @@ def test_processing_state_becomes_failed_after_bounded_timeout():
     database.save.assert_called_once_with(update_fields=["etl_status", "etl_message"])
 
 
+@override_settings(ETL_PROCESSING_TIMEOUT_SECONDS=90000)
+def test_sqlite_processing_window_is_capped_before_staging_ttl():
+    now = timezone.now()
+    database = Mock(
+        pk=8,
+        workspace_id=23,
+        ingestion_job_id="job-sqlite",
+        source_engine="sqlite",
+        upload_date=now - timedelta(seconds=3601),
+        etl_status="processing",
+    )
+    assert _mark_processing_timeout(database, "The output table remained empty.", now=now)
+    assert "within 3600 seconds" in database.etl_message
+
+
 def _principal():
     return SimpleNamespace(
         id=11,

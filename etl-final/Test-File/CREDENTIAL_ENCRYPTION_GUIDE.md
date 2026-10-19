@@ -29,7 +29,7 @@ This document describes the credential encryption feature implemented to secure 
     "type": "database",
     "host": "localhost",
     "user": "admin",
-    "password": "gAAAAABplBts0PNuUpC18_tyPJT9CtEZEgeHqF...",  # ✅ ENCRYPTED!
+    "password": "REDACTED_ENCRYPTED_EXAMPLE...",  # ✅ ENCRYPTED!
     "_password_encrypted": True,
     "database": "mydb"
 }
@@ -63,7 +63,7 @@ This document describes the credential encryption feature implemented to secure 
 │                                                                 │
 │  2. Encrypt password                                           │
 │     encrypted = encryption.encrypt(password)                   │
-│     → "gAAAAABplBts0PNuUpC18_tyPJT9..."                       │
+│     → "REDACTED_ENCRYPTED_EXAMPLE..."                       │
 │                                                                 │
 │  3. Send to Kafka with encryption flag                         │
 │     {                                                          │
@@ -79,7 +79,7 @@ This document describes the credential encryption feature implemented to secure 
 │                                                                 │
 │  1. Receive message from Kafka                                 │
 │     message = {                                                │
-│       "password": "gAAAAABplBts0PNuUpC18_tyPJT9...",          │
+│       "password": "REDACTED_ENCRYPTED_EXAMPLE...",          │
 │       "_password_encrypted": True                              │
 │     }                                                          │
 │                                                                 │
@@ -196,7 +196,7 @@ encrypted_creds = encryption.encrypt_credentials(credentials)
 # Returns: {
 #   "host": "localhost",
 #   "user": "admin",
-#   "password": "gAAAAABplBts...",
+#   "password": "REDACTED_ENCRYPTED_EXAMPLE...",
 #   "_password_encrypted": True
 # }
 

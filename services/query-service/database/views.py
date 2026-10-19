@@ -9,9 +9,9 @@ from django.db import transaction
 from django.utils import timezone
 import requests
 import logging
-import json
 import uuid
 import hashlib
+from bi_platform_shared.uploads import validate_upload, UploadRejected
 
 from .models import Database
 from .serializers import (
@@ -202,6 +202,10 @@ def _mark_ingestion_failed(database, message):
 def _mark_processing_timeout(database, detail, now=None):
     """Bound the processing state when no terminal ETL event is observable."""
     timeout_seconds = max(30, int(getattr(settings, 'ETL_PROCESSING_TIMEOUT_SECONDS', 240)))
+    if getattr(database, 'source_engine', '') == 'sqlite':
+        # A queued SQLite snapshot is only a valid processing job inside this
+        # window. Its private source is retained for 24 hours from dispatch.
+        timeout_seconds = min(timeout_seconds, 3600)
     observed_at = now or timezone.now()
     upload_date = getattr(database, 'upload_date', None)
     if not isinstance(upload_date, observed_at.__class__):
@@ -309,6 +313,10 @@ class SQLiteSourcePrepareView(APIView):
         uploaded = request.FILES.get("file")
         if uploaded is None:
             return Response({"success": False, "error": {"code": "INVALID_CONFIGURATION", "message": "A SQLite file is required."}}, status=400)
+        try:
+            validate_upload(uploaded, 'sqlite')
+        except UploadRejected as exc:
+            return Response({"success": False, "error": {"code": "INVALID_UPLOAD", "message": str(exc)}}, status=400)
         dataset_id, job_id = _probe_scope(workspace_id)
         try:
             response = requests.post(
@@ -384,14 +392,20 @@ class DatabaseSnapshotStartView(APIView):
         database.clickhouse_table_name = imported_tables[0]["destination_table"]
         database.save(update_fields=["source_tables", "clickhouse_table_name"])
         try:
+            snapshot_request = {
+                "engine": engine,
+                "configuration": configuration,
+                "tables": tables,
+                "chunk_size": request.data.get("chunk_size", 1000),
+            }
+            if engine == "sqlite":
+                snapshot_request["max_queue_delay_seconds"] = min(
+                    max(30, int(getattr(settings, "ETL_PROCESSING_TIMEOUT_SECONDS", 240))),
+                    3600,
+                )
             response = requests.post(
                 f"{settings.ETL_SERVICE_URL.rstrip('/')}/api/databases/snapshot/",
-                json={
-                    "engine": engine,
-                    "configuration": configuration,
-                    "tables": tables,
-                    "chunk_size": request.data.get("chunk_size", 1000),
-                },
+                json=snapshot_request,
                 headers=_etl_headers(workspace_id, database.pk, job_id),
                 timeout=130,
             )
@@ -523,6 +537,10 @@ class DatabaseUploadView(APIView):
             )
         
         uploaded_file = request.FILES['file']
+        try:
+            validate_upload(uploaded_file, 'dataset')
+        except UploadRejected as exc:
+            return Response({'success': False, 'message': str(exc)}, status=400)
         logger.info("Upload started: %s (%s bytes) by manager=%s", uploaded_file.name, uploaded_file.size, manager_id)
         
         # ============================================================
@@ -646,52 +664,11 @@ class DatabaseUploadView(APIView):
                     status=status.HTTP_502_BAD_GATEWAY
                 )
             
-            # Parse successful ETL response
-            etl_data = None
-            file_path = ''
-            
-            try:
-                content_type = etl_response.headers.get('Content-Type', '')
-                
-                if not content_type:
-                    logger.warning("ETL response has no Content-Type header")
-                
-                if 'application/json' in content_type:
-                    etl_data = etl_response.json()
-                    logger.info(f"ETL JSON response: {etl_data}")
-                    
-                    # Extract file path from various possible response structures
-                    if isinstance(etl_data, dict):
-                        # Try different keys
-                        file_path = (
-                            etl_data.get('data', {}).get('saved_path', '') or
-                            etl_data.get('saved_path', '') or
-                            etl_data.get('path', '') or
-                            etl_data.get('file_path', '')
-                        )
-                    
-                    if not file_path:
-                        logger.warning(f"No file path in ETL response: {etl_data}")
-                        file_path = f"uploaded_{uploaded_file.name}"
-                
-                else:
-                    # Non-JSON response - this is acceptable
-                    logger.warning(f"ETL returned non-JSON response (Content-Type: {content_type})")
-                    file_path = f"uploaded_{uploaded_file.name}"
-            
-            except json.JSONDecodeError as e:
-                logger.error(f"ETL response is not valid JSON: {e}")
-                logger.error(f"Response text: {etl_response.text[:500]}")
-                # Don't fail - use default path
-                file_path = f"uploaded_{uploaded_file.name}"
-            
-            except Exception as e:
-                logger.error(f"Unexpected error parsing ETL response: {e}")
-                file_path = f"uploaded_{uploaded_file.name}"
-            
             # The record is created before dispatch so every asynchronous event
             # carries the real query-service dataset id and can update status.
-            database.file_path = file_path
+            # Connector staging paths belong to ETL and are never returned or
+            # persisted in Query's client-facing source metadata.
+            database.file_path = ''
             database.etl_status = 'processing'
             database.etl_message = 'ETL processing started.'
             database.save(update_fields=['file_path', 'etl_status', 'etl_message'])

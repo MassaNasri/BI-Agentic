@@ -25,5 +25,5 @@ COPY services/ai-service/ /app/
 
 EXPOSE 8005
 
-CMD ["sh", "-c", "python manage.py runserver 0.0.0.0:8005"]
+CMD ["sh", "-c", "(while true; do python -m bi_platform_shared.audio_cleanup ai; sleep 3600; done) & exec python manage.py runserver 0.0.0.0:8005"]
 

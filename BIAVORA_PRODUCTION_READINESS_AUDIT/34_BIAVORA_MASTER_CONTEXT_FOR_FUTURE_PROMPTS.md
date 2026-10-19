@@ -6,9 +6,9 @@
 
 ## CURRENT VERIFIED BASELINE
 
-BIAVORA is a Docker Compose development/pre-production system with ten Django business services, six ETL applications, event-driven Kafka ETL, ClickHouse analytics, voice/text AI, Metabase-backed reporting, and a substantial deterministic test suite. Strong assets include P1-R multi-engine snapshot ingestion, CSV, connector registry, multi-table datasets, Kafka ETL, ClickHouse loading, workspace checks, SQL parsing, SSRF/TLS/credential redaction work, CI/migration/security gates, AI tests, frontend tests/build, and image builds. Foundation-A now adds logical dataset-bound Query authorization, exact table allowlisting, fail-closed Voice routing, and live-verified bounded Query resource controls.
+BIAVORA is a Docker Compose development/pre-production system with ten Django business services, six ETL applications, event-driven Kafka ETL, ClickHouse analytics, voice/text AI, Metabase-backed reporting, and a substantial deterministic test suite. Strong assets include P1-R multi-engine snapshot ingestion, CSV, connector registry, multi-table datasets, Kafka ETL, ClickHouse loading, workspace checks, SQL parsing, SSRF/TLS/credential redaction work, CI/migration/security gates, AI tests, frontend tests/build, and image builds. Foundation-A adds logical dataset-bound Query authorization, exact table allowlisting, fail-closed Voice routing, and live-verified bounded Query resource controls. Foundation-B contains production payment simulation and closes the historical development credential incident by owner attestation plus current-tree verification. Public CSV/XLSX/SQLite and Voice-to-AI uploads, scanner fail-closed behavior, tenant isolation, private-path redaction, bounded SQLite queue/retention, and cleanup pass live verification.
 
-It is **NO-GO for public production today**. The last reconciled whole-platform production readiness remains **36%**; Week-14 scope remains **24% implemented / 18% production-ready** pending a new full reconciliation. Foundation-A is GREEN: BIA-001, BIA-002, and BIA-010 are closed with automated and live ClickHouse/PostgreSQL evidence. Other critical evidence still includes simulated subscription activation, shared critical DB roles/schema, historical secret exposure, unsafe source/credential lifecycle, unwired durable job skeleton, unsafe upload boundary, development runtime, fragmented AI providers, and broad AI schema access.
+It is **NO-GO for public production today**. The last reconciled whole-platform production readiness remains **36%**; Week-14 scope remains **24% implemented / 18% production-ready** pending a new full reconciliation. Foundation-A is GREEN: BIA-001, BIA-002, and BIA-010 are closed with automated and live ClickHouse/PostgreSQL evidence. Foundation-B is GREEN: BIA-003 payment containment, BIA-006 secrets, and BIA-011 uploads are closed with live/security/regression evidence. Other critical blockers include shared critical DB roles/schema, unsafe source/credential lifecycle, unwired durable job skeleton, development runtime, fragmented AI providers, and broad AI schema access.
 
 ## FINAL WEEK-14 TARGET
 
@@ -84,11 +84,11 @@ Before release: isolated production-like staging; production process servers/wor
 
 ## CURRENT PHASE
 
-Foundation-A authoritative analytical security-boundary implementation is `GREEN`. Live ClickHouse limits/cancellation, real PostgreSQL multi-worker admission and stale-lock recovery, bounded abuse behavior, and maintained regressions pass. Foundation-B is ready to begin: subscription containment, secret incident closure, and upload boundary.
+Foundation-A authoritative analytical security-boundary implementation remains `GREEN`. Foundation-B final gate is `GREEN` (2026-10-18): BIA-003, BIA-006, and BIA-011 are closed. Public CSV/XLSX/SQLite/Voice uploads, ClamAV, private cleanup, tenant isolation, bounded SQLite queue timing, payment containment, secret scanning, and maintained regressions pass. Subscription 0003 and Voice 0014 are applied in local PostgreSQL. The configured small Whisper model was provisioned in the mounted runtime cache and the final public Voice upload returned 200. See `37_FOUNDATION_B_EXTERNAL_BOUNDARY_IMPLEMENTATION.md`.
 
 ## CURRENT BLOCKERS
 
-`BIA-003`, `005`, `006`, `008`, `009`, `011`: production payment simulation, critical DB ownership, secret rotation, Integration/secret lifecycle, durable jobs, and upload security. BIA-010 is closed with live ClickHouse enforcement/cancellation and real PostgreSQL multi-worker advisory-lock evidence. See `20`, `28`, and `36` for evidence.
+`BIA-005`, `008`, `009`: critical DB ownership, Integration/secret lifecycle, and durable jobs. BIA-003, BIA-006, BIA-010, and BIA-011 are closed. See `20`, `28`, `36`, and `37` for evidence.
 
 ## FEATURES NOT YET IMPLEMENTED
 

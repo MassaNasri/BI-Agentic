@@ -25,6 +25,7 @@ from rest_framework.test import APIRequestFactory
 from shared.security.destination_policy import DestinationPolicyError, validate_destination
 from shared.security.internal_auth import ETLInternalAuthentication, ETLRequestScope, record_matches_scope, require_etl_scope
 from shared.security.runtime_config import load_runtime_security
+from shared.security.log_redaction import redact_value
 from shared.utils.credential_encryption import CredentialConfigurationError, CredentialEncryption
 
 
@@ -104,6 +105,14 @@ def test_production_rejects_insecure_runtime_configuration(monkeypatch):
     monkeypatch.setenv("DJANGO_SECRET_KEY", "change-me")
     with pytest.raises(Exception):
         load_runtime_security("test-service")
+
+
+def test_etl_nested_source_credentials_are_redacted():
+    result = redact_value({'source_id': 7, 'config': {'password': 'tenant password',
+                                                    'headers': {'Authorization': 'Bearer abc.def'}}})
+    assert result['source_id'] == 7
+    assert result['config']['password'] == '[REDACTED]'
+    assert result['config']['headers']['Authorization'] == '[REDACTED]'
 
 
 @pytest.mark.parametrize(
