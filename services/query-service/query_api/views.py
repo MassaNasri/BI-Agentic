@@ -6,6 +6,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from query_api.application.query_execution import execute_sql_payload, validate_sql_payload
+from query_api.public_sql import public_query_payload
 from query_api.resource_policy import build_workspace_query_id
 from query_api.services import SQLGuard, get_clickhouse_executor
 from query_api.services.workspace_db_resolver import (
@@ -103,7 +104,8 @@ class QueryValidateInternalView(APIView):
         payload = dict(request.data)
         payload['workspace_id'] = workspace_id
         result, http_status, _binding = validate_sql_payload(payload)
-        return Response(result, status=http_status)
+        return Response(public_query_payload(result, workspace_id=workspace_id,
+                                             dataset_id=payload.get("dataset_id")), status=http_status)
 
 
 class QueryExecuteInternalView(APIView):
@@ -118,7 +120,8 @@ class QueryExecuteInternalView(APIView):
         payload["workspace_id"] = workspace_id
         payload["request_id"] = str(getattr(request, "request_id", "") or "")
         result, http_status = execute_sql_payload(payload)
-        return Response(result, status=http_status)
+        return Response(public_query_payload(result, workspace_id=workspace_id,
+                                             dataset_id=payload.get("dataset_id")), status=http_status)
 
 
 class QueryCancelInternalView(APIView):
@@ -237,11 +240,11 @@ class QueryDefinitionVisualizationView(APIView):
                     else status.HTTP_403_FORBIDDEN
                 ),
             )
-        return Response({
+        return Response(public_query_payload({
             'success': True,
             'query_definition_id': str(definition.id),
             'workspace_id': definition.workspace_id,
             'dataset_id': definition.dataset_id,
             'sql': validation['sql'],
             'expires_at': definition.expires_at,
-        })
+        }, workspace_id=workspace_id, dataset_id=definition.dataset_id))

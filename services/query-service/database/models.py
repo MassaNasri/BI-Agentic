@@ -4,14 +4,10 @@ import uuid
 
 
 class Database(models.Model):
-    """
-    Model representing a manager's uploaded database.
-    Each manager can have only ONE database at a time.
-    """
+    """Query-owned analytical dataset/materialization (legacy table name)."""
     
     manager = models.PositiveBigIntegerField(
         db_column='manager_id',
-        unique=True,
         db_index=True,
         help_text="Manager user identifier from auth-service.",
     )
@@ -38,6 +34,11 @@ class Database(models.Model):
     source_kind = models.CharField(max_length=20, default='file')
     source_engine = models.CharField(max_length=32, blank=True, default='')
     source_tables = models.JSONField(default=list, blank=True)
+    source = models.ForeignKey(
+        'integration.DataSource', null=True, blank=True,
+        on_delete=models.PROTECT, related_name='datasets',
+        help_text="Integration-owned source; file uploads have no persistent source.",
+    )
     
     # Data metadata
     row_count = models.IntegerField(default=0, help_text="Number of rows in the dataset")

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import base64
+import json
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
@@ -22,6 +23,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Seque
 from uuid import UUID
 
 from shared.security.destination_policy import DestinationPolicyError, validate_destination
+from shared.security.transport import get_transport
 from shared.utils.db_type_utils import normalize_db_type
 
 
@@ -150,6 +152,7 @@ class BaseDatabaseConnector:
     fields: Sequence[Field] = SERVER_FIELDS
 
     def capabilities(self) -> dict:
+        direct_available = os.getenv("APP_ENV") != "production" or not self.server_based or self.key in {"postgres", "clickhouse"}
         fields = []
         for field in self.fields:
             value = field
@@ -161,14 +164,16 @@ class BaseDatabaseConnector:
             "label": self.label,
             "driver": self.driver,
             "workflow": "server" if self.server_based else "file_upload",
+            "transports": ["direct_secure_internet"] if self.server_based else [],
+            "direct_production_security_supported": self.key in {"postgres", "clickhouse"} if self.server_based else None,
             "fields": fields,
             "capabilities": {
-                "test_connection": True,
-                "schema_discovery": self.supports_schemas,
-                "table_discovery": True,
-                "column_introspection": True,
-                "primary_key_discovery": True,
-                "snapshot_extraction": True,
+                "test_connection": direct_available,
+                "schema_discovery": direct_available and self.supports_schemas,
+                "table_discovery": direct_available,
+                "column_introspection": direct_available,
+                "primary_key_discovery": direct_available,
+                "snapshot_extraction": direct_available,
                 "chunked_extraction": True,
                 "tls": self.server_based,
                 "cdc": False,
@@ -200,6 +205,9 @@ class BaseDatabaseConnector:
 
     def connect(self, config: Mapping[str, Any]):
         raise NotImplementedError
+
+    def _target(self, config):
+        return get_transport(config.get("transport")).before_connect(config, self.key)
 
     def close(self, connection) -> None:
         if connection is not None:
@@ -258,9 +266,17 @@ class BaseDatabaseConnector:
         try:
             cfg = self.validate_configuration(config)
             connection = self.connect(cfg)
-            result = {"schemas": self.list_schemas(connection), "tables": self.list_tables(connection, schema)}
+            schemas = self.list_schemas(connection)
+            tables = self.list_tables(connection, schema)
+            if len(schemas) > 100 or len(tables) > 500:
+                raise ConnectorError("DISCOVERY_LIMIT_EXCEEDED", "The source catalog is too large for one discovery request.")
+            result = {"schemas": schemas, "tables": tables}
             if table:
                 result["table"] = self.inspect_table(connection, schema, table)
+                if len(result["table"].get("columns", [])) > 256:
+                    raise ConnectorError("DISCOVERY_LIMIT_EXCEEDED", "The selected table has too many columns.")
+            if len(json.dumps(result, default=str).encode("utf-8")) > 1048576:
+                raise ConnectorError("DISCOVERY_LIMIT_EXCEEDED", "The source catalog is too large for one discovery request.")
             return result
         except Exception as exc:
             raise safe_connector_error(exc) from exc
@@ -404,16 +420,25 @@ class PostgresConnector(InformationSchemaConnector):
 
     def connect(self, config):
         cfg = self.validate_configuration(config) if "resolved_host" not in config else dict(config)
+        target = self._target(cfg)
         try:
             import psycopg2
             from psycopg2.extras import RealDictCursor
         except ImportError as exc:
             raise ConnectorError("DRIVER_UNAVAILABLE", "The PostgreSQL driver is unavailable.", status_code=503) from exc
+        tls_kwargs = {}
+        ca_file = os.getenv("ETL_SOURCE_PG_CA_FILE", "").strip()
+        if ca_file:
+            # Platform-managed trust path; never accepted from tenant metadata.
+            tls_kwargs["sslrootcert"] = ca_file
         return psycopg2.connect(
-            host=cfg["resolved_host"], port=cfg["port"], dbname=cfg["database"],
+            host=target.hostname, hostaddr=target.address, port=target.port, dbname=cfg["database"],
             user=cfg["username"], password=cfg.get("password", ""),
-            connect_timeout=cfg["connect_timeout"], sslmode=cfg.get("sslmode", "require"),
+            connect_timeout=cfg["connect_timeout"],
+            sslmode=cfg.get("sslmode", "verify-full" if os.getenv("APP_ENV") == "production" else "require"),
+            gssencmode="disable",
             cursor_factory=RealDictCursor,
+            **tls_kwargs,
         )
 
     def default_schema(self, connection):
@@ -458,6 +483,7 @@ class MySQLConnector(InformationSchemaConnector):
 
     def connect(self, config):
         cfg = self.validate_configuration(config) if "resolved_host" not in config else dict(config)
+        target = self._target(cfg)
         try:
             import pymysql
         except ImportError as exc:
@@ -467,7 +493,7 @@ class MySQLConnector(InformationSchemaConnector):
         if ssl_mode != "disabled":
             kwargs["ssl"] = {"ca": cfg.get("ssl_ca")} if cfg.get("ssl_ca") else {}
         return pymysql.connect(
-            host=cfg["resolved_host"], port=cfg["port"], database=cfg["database"],
+            host=target.address, port=target.port, database=cfg["database"],
             user=cfg["username"], password=cfg.get("password", ""),
             connect_timeout=cfg["connect_timeout"], read_timeout=cfg["read_timeout"],
             cursorclass=pymysql.cursors.DictCursor, **kwargs,
@@ -580,6 +606,7 @@ class SQLServerConnector(InformationSchemaConnector):
 
     def connect(self, config):
         cfg = self.validate_configuration(config) if "resolved_host" not in config else dict(config)
+        target = self._target(cfg)
         try:
             import pytds
         except ImportError as exc:
@@ -593,7 +620,7 @@ class SQLServerConnector(InformationSchemaConnector):
                 "validate_host": not bool(cfg.get("trust_server_certificate", False)),
             })
         return pytds.connect(
-            server=cfg["resolved_host"], port=cfg["port"], database=cfg["database"],
+            server=target.address, port=target.port, database=cfg["database"],
             user=cfg["username"], password=cfg.get("password", ""),
             login_timeout=cfg["connect_timeout"], timeout=cfg["read_timeout"], as_dict=True, **kwargs,
         )
@@ -637,6 +664,7 @@ class OracleConnector(BaseDatabaseConnector):
 
     def connect(self, config):
         cfg = self.validate_configuration(config) if "resolved_host" not in config else dict(config)
+        target = self._target(cfg)
         try:
             import oracledb
         except ImportError as exc:
@@ -644,8 +672,8 @@ class OracleConnector(BaseDatabaseConnector):
         kwargs = {
             "user": cfg["username"],
             "password": cfg.get("password", ""),
-            "host": cfg["resolved_host"],
-            "port": cfg["port"],
+            "host": target.address,
+            "port": target.port,
             "service_name": cfg["service_name"],
             "protocol": "tcps" if cfg.get("tls", True) else "tcp",
             "tcp_connect_timeout": cfg["connect_timeout"],
@@ -709,20 +737,23 @@ class ClickHouseConnector(BaseDatabaseConnector):
     fields = SERVER_FIELDS + (
         Field("secure", "Use TLS", "boolean", False, True),
         Field("verify", "Verify certificate", "boolean", False, True),
-        Field("ca_certs", "CA certificate path", required=False),
     )
 
     def connect(self, config):
         cfg = self.validate_configuration(config) if "resolved_host" not in config else dict(config)
+        target = self._target(cfg)
         try:
             from clickhouse_driver import dbapi
         except ImportError as exc:
             raise ConnectorError("DRIVER_UNAVAILABLE", "The ClickHouse driver is unavailable.", status_code=503) from exc
         return dbapi.connect(
-            host=cfg["resolved_host"], port=cfg["port"], database=cfg["database"],
+            host=target.address, port=target.port, database=cfg["database"],
             user=cfg["username"], password=cfg.get("password", ""),
             secure=bool(cfg.get("secure", True)), verify=bool(cfg.get("verify", True)),
-            ca_certs=cfg.get("ca_certs"), connect_timeout=cfg["connect_timeout"],
+            ca_certs=os.getenv("ETL_SOURCE_CLICKHOUSE_CA_FILE") or (
+                cfg.get("ca_certs") if os.getenv("APP_ENV") != "production" else None
+            ), server_hostname=target.hostname,
+            check_hostname=True, connect_timeout=cfg["connect_timeout"],
             send_receive_timeout=cfg["read_timeout"],
         )
 

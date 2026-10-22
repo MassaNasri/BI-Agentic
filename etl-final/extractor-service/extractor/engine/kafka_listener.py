@@ -21,6 +21,7 @@ from shared.utils.kafka_consumer import KafkaMessageConsumer
 from shared.utils.kafka_producer import KafkaMessageProducer
 from shared.utils.metadata_schema import MetadataSchema
 from shared.utils.credential_encryption import get_encryption_instance
+from shared.security.legacy_kafka import allow_legacy_source_event
 from shared.utils.idempotency_manager import (
     IdempotencyClaim,
     IdempotencyManager,
@@ -519,7 +520,38 @@ class ConnectionListener:
                     )
                     return False
 
-            db_config = dict(message.get("configuration") or {})
+            credential_ref = message.get("credential_ref")
+            if message.get("contract_version") == 2 and credential_ref is None:
+                logger.error("missing_source_credential_reference")
+                return False
+            if credential_ref is not None:
+                from shared.security.credential_client import resolve_source_execution
+                if (message.get("contract_version") != 2
+                        or not isinstance(credential_ref, dict)
+                        or str(credential_ref.get("workspace_id")) != str(scope_fields.get("workspace_id"))
+                        or str(credential_ref.get("dataset_id")) != str(scope_fields.get("dataset_id"))
+                        or str(credential_ref.get("job_id")) != str(scope_fields.get("ingestion_job_id"))
+                        or str(credential_ref.get("source_id")) != str(message.get("integration_source_id"))
+                        or (message.get("configuration") or {}).get("password")):
+                    logger.error("invalid_source_credential_reference")
+                    return False
+                resolved_engine, db_config, transport, config_version = resolve_source_execution(
+                    credential_ref, service="etl-extractor",
+                )
+                if (normalize_db_type(resolved_engine) != db_type or transport != "direct_secure_internet"
+                        or config_version != message.get("configuration_version")):
+                    logger.error("source_execution_identity_mismatch")
+                    return False
+                if not db_config:
+                    logger.error("empty_source_execution_configuration")
+                    return False
+            else:
+                # Production replay is disabled unless a short, explicit drain window is configured.
+                if not allow_legacy_source_event(message):
+                    logger.warning("legacy_source_event_rejected workspace=%s dataset=%s job=%s", scope_fields.get("workspace_id"), scope_fields.get("dataset_id"), scope_fields.get("ingestion_job_id"))
+                    return False
+                logger.warning("legacy_source_event_accepted_for_bounded_replay workspace=%s dataset=%s job=%s", scope_fields.get("workspace_id"), scope_fields.get("dataset_id"), scope_fields.get("ingestion_job_id"))
+                db_config = dict(message.get("configuration") or {})
             if not db_config:
                 db_config = {
                     "host": message.get("host"), "username": message.get("user"),
@@ -529,7 +561,7 @@ class ConnectionListener:
                 }
             db_config["db_type"] = db_type
             db_config["workspace_id"] = scope_fields.get("workspace_id")
-            if db_config.get("_password_encrypted"):
+            if credential_ref is None and db_config.get("_password_encrypted"):
                 logger.info("[EXTRACTOR] Decrypting database credential connector=%s", db_type)
                 db_config["password"] = get_encryption_instance().decrypt(db_config.get("password", ""))
                 db_config.pop("_password_encrypted", None)
@@ -884,6 +916,7 @@ class ConnectionListener:
                     }
                 safe_message.pop("password", None)
                 safe_message.pop("_password_encrypted", None)
+                safe_message.pop("credential_ref", None)
                 connection_metadata = MetadataSchema.create_connection_metadata(
                     source_type=message.get("type", "unknown"),
                     source_id=message.get("filename") or message.get("database", "unknown"),

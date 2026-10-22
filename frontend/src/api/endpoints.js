@@ -96,17 +96,27 @@ export const workspaceAPI = {
 // ============================================================================
 
 export const databaseAPI = {
+  listSources: () => apiClient.get('/database/sources/'),
+  createSource: (source) => apiClient.post('/database/sources/', source),
+  updateSource: (sourceId, changes) => apiClient.patch(`/database/sources/${sourceId}/`, changes),
+  retireSource: (sourceId) => apiClient.delete(`/database/sources/${sourceId}/`),
+  configureSourceCredential: (sourceId, password) => apiClient.post(`/database/sources/${sourceId}/credential/configure/`, { password }),
+  rotateSourceCredential: (sourceId, password) => apiClient.post(`/database/sources/${sourceId}/credential/rotate/`, { password }),
+  revokeSourceCredential: (sourceId) => apiClient.post(`/database/sources/${sourceId}/credential/revoke/`, {}),
+  listDatasets: () => apiClient.get('/database/datasets/'),
   getSourceCapabilities: () => apiClient.get('/database/sources/capabilities/'),
-  testSourceConnection: (engine, configuration) =>
-    apiClient.post('/database/sources/test/', { engine, configuration }),
-  discoverSource: (engine, configuration, schema = null, table = null) =>
-    apiClient.post('/database/sources/discover/', { engine, configuration, schema, table }),
-  startSnapshot: (engine, configuration, tables, chunkSize = 1000) =>
+  testSourceConnection: (sourceId) =>
+    apiClient.post('/database/sources/test/', { source_id: sourceId }),
+  discoverSource: (sourceId, schema = null, table = null) =>
+    apiClient.post('/database/sources/discover/', { source_id: sourceId, schema, table }),
+  startSnapshot: (engine, configuration, tables, chunkSize = 1000, sourceId = null, name = null) =>
     apiClient.post('/database/sources/snapshot/', {
       engine,
-      configuration,
+      configuration: engine === 'sqlite' ? configuration : {},
       tables,
       chunk_size: chunkSize,
+      ...(sourceId ? { source_id: sourceId } : {}),
+      ...(name ? { name } : {}),
     }),
   prepareSQLite: (file, onUploadProgress) => {
     const formData = new FormData()
@@ -130,18 +140,22 @@ export const databaseAPI = {
   },
   
   // Get manager's database information
-  getDatabaseInfo: () => apiClient.get('/database/'),
+  getDatabaseInfo: (datasetId = null) => apiClient.get('/database/', {
+    params: datasetId ? { dataset_id: datasetId } : {},
+  }),
   
   // Get database preview (first 5 rows)
-  getDatabasePreview: (tableId = null) => apiClient.get('/database/preview/', {
-    params: tableId ? { table: tableId } : {},
+  getDatabasePreview: (tableId = null, datasetId = null) => apiClient.get('/database/preview/', {
+    params: { ...(tableId ? { table: tableId } : {}), ...(datasetId ? { dataset_id: datasetId } : {}) },
   }),
-  getDatabaseSchema: (tableId = null) => apiClient.get('/database/schema/', {
-    params: tableId ? { table: tableId } : {},
+  getDatabaseSchema: (tableId = null, datasetId = null) => apiClient.get('/database/schema/', {
+    params: { ...(tableId ? { table: tableId } : {}), ...(datasetId ? { dataset_id: datasetId } : {}) },
   }),
   
   // Delete manager's database
-  deleteDatabase: () => apiClient.delete('/database/'),
+  deleteDatabase: (datasetId = null) => apiClient.delete('/database/', {
+    params: datasetId ? { dataset_id: datasetId } : {},
+  }),
 }
 
 // ============================================================================

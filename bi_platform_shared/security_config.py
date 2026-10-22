@@ -1,6 +1,8 @@
 """Common production credential sanity checks for Django deployments."""
 
 import os
+import re
+from .secret_delivery import read_secret, SecretDeliveryError
 
 
 _WEAK = {
@@ -12,9 +14,12 @@ _PLACEHOLDER_PREFIXES = (
     'example-', 'dummy-', 'test-only', 'nonproduction',
 )
 _NAMES = (
-    'DB_PASSWORD', 'CLICKHOUSE_PASSWORD', 'METABASE_PASSWORD', 'METABASE_SECRET_KEY',
+    'DB_PASSWORD', 'INTEGRATION_DB_PASSWORD', 'CLICKHOUSE_PASSWORD', 'METABASE_PASSWORD', 'METABASE_SECRET_KEY',
     'METABASE_APP_DB_PASSWORD', 'METABASE_ENCRYPTION_SECRET_KEY',
-    'CREDENTIAL_SECRET_KEY', 'ETL_INTERNAL_API_KEY', 'INGESTION_CALLBACK_API_KEY',
+    'CREDENTIAL_SECRET_KEY', 'CREDENTIAL_RESOLVER_API_KEY',
+    'CREDENTIAL_RESOLVER_CONNECTOR_KEY', 'CREDENTIAL_RESOLVER_EXTRACTOR_KEY',
+    'CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS', 'CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS',
+    'ETL_INTERNAL_API_KEY', 'INGESTION_CALLBACK_API_KEY',
     'NOTIFICATION_INTERNAL_API_KEY', 'NOTIFICATION_SERVICE_API_KEY',
     'AI_SERVICE_INTERNAL_API_KEY', 'INTERNAL_SERVICE_TOKEN',
     'INTERNAL_API_TOKEN', 'SERVICE_INTERNAL_TOKEN',
@@ -31,12 +36,23 @@ def validate_production_secrets(profile, django_secret, environment=None):
     environment = os.environ if environment is None else environment
     if len(django_secret) < 32 or _is_weak(django_secret):
         raise ImproperlyConfigured('Production DJANGO_SECRET_KEY is weak or a placeholder.')
-    for name in _NAMES:
-        value = str(environment.get(name, '') or '').strip()
-        if value and (_is_weak(value) or (name in {'METABASE_SECRET_KEY', 'METABASE_ENCRYPTION_SECRET_KEY', 'CREDENTIAL_SECRET_KEY'} and len(value) < 32)):
+    redaction_environment = dict(environment)
+    versioned = {
+        name.removesuffix('_FILE') for name in environment
+        if re.fullmatch(r'CREDENTIAL_SECRET_KEY_V[1-9][0-9]{0,3}(?:_FILE)?', name)
+    }
+    names = (*_NAMES, *sorted(versioned))
+    for name in names:
+        try:
+            value = read_secret(name, environment=environment, production=True).strip()
+        except SecretDeliveryError as exc:
+            raise ImproperlyConfigured(str(exc)) from exc
+        if value:
+            redaction_environment[name] = value
+        if value and (_is_weak(value) or ((name.startswith('CREDENTIAL_SECRET_KEY_V') or name in {'METABASE_SECRET_KEY', 'METABASE_ENCRYPTION_SECRET_KEY', 'CREDENTIAL_SECRET_KEY', 'CREDENTIAL_RESOLVER_API_KEY', 'CREDENTIAL_RESOLVER_CONNECTOR_KEY', 'CREDENTIAL_RESOLVER_EXTRACTOR_KEY', 'CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS', 'CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS'}) and len(value) < 32)):
             raise ImproperlyConfigured(f'Production {name} is weak or a placeholder.')
     from .log_redaction import install_secret_redaction
-    install_secret_redaction(environment)
+    install_secret_redaction(redaction_environment)
 
 
 def _is_weak(value):

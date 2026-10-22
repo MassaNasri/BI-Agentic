@@ -21,27 +21,25 @@ from .serializers import (
 )
 from .utils import ClickHouseClient, cleanup_database, format_file_size
 from .internal_authentication import IngestionServiceAuthentication
+from integration.metadata import safe_connection_metadata
+from integration.scope import (
+    principal_attr as _principal_attr,
+    principal_user_id as _principal_user_id,
+    principal_workspace_id as _principal_workspace_id,
+    require_manager_scope as _require_manager_scope,
+)
+from integration.service import create_source, owned_source, record_selection, selected_tables
+from integration.credentials import (
+    CredentialUnavailable, authorize_execution, execution_reference,
+)
+from integration.models import SourceCandidate
+from integration.limits import admit_source_operation
 from query_api.services.workspace_db_resolver import (
     WorkspaceDatasetBindingError,
     resolve_workspace_dataset_binding,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _require_manager_scope(request):
-    if _principal_attr(request.user, "role").lower() != "manager":
-        return None, Response(
-            {"success": False, "error": {"code": "PERMISSION_DENIED", "message": "Only managers can manage data sources."}},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    workspace_id = _principal_workspace_id(request)
-    if workspace_id is None:
-        return None, Response(
-            {"success": False, "error": {"code": "WORKSPACE_REQUIRED", "message": "A workspace-scoped token is required."}},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    return workspace_id, None
 
 
 def _etl_headers(workspace_id, dataset_id, job_id):
@@ -68,6 +66,42 @@ def _etl_json_response(response):
 def _probe_scope(workspace_id):
     job_id = uuid.uuid4()
     return f"probe-{job_id.hex}", job_id
+
+
+def _source_request_error(workspace_id, source_id, engine, configuration):
+    source = owned_source(workspace_id, source_id, require_active=True)
+    if source is None:
+        return Response({"success": False, "error": {"code": "SOURCE_NOT_FOUND"}}, status=404)
+    try:
+        metadata = safe_connection_metadata(configuration)
+    except ValueError:
+        return Response({"success": False, "error": {"code": "INVALID_CONFIGURATION"}}, status=400)
+    if source.engine != str(engine or "").strip().lower() or any(
+        metadata.get(key) != value for key, value in source.connection_metadata.items()
+    ):
+        return Response({"success": False, "error": {"code": "SOURCE_CONFIGURATION_MISMATCH"}}, status=400)
+    return None
+
+
+def _source_probe(request, workspace_id, kind):
+    source = owned_source(workspace_id, request.data.get("source_id"), require_active=True)
+    if source is None:
+        return None, None, Response({"success": False, "error": {"code": "SOURCE_NOT_FOUND"}}, status=404)
+    if request.data.get("configuration") not in (None, {}) or request.data.get("password") is not None:
+        return None, None, Response({"success": False, "error": {"code": "SOURCE_CONFIGURATION_MISMATCH"}}, status=400)
+    if request.data.get("engine") not in (None, source.engine):
+        return None, None, Response({"success": False, "error": {"code": "SOURCE_CONFIGURATION_MISMATCH"}}, status=400)
+    actor_id = _principal_user_id(request.user)
+    if actor_id is None:
+        return None, None, Response({"success": False, "error": {"code": "INVALID_PRINCIPAL"}}, status=401)
+    if not admit_source_operation(workspace_id, actor_id, kind):
+        return None, None, Response({"success": False, "error": {"code": "SOURCE_RATE_LIMITED"}}, status=429)
+    dataset_id, job_id = _probe_scope(workspace_id)
+    try:
+        grant = authorize_execution(source, job_id=job_id, dataset_id=dataset_id, kind=kind)
+    except CredentialUnavailable:
+        return None, None, Response({"success": False, "error": {"code": "CREDENTIAL_NOT_CONFIGURED"}}, status=400)
+    return grant, (dataset_id, job_id), None
 
 
 def _loader_table_name(value):
@@ -168,6 +202,21 @@ def _resolve_imported_table(database, table_id=None):
     raise KeyError("The requested imported table is not part of this dataset.")
 
 
+def _manager_dataset(request, manager_id, workspace_id):
+    """Resolve an optional logical dataset id, defaulting to the latest one."""
+    requested = request.query_params.get("dataset_id")
+    queryset = Database.objects.filter(manager=manager_id, workspace_id=workspace_id)
+    if requested not in (None, ""):
+        try:
+            dataset_id = int(requested)
+        except (TypeError, ValueError):
+            return None
+        if dataset_id <= 0:
+            return None
+        queryset = queryset.filter(pk=dataset_id)
+    return queryset.order_by("-upload_date", "-pk").first()
+
+
 def _wait_for_initial_rows(database, row_count, now=None):
     """Avoid publishing completion while the loader's first atomic batch is in flight.
 
@@ -260,11 +309,14 @@ class DatabaseSourceTestView(APIView):
         workspace_id, error = _require_manager_scope(request)
         if error:
             return error
-        dataset_id, job_id = _probe_scope(workspace_id)
+        grant, scope, source_error = _source_probe(request, workspace_id, "test")
+        if source_error:
+            return source_error
+        dataset_id, job_id = scope
         try:
             response = requests.post(
                 f"{settings.ETL_SERVICE_URL.rstrip('/')}/api/databases/test/",
-                json={"engine": request.data.get("engine"), "configuration": request.data.get("configuration", {})},
+                json={"credential_ref": execution_reference(grant)},
                 headers=_etl_headers(workspace_id, dataset_id, job_id),
                 timeout=130,
             )
@@ -282,13 +334,15 @@ class DatabaseSourceDiscoveryView(APIView):
         workspace_id, error = _require_manager_scope(request)
         if error:
             return error
-        dataset_id, job_id = _probe_scope(workspace_id)
+        grant, scope, source_error = _source_probe(request, workspace_id, "discover")
+        if source_error:
+            return source_error
+        dataset_id, job_id = scope
         try:
             response = requests.post(
                 f"{settings.ETL_SERVICE_URL.rstrip('/')}/api/databases/discover/",
                 json={
-                    "engine": request.data.get("engine"),
-                    "configuration": request.data.get("configuration", {}),
+                    "credential_ref": execution_reference(grant),
                     "schema": request.data.get("schema"),
                     "table": request.data.get("table"),
                 },
@@ -343,7 +397,31 @@ class DatabaseSnapshotStartView(APIView):
         engine = str(request.data.get("engine") or "").strip().lower()
         configuration = request.data.get("configuration", {})
         tables = request.data.get("tables", [])
-        if not isinstance(configuration, dict) or not isinstance(tables, list) or not tables:
+        source_id = request.data.get("source_id")
+        source = owned_source(workspace_id, source_id, require_active=True) if source_id else None
+        if source_id and source is None:
+            return Response({"success": False, "error": {"code": "SOURCE_NOT_FOUND"}}, status=404)
+        candidate = None
+        if request.data.get("replacement_id") is not None:
+            candidate = SourceCandidate.objects.filter(
+                pk=request.data["replacement_id"], source=source, state="validated",
+            ).select_related("credential").first()
+            if candidate is None:
+                return Response({"success": False, "error": {"code": "REPLACEMENT_NOT_FOUND"}}, status=404)
+            if configuration not in (None, {}) or request.data.get("password") is not None or request.data.get("tables") not in (None, [], candidate.selected_tables):
+                return Response({"success": False, "error": {"code": "SOURCE_CONFIGURATION_MISMATCH"}}, status=400)
+            engine = candidate.engine
+            configuration = dict(candidate.connection_metadata)
+            tables = candidate.selected_tables
+        if source is not None:
+            if candidate is None and (configuration not in (None, {}) or request.data.get("password") is not None or engine not in ("", source.engine)):
+                return Response({"success": False, "error": {"code": "SOURCE_CONFIGURATION_MISMATCH"}}, status=400)
+            if candidate is None:
+                engine = source.engine
+                configuration = dict(source.connection_metadata)
+        elif engine != "sqlite":
+            return Response({"success": False, "error": {"code": "SOURCE_REQUIRED"}}, status=400)
+        if not engine or not isinstance(configuration, dict) or not isinstance(tables, list) or not tables:
             return Response({"success": False, "error": {"code": "INVALID_CONFIGURATION", "message": "Configuration and at least one table are required."}}, status=400)
         if len(tables) > 20:
             return Response({"success": False, "error": {"code": "INVALID_CONFIGURATION", "message": "Select no more than 20 tables."}}, status=400)
@@ -351,20 +429,23 @@ class DatabaseSnapshotStartView(APIView):
         if not first_table.get("name"):
             return Response({"success": False, "error": {"code": "INVALID_CONFIGURATION", "message": "A valid table selection is required."}}, status=400)
 
-        job_id = uuid.uuid4()
-        manager_database = Database.objects.filter(manager=manager_id).first()
-        if manager_database and manager_database.workspace_id != workspace_id:
-            return Response(
-                {"success": False, "error": {
-                    "code": "WORKSPACE_CONFLICT",
-                    "message": "The existing data source belongs to a different workspace.",
-                }},
-                status=status.HTTP_409_CONFLICT,
+        try:
+            selected = selected_tables(tables)
+            metadata = safe_connection_metadata(configuration)
+        except ValueError as exc:
+            return Response({"success": False, "error": {"code": "INVALID_CONFIGURATION", "message": str(exc)}}, status=400)
+        if not admit_source_operation(workspace_id, manager_id, "snapshot"):
+            return Response({"success": False, "error": {"code": "SOURCE_RATE_LIMITED"}}, status=429)
+        if source is not None and candidate is None:
+            record_selection(source, selected)
+        elif source is None:
+            # Compatibility path: legacy snapshot callers do not create a source first.
+            source = create_source(
+                workspace_id=workspace_id, actor_id=manager_id,
+                name=str(request.data.get("name") or f"{engine}:{first_table['name']}")[:255],
+                engine=engine, configuration=configuration, tables=tables,
             )
-        existing = manager_database
-        if existing:
-            cleanup_database(existing)
-            existing.delete()
+        job_id = uuid.uuid4()
         database = Database.objects.create(
             manager=manager_id,
             manager_email=_principal_attr(request.user, "email"),
@@ -376,6 +457,7 @@ class DatabaseSnapshotStartView(APIView):
             file_path="",
             source_kind="database",
             source_engine=engine,
+            source=source,
             source_tables=tables,
             clickhouse_database=getattr(settings, "CLICKHOUSE_DATABASE", "etl"),
             etl_status="pending",
@@ -392,12 +474,28 @@ class DatabaseSnapshotStartView(APIView):
         database.clickhouse_table_name = imported_tables[0]["destination_table"]
         database.save(update_fields=["source_tables", "clickhouse_table_name"])
         try:
+            grant = authorize_execution(
+                source, job_id=job_id, dataset_id=database.pk,
+                kind="candidate" if candidate else "snapshot",
+                credential=candidate.credential if candidate else None,
+                engine=candidate.engine if candidate else None,
+                metadata=candidate.connection_metadata if candidate else None,
+                configuration_version=source.configuration_version + 1 if candidate else None,
+            ) if engine != "sqlite" else None
+        except CredentialUnavailable:
+            database.delete()
+            return Response({"success": False, "error": {"code": "CREDENTIAL_NOT_CONFIGURED"}}, status=400)
+        try:
             snapshot_request = {
                 "engine": engine,
-                "configuration": configuration,
                 "tables": tables,
+                "integration_source_id": str(source.pk),
                 "chunk_size": request.data.get("chunk_size", 1000),
             }
+            if grant is not None:
+                snapshot_request["credential_ref"] = execution_reference(grant)
+            else:
+                snapshot_request["configuration"] = configuration
             if engine == "sqlite":
                 snapshot_request["max_queue_delay_seconds"] = min(
                     max(30, int(getattr(settings, "ETL_PROCESSING_TIMEOUT_SECONDS", 240))),
@@ -420,6 +518,10 @@ class DatabaseSnapshotStartView(APIView):
             database.etl_status = "processing"
             database.etl_message = "Database snapshot extraction started."
             database.save(update_fields=["etl_status", "etl_message"])
+            if candidate is not None:
+                candidate.validation_dataset_id = database.pk
+                candidate.state = "loading"
+                candidate.save(update_fields=["validation_dataset_id", "state"])
             return Response({
                 "success": True,
                 "message": "Database snapshot started.",
@@ -430,34 +532,6 @@ class DatabaseSnapshotStartView(APIView):
             database.etl_message = "The ETL service is unavailable."
             database.save(update_fields=["etl_status", "etl_message"])
             return Response({"success": False, "error": {"code": "ETL_UNAVAILABLE", "message": database.etl_message}}, status=503)
-
-
-def _principal_attr(user, *names: str) -> str:
-    for name in names:
-        value = getattr(user, name, None)
-        if value not in (None, ""):
-            return str(value).strip()
-    return ""
-
-
-def _principal_user_id(user) -> int | None:
-    raw_value = _principal_attr(user, "id", "pk")
-    if not raw_value:
-        return None
-    try:
-        return int(raw_value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _principal_workspace_id(request) -> int | None:
-    candidate = _principal_attr(request.user, "workspace_id")
-    if candidate in (None, "", b""):
-        return None
-    try:
-        return int(candidate)
-    except (TypeError, ValueError):
-        return None
 
 
 class DatabaseHealthCheckView(APIView):
@@ -484,7 +558,6 @@ class DatabaseHealthCheckView(APIView):
             'service': 'database',
             'status': 'healthy',
             'etl_service': etl_status,
-            'etl_url': etl_url
         }, status=status.HTTP_200_OK)
 
 
@@ -544,19 +617,9 @@ class DatabaseUploadView(APIView):
         logger.info("Upload started: %s (%s bytes) by manager=%s", uploaded_file.name, uploaded_file.size, manager_id)
         
         # ============================================================
-        # 3. CHECK: Existing database (replace mode)
+        # 3. New upload materialization; preserve existing datasets until
+        # an explicit dataset deletion. File uploads are not persistent sources.
         # ============================================================
-        manager_database = Database.objects.filter(manager=manager_id).first()
-        if manager_database and manager_database.workspace_id != workspace_id:
-            return Response(
-                {'success': False, 'message': 'The existing data source belongs to a different workspace.'},
-                status=status.HTTP_409_CONFLICT,
-            )
-        existing_db = manager_database
-        replace_mode = existing_db is not None
-        
-        if replace_mode:
-            logger.info(f"Replace mode: Existing database {existing_db.id} will be replaced")
         
         # ============================================================
         # 4. ETL INTEGRATION: Forward file with defensive handling
@@ -566,40 +629,19 @@ class DatabaseUploadView(APIView):
         
         try:
             configured_clickhouse_database = getattr(settings, 'CLICKHOUSE_DATABASE', 'etl')
-            if replace_mode:
-                logger.info("Cleaning up previous physical dataset for database %s", existing_db.id)
-                cleanup_database(existing_db)
-                database = existing_db
-                database.ingestion_job_id = ingestion_job_id
-                database.filename = uploaded_file.name
-                database.file_size = uploaded_file.size
-                database.file_path = ''
-                database.source_kind = 'file'
-                database.source_engine = ''
-                database.source_tables = []
-                database.row_count = 0
-                database.column_count = 0
-                database.columns_schema = {}
-                database.clickhouse_table_name = ''
-                database.clickhouse_database = configured_clickhouse_database
-                database.upload_date = timezone.now()
-                database.etl_status = 'pending'
-                database.etl_message = 'Upload accepted; waiting for ETL dispatch.'
-                database.save()
-            else:
-                database = Database.objects.create(
-                    manager=manager_id,
-                    manager_email=user_email,
-                    manager_name=user_name,
-                    workspace_id=workspace_id,
-                    ingestion_job_id=ingestion_job_id,
-                    filename=uploaded_file.name,
-                    file_size=uploaded_file.size,
-                    file_path='',
-                    clickhouse_database=configured_clickhouse_database,
-                    etl_status='pending',
-                    etl_message='Upload accepted; waiting for ETL dispatch.',
-                )
+            database = Database.objects.create(
+                manager=manager_id,
+                manager_email=user_email,
+                manager_name=user_name,
+                workspace_id=workspace_id,
+                ingestion_job_id=ingestion_job_id,
+                filename=uploaded_file.name,
+                file_size=uploaded_file.size,
+                file_path='',
+                clickhouse_database=configured_clickhouse_database,
+                etl_status='pending',
+                etl_message='Upload accepted; waiting for ETL dispatch.',
+            )
 
             # Prepare multipart form data
             files = {
@@ -639,24 +681,10 @@ class DatabaseUploadView(APIView):
             
             # Check if ETL request was successful
             if etl_response.status_code != 200:
-                error_msg = f"ETL service returned {etl_response.status_code}"
-                
-                # Try to extract error message from response
-                try:
-                    content_type = etl_response.headers.get('Content-Type', '')
-                    
-                    if 'application/json' in content_type:
-                        error_data = etl_response.json()
-                        error_msg = error_data.get('message', error_msg)
-                    else:
-                        # Non-JSON response, log it
-                        response_text = etl_response.text[:200]  # First 200 chars
-                        logger.error(f"ETL non-JSON error response: {response_text}")
-                        error_msg = f"ETL service error (Status: {etl_response.status_code})"
-                
-                except Exception as parse_error:
-                    logger.error(f"Failed to parse ETL error response: {parse_error}")
-
+                # Upstream error bodies can contain internal hosts, paths, or
+                # driver diagnostics. Keep the public contract generic.
+                logger.warning("ETL upload dispatch rejected status=%s dataset=%s", etl_response.status_code, database.pk)
+                error_msg = 'Upload processing could not start.'
                 _mark_ingestion_failed(database, error_msg)
                 
                 return Response(
@@ -680,7 +708,7 @@ class DatabaseUploadView(APIView):
             
             response_data = {
                 'success': True,
-                'message': 'Database replaced successfully and ETL processing started' if replace_mode else 'Database uploaded successfully and ETL processing started',
+                'message': 'Database uploaded successfully and ETL processing started',
                 'data': {
                     'id': database.id,
                     'filename': database.filename,
@@ -689,7 +717,7 @@ class DatabaseUploadView(APIView):
                     'upload_date': database.upload_date.isoformat(),
                     'etl_status': database.etl_status,
                     'ingestion_job_id': str(database.ingestion_job_id),
-                    'replaced': replace_mode
+                    'replaced': False
                 }
             }
             
@@ -743,6 +771,21 @@ class DatabaseUploadView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class DatasetListView(APIView):
+    """Query-owned logical datasets, without physical storage identifiers."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if _principal_attr(request.user, "role").lower() not in {"manager", "analyst", "executive"}:
+            return Response({"success": False, "error": {"code": "PERMISSION_DENIED"}}, status=403)
+        workspace_id = _principal_workspace_id(request)
+        if workspace_id is None:
+            return Response({"success": False, "error": {"code": "WORKSPACE_REQUIRED"}}, status=400)
+        datasets = Database.objects.filter(workspace_id=workspace_id).order_by("-upload_date", "-pk")
+        return Response({"success": True, "data": DatabaseSerializer(datasets, many=True).data})
 
 
 class DatabaseDetailView(APIView):
@@ -799,12 +842,21 @@ class DatabaseDetailView(APIView):
                 )
 
         try:
+            requested_dataset_id = request.query_params.get("dataset_id")
+            status_queryset = Database.objects.filter(workspace_id=workspace_id)
+            if requested_dataset_id not in (None, ""):
+                try:
+                    parsed_dataset_id = int(requested_dataset_id)
+                    if parsed_dataset_id <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    return Response({'success': False, 'code': 'dataset_id_invalid', 'message': 'dataset_id must be positive.'}, status=400)
+                status_queryset = status_queryset.filter(pk=parsed_dataset_id)
             status_database = (
-                Database.objects.filter(workspace_id=workspace_id)
+                status_queryset
                 .order_by("-upload_date")
                 .first()
             )
-            requested_dataset_id = request.query_params.get("dataset_id")
             candidate_matches_request = (
                 status_database is not None
                 and requested_dataset_id in (None, "", str(status_database.pk), status_database.pk)
@@ -854,10 +906,10 @@ class DatabaseDetailView(APIView):
                 },
                 status=exc.http_status,
             )
-        except Exception as e:
-            logger.error(f"Error retrieving database: {str(e)}")
+        except Exception:
+            logger.exception("Error retrieving dataset")
             return Response(
-                {'success': False, 'message': str(e)},
+                {'success': False, 'message': 'Dataset lookup failed.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
@@ -1042,10 +1094,17 @@ class DatabaseDetailView(APIView):
             return Response({'success': False, 'message': 'Workspace scope is required.'}, status=400)
         
         try:
-            database = Database.objects.get(manager=manager_id, workspace_id=workspace_id)
+            database = _manager_dataset(request, manager_id, workspace_id)
+            if database is None:
+                raise Database.DoesNotExist
             
             # Cleanup ClickHouse and other resources
             cleanup_results = cleanup_database(database)
+            if cleanup_results['errors']:
+                return Response(
+                    {'success': False, 'message': 'Dataset cleanup could not complete.'},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
             
             # Delete database record
             database.delete()
@@ -1055,7 +1114,7 @@ class DatabaseDetailView(APIView):
             return Response({
                 'success': True,
                 'message': 'Database deleted successfully',
-                'cleanup_results': cleanup_results
+                'cleanup_results': {'clickhouse_dropped': cleanup_results['clickhouse_dropped']}
             }, status=status.HTTP_200_OK)
             
         except Database.DoesNotExist:
@@ -1063,10 +1122,10 @@ class DatabaseDetailView(APIView):
                 {'success': False, 'message': 'No database found to delete'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        except Exception as e:
-            logger.error(f"Error deleting database: {str(e)}")
+        except Exception:
+            logger.exception("Error deleting dataset")
             return Response(
-                {'success': False, 'message': str(e)},
+                {'success': False, 'message': 'Dataset deletion failed.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -1097,7 +1156,9 @@ class DatabasePreviewView(APIView):
             return Response({'success': False, 'message': 'Workspace scope is required.'}, status=400)
         
         try:
-            database = Database.objects.get(manager=manager_id, workspace_id=workspace_id)
+            database = _manager_dataset(request, manager_id, workspace_id)
+            if database is None:
+                raise Database.DoesNotExist
             
             # Check if ETL processing is complete
             if database.etl_status != 'completed':
@@ -1112,9 +1173,9 @@ class DatabasePreviewView(APIView):
                     database,
                     request.query_params.get("table") or request.query_params.get("table_id"),
                 )
-            except (KeyError, ValueError) as exc:
+            except (KeyError, ValueError):
                 return Response(
-                    {"success": False, "error": {"code": "TABLE_NOT_FOUND", "message": str(exc)}},
+                    {"success": False, "error": {"code": "TABLE_NOT_FOUND", "message": "The selected logical table is unavailable."}},
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
@@ -1131,7 +1192,6 @@ class DatabasePreviewView(APIView):
                 return Response({
                     'success': False,
                     'message': 'Failed to retrieve schema from ClickHouse',
-                    'error': schema_result.get('error')
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # Get preview rows
@@ -1145,7 +1205,6 @@ class DatabasePreviewView(APIView):
                 return Response({
                     'success': False,
                     'message': 'Failed to retrieve preview data from ClickHouse',
-                    'error': preview_result.get('error')
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # Format response
@@ -1181,10 +1240,10 @@ class DatabasePreviewView(APIView):
                 {'success': False, 'message': 'No database found'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        except Exception as e:
-            logger.error(f"Error getting database preview: {str(e)}")
+        except Exception:
+            logger.exception("Error getting database preview")
             return Response(
-                {'success': False, 'message': str(e)},
+                {'success': False, 'message': 'Database preview failed.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -1207,7 +1266,9 @@ class DatabaseSchemaView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
         try:
-            database = Database.objects.get(manager=manager_id, workspace_id=workspace_id)
+            database = _manager_dataset(request, manager_id, workspace_id)
+            if database is None:
+                raise Database.DoesNotExist
             if database.etl_status != 'completed':
                 return Response(
                     {'success': False, 'message': 'Database processing is not complete.', 'etl_status': database.etl_status},
@@ -1242,9 +1303,9 @@ class DatabaseSchemaView(APIView):
             })
         except Database.DoesNotExist:
             return Response({'success': False, 'message': 'No database found'}, status=status.HTTP_404_NOT_FOUND)
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError):
             return Response(
-                {"success": False, "error": {"code": "TABLE_NOT_FOUND", "message": str(exc)}},
+                {"success": False, "error": {"code": "TABLE_NOT_FOUND", "message": "The selected logical table is unavailable."}},
                 status=status.HTTP_404_NOT_FOUND,
             )
         except Exception:
