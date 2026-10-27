@@ -1,84 +1,40 @@
-# BIAVORA Production-Readiness Audit and Canonical Reference
+# BIAVORA canonical release blueprint
 
-> **Reference Version:** 2.0  
-> **Status:** APPROVED_FOR_IMPLEMENTATION_PLANNING  
-> **Target:** Production Deployable in 14 Weeks
+Revision 3 / 2026-10-27. **Target: 10 January 2027. Current production decision: NO-GO.**
+Foundation-A/B are CLOSED within their recorded scope. **Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.** Previous remote run: **FAILED** (owner-reported Auth production environment and Security Regression dependency conflict). Fix implemented locally; new remote verification: **PENDING_PUSH_AND_RUN**. No repaired remote GREEN is claimed.
 
-Audit/reconciliation date: 2026-10-13  
-Repository: `BI-Voice-Agent` / BIAVORA  
-Branch/revision inspected: `main` at `0b9ee0b`  
-Mode: documentation and architecture reconciliation only
+## Start here and precedence
 
-BIAVORA is **not production-ready today**. The current recommendation is **NO-GO**. Reconciled whole-platform production readiness is **36%**. Week-14 product scope is **24% implemented** and **18% production-ready** today; its release target index is **83% plus all hard gates**. The target is a real publicly deployable SaaS, not an academic demonstration.
+Read [34 — Master context](34_BIAVORA_MASTER_CONTEXT_FOR_FUTURE_PROMPTS.md) before implementation.
+Authority: **43 scope/calendar → 34 context → current architecture/rules/security and accepted ADRs → 20 debt → applicable Foundation evidence → historical reports**. Planning never overrides observed facts. Next implementation phase: Foundation-D — PostgreSQL CDC, after current required CI GREEN and preserved local A/B/C boundaries. External C proof is CAP-14, due before public release. See 49; no staging provisioning first.
 
-No application source, executable configuration, test, migration, dependency, infrastructure file, commit, or remote branch was changed by v2. The existing TimesFM working-tree state was preserved.
-
-## Start here
-
-Every future BIAVORA task must first read:
-
-**`34_BIAVORA_MASTER_CONTEXT_FOR_FUTURE_PROMPTS.md`**
-
-Then read the task-relevant canonical documents below. When a v1 evidence file and a canonical v2 decision differ, runtime evidence remains factual, but the canonical v2 decision controls implementation planning.
-
-## CANONICAL REFERENCE DOCUMENTS
-
-| File | Authority |
+| Current document | Purpose |
 |---|---|
-| `29_CANONICAL_PRODUCT_SCOPE.md` | **CANONICAL** — exact Week-14 product, support modes, exclusions |
-| `30_CANONICAL_ARCHITECTURE_RULES.md` | **CANONICAL** — mandatory MUST/SHOULD/MUST NOT rules |
-| `31_CANONICAL_SERVICE_OWNERSHIP_MAP.md` | **CANONICAL** — domain vs deployment ownership |
-| `32_CANONICAL_AI_ARCHITECTURE.md` | **CANONICAL** — AI flow, tools, permissions, provider/evaluation/usage |
-| `33_PRODUCTION_SECURITY_BASELINE.md` | **CANONICAL** — staged public-SaaS security controls |
-| `34_BIAVORA_MASTER_CONTEXT_FOR_FUTURE_PROMPTS.md` | **PRIMARY CANONICAL ENTRYPOINT** |
-| `25_14_WEEK_IMPLEMENTATION_ROADMAP.md` | **CANONICAL EXECUTION SEQUENCE** — two-person weekly plan and gates |
-| `26_MASTER_REFACTOR_BUILD_DELETE_PLAN.md` | **CANONICAL IMPLEMENTATION MAP** |
-| `20_TECHNICAL_DEBT_AND_PROBLEM_REGISTER.md` | **CANONICAL REGISTER + EVIDENCE INDEX** |
-| `23_FEATURE_READINESS_MATRIX.md` | **CANONICAL READINESS MODEL** |
-| `22_TARGET_ARCHITECTURE.md` | **CANONICAL WEEK-14 ARCHITECTURE** |
-| `27_FINAL_AUDIT_RESULTS.json` | **CANONICAL MACHINE-READABLE RESULT** |
-| `28_AUDIT_RECONCILIATION_CHANGELOG.md` | **CANONICAL CHANGE TRACE** |
-| `35_REFERENCE_CONSISTENCY_REPORT.md` | **CANONICAL VALIDATION RECORD** |
+| [43 — Product scope and release roadmap](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md) | Exact 14 capabilities, engine matrix, exclusions, P0/P1/P2, phases, dependencies and launch gates |
+| [44 — Presentation architecture](44_AI_PRESENTATION_AND_EXECUTIVE_REPORT_ARCHITECTURE.md) | Internal analysis/evidence, provider-neutral spec, egress, approval, artifacts, factuality, tests and rollout |
+| [45 — Release traceability](45_BIAVORA_RELEASE_TRACEABILITY_MATRIX.md) | Every capability's owner, current state, dependencies, tests and deployment proof |
+| [46 — ADR-023](46_ADR_023_PRESENTATION_OWNERSHIP_AND_PROVIDER_ABSTRACTION.md) | New Presentation domain in Report deployment; legacy Voice ownership preserved |
+| [49 — Local closure and CI repair](49_FOUNDATION_C_LOCAL_CLOSURE_AND_CI_REPAIR_REPORT.md) | Current local closure decision, CI fixes/results and deferred deployment gates |
+| [47 — Historical reconciliation report](47_SCOPE_ARCHITECTURE_RECONCILIATION_REPORT.md) | Repository baseline, changes, conflicts, risks and validation |
+| [48 — Inventory and retained references](48_DOCUMENTATION_INVENTORY_AND_SCOPE_REFERENCES.md) | Document classification, review coverage and every old-scope match |
+| [20 — Debt register](20_TECHNICAL_DEBT_AND_PROBLEM_REGISTER.md) | Stable BIA IDs, scoped closures, residual launch risks |
+| [22 — Target architecture](22_TARGET_ARCHITECTURE.md) | System/owner/analytical/CDC/MCP diagrams and implementation gaps |
+| [23 — Readiness entrypoint](23_FEATURE_READINESS_MATRIX.md) | Redirect to evidence-based capability matrix; historical scores retired |
+| [24 — ADR register](24_ARCHITECTURE_DECISION_RECORDS_NEEDED.md) | Required/deferred decisions, including ADR-023 |
+| [25 — Roadmap entrypoint](25_14_WEEK_IMPLEMENTATION_ROADMAP.md) | Legacy filename retained; dated roadmap in 43 supersedes rolling weeks |
+| [26 — Implementation map](26_MASTER_REFACTOR_BUILD_DELETE_PLAN.md) | Stable MAP IDs, sequencing, maintained controls and deferred cleanup |
+| [29 — Product scope entrypoint](29_CANONICAL_PRODUCT_SCOPE.md) | Approved scope/exclusions; details in 43 |
+| [30 — Architecture rules](30_CANONICAL_ARCHITECTURE_RULES.md) | Mandatory ownership, Query, jobs, AI, security and release rules |
+| [31 — Ownership map](31_CANONICAL_SERVICE_OWNERSHIP_MAP.md) | Actual owners versus intended domain placement |
+| [32 — AI architecture](32_CANONICAL_AI_ARCHITECTURE.md) | Single governed Analyst, Semantic/Trust/tools/evaluation/provider facade |
+| [33 — Security baseline](33_PRODUCTION_SECURITY_BASELINE.md) | Current hard gates, egress/approval/artifact and operating security |
 
-## Evidence and supporting plans
+## Historical evidence and superseded plans
 
-| File | Classification |
-|---|---|
-| `00_EXECUTIVE_SUMMARY.md` | Reconciled summary |
-| `01_REPOSITORY_INVENTORY.md` | Evidence |
-| `02_CURRENT_SYSTEM_ARCHITECTURE.md` | Evidence of current state |
-| `03_SERVICE_OWNERSHIP_AND_MICROSERVICES_AUDIT.md` | Evidence + v2 alignment note |
-| `04_SERVICE_COMMUNICATION_AUDIT.md` | Evidence; canonical HTTP/event rule is in `30` |
-| `05_DATABASE_AND_DATA_OWNERSHIP_AUDIT.md` | Evidence + v2 logical-ownership correction |
-| `06_ETL_MULTI_DB_AND_CDC_READINESS.md` | Evidence + v2 feature/certification correction |
-| `07_AI_SYSTEM_DEEP_AUDIT.md` | Evidence + v2 AI alignment |
-| `08_AI_EVALUATION_AND_TEST_STRATEGY.md` | Supporting plan; evaluation starts Week 1 |
-| `09_SEMANTIC_LAYER_AND_MODELING_AGENT_PLAN.md` | Supporting plan aligned to canonical semantic lifecycle |
-| `10_RAG_AND_KNOWLEDGE_ARCHITECTURE.md` | Supporting plan aligned to canonical Knowledge plane |
-| `11_AGENTIC_ARCHITECTURE.md` | Supporting plan aligned to one orchestrator |
-| `12_TRUST_EXPLAINABILITY_AND_GOVERNANCE.md` | Supporting platform contract |
-| `13_MCP_ACTIONS_AND_APPROVAL_ARCHITECTURE.md` | Supporting approval/action plan |
-| `14_SUBSCRIPTION_METERING_REDESIGN.md` | Supporting separated entitlement/metering/billing/payment plan |
-| `15_SECURITY_AUDIT.md` | Evidence + staged remediation; normative baseline is `33` |
-| `16_PRODUCTION_READINESS_AND_SRE_AUDIT.md` | Reconciled readiness + Production Definition of Done |
-| `17_TESTING_QA_AND_RELEASE_STRATEGY.md` | Evidence + v2 release additions |
-| `18_FRONTEND_PRODUCT_AUDIT.md` | Evidence |
-| `19_DEAD_CODE_AND_DELETION_CANDIDATES.md` | Evidence only; deletion requires `26` gates |
-| `21_DESIGN_PATTERNS_RECOMMENDATIONS.md` | Supporting recommendations; canonical rules control |
-| `24_ARCHITECTURE_DECISION_RECORDS_NEEDED.md` | ADR backlog constrained by v2 decisions |
+Reports **36–42** remain unchanged evidence; 42 records the historical C6 assessment, while 49 records the current local-closure decision. Reports **00–07, 15–19, 27 JSON, 28, 35 and 47** remain historical snapshots, not today's scope, percentages or release checklist. In particular **27_FINAL_AUDIT_RESULTS.json is historical**, not a current machine-readable production result. Their original claims are qualified by their date and scope.
 
-## Reconciliation headline
+Supporting plans **08–14 and 21** and the earlier `docs/audit` planning documents are explicitly marked superseded. Their retained bodies explain earlier design thinking; they cannot add January requirements. Remediation/P1/P1-R and ETL implementation reports remain evidence of the specific tests/features recorded, not full launch certification. Operational reference docs still require revalidation against deployed topology. See 48 for the file-by-file inventory.
 
-- Defects: **4 BLOCKER, 7 CRITICAL, 13 HIGH, 10 MEDIUM, 2 LOW = 36**.
-- Planned-feature entries: **6** (`BIA-012`, `022`, `023`, `024`, `025`, `033`).
-- Priorities across 42 tracked IDs: **P0 9, P1 21, P2 8, P3 4**.
-- Invalid/removed findings: **0**. New issue IDs: **0**.
-- AI production readiness: **32%**. Security readiness: **31%**. Ownership/microservice readiness: **35%**.
+**Structured & Unstructured RAG, Proactive Monitoring Agent, and Arabic & Voice Support expansion are OUT OF JANUARY 10 RELEASE SCOPE.** Existing code, Voice functionality and security regressions remain maintained. Infrastructure monitoring/alerts remain mandatory.
 
-## Frozen decisions
-
-Query is sole analytical authority; logical data ownership precedes physical separation; HTTP is control plane and Kafka/events are data/event plane; Integration is a logical domain before a deployment; direct secure Internet transport is first; PostgreSQL CDC is first; long work is durable; one governed Analyst Orchestrator uses typed tools and an internal provider facade; Semantic is foundational; structured facts use Query while unstructured knowledge uses permissioned pgvector RAG; actions require policy/human approval/isolated execution; Entitlements/Metering/Billing/Payments are separate; managed production infrastructure is preferred and Kubernetes is not mandatory.
-
-## Release truth
-
-The plan is approved for implementation planning. It does **not** claim the system is production-ready. Only a passing `PRODUCTION_GATE` with the evidence in `16` and `33` authorizes public release.
+Query is the sole analytical authority. HTTP remains control plane; Kafka remains asynchronous data/event plane. PresentationProvider has SlidesGPTProvider and GammaProvider adapters, independent of MCP/REST transport. BIAVORA computes facts/evidence/storyline; vendors render. A future implementation must use 43/45 gates and may not infer readiness from an old GREEN, filename, class, or dependency.

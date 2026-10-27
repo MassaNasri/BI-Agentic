@@ -1,3 +1,5 @@
+> **SUPERSEDED SUPPORTING PLAN — 2026-10-27.** The body below preserves prior design context, not January commitments. Product Scope revision dated 2026-10-27 in [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md), current architecture 22/30–34, and presentation 44/46 control. Structured & Unstructured RAG, Proactive Monitoring Agent and Arabic & Voice Support expansion are OUT OF JANUARY 10 RELEASE SCOPE; do not implement their old milestones. Existing functionality/security remains maintained.
+
 # AI evaluation and test strategy
 
 > **v2 scheduling decision:** Evaluation begins in **Week 1**, in parallel with platform work. The first gate requires a versioned English/Arabic voice, intent, schema-resolution, text-to-SQL, safety, and provider-contract corpus plus prompt/model registry. Every later semantic, RAG, agent, forecast, What-if, and MCP capability must add cases before its feature gate and must pass the production release thresholds defined below.

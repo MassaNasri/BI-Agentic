@@ -1,115 +1,77 @@
-# BIAVORA Master Context for Future Prompts
+# BIAVORA master context for future prompts
 
-> **Reference Version:** 2.0  
-> **Status:** APPROVED_FOR_IMPLEMENTATION_PLANNING  
-> **Target:** Production Deployable in 14 Weeks
+Revision 3.1 · Product Scope revision **2026-10-27** · Public launch target **10 January 2027**.
+Read this first, then [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md), [45](45_BIAVORA_RELEASE_TRACEABILITY_MATRIX.md) and the task-relevant architecture/evidence. This is a production SaaS plan, not a demo. **Production NO-GO today.**
 
-## CURRENT VERIFIED BASELINE
+## Authority and current state
 
-BIAVORA is a Docker Compose development/pre-production system with ten Django business services, six ETL applications, event-driven Kafka ETL, ClickHouse analytics, voice/text AI, Metabase-backed reporting, and a substantial deterministic test suite. Strong assets include P1-R multi-engine snapshot ingestion, CSV, connector registry, multi-table datasets, Kafka ETL, ClickHouse loading, workspace checks, SQL parsing, SSRF/TLS/credential redaction work, CI/migration/security gates, AI tests, frontend tests/build, and image builds. Foundation-A adds logical dataset-bound Query authorization, exact table allowlisting, fail-closed Voice routing, and live-verified bounded Query resource controls. Foundation-B contains production payment simulation and closes the historical development credential incident by owner attestation plus current-tree verification. Public CSV/XLSX/SQLite and Voice-to-AI uploads, scanner fail-closed behavior, tenant isolation, private-path redaction, bounded SQLite queue/retention, and cleanup pass live verification.
+Precedence: 43 scope/calendar → this context → 22/30/31/32/33 and accepted ADRs → 20 register → latest applicable Foundation reports → historical reports. 44/46 govern presentation detail; 45 traces scope. Later plans supersede commitments, never facts. Old Week-14 plans and readiness percentages are historical; [48](48_DOCUMENTATION_INVENTORY_AND_SCOPE_REFERENCES.md) classifies retained references.
 
-It is **NO-GO for public production today**. The last reconciled whole-platform production readiness remains **36%**; Week-14 scope remains **24% implemented / 18% production-ready** pending a new full reconciliation. Foundation-A is GREEN: BIA-001, BIA-002, and BIA-010 are closed with automated and live ClickHouse/PostgreSQL evidence. Foundation-B is GREEN: BIA-003 payment containment, BIA-006 secrets, and BIA-011 uploads are closed with live/security/regression evidence. Other critical blockers include shared critical DB roles/schema, unsafe source/credential lifecycle, unwired durable job skeleton, development runtime, fragmented AI providers, and broad AI schema access.
+Original scope-reconciliation baseline: `foundation-c-staging`, `9ed2439512179b032736c6f1917521fb7c0dce71`, only pre-existing dirty TimesFM at that earlier entry. The CI-repair entry already includes the unstaged scope reconciliation; see 49. Preserve user work and never stage/reset/clean/edit/commit `services/ai-service/forecasting/timesfm`. The prior scope reconciliation is preserved; the current run repairs CI/test fixtures and updates sequencing only. No commit/push or Foundation-D implementation.
 
-## FINAL WEEK-14 TARGET
+- Foundation-A: CLOSED / scoped GREEN, BIA-001/002/010, report 36.
+- Foundation-B: CLOSED / scoped GREEN, BIA-003/006/011, report 37. Payment containment is not a real paid checkout.
+- **Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.**
+- BIA-005/014/030 and BIA-018 DNS local defects remain CLOSED. BIA-008 implementation is LOCAL ENGINEERING COMPLETE, but the issue remains technically PARTIAL until deployment proof; that proof is DEFERRED_TO_PRODUCTION_READINESS under CAP-14.
+- Managed external secret store/KMS, deployed workload identities and real identity rotation, stable controlled public egress, customer-like PostgreSQL TLS verify-full and allowlist proof, combined full public production-policy ETL, deployed Kafka v1 backlog/drain attestation, and deployment cutover/rollback proof remain mandatory under CAP-14 before public GO. Previous remote run: **FAILED** (owner-reported Auth production environment and Security Regression dependency conflict). Fix implemented locally; new remote verification: **PENDING_PUSH_AND_RUN**. No repaired remote GREEN is claimed.
+- Kafka v1 is TRANSITIONAL: production producer cutoff in code, reader default OFF with bounded replay; actual deployed backlog unknown.
+- BIA-009 jobs skeleton is unwired/broken; active Voice/AI is request-bound. BIA-019/020/021 provider fragmentation/false-success/schema access, metering and production runtime/operations remain open.
 
-A publicly deployable multi-tenant SaaS for real organizations: certified PostgreSQL snapshot+CDC; honest snapshot modes for other engines; governed Semantic Layer and Modeling Agent; one Analyst Orchestrator; hybrid permissioned RAG; Trust evidence; Arabic/Voice; constrained reliability/proactive/What-if; one useful approval-gated action; early and release-gated AI evaluation; resource-aware metering; real hosted payment when paid launch is enabled; enforceable ownership; production runtime/staging/security/observability/backups/recovery/CI-CD/rollback/support.
+## Final scope
 
-Release requires `FOUNDATION_GATE -> CDC_GATE -> SEMANTIC_GATE -> AI_AGENT_GATE -> SECURITY_GATE -> STAGING_GATE -> PRODUCTION_GATE`. A deadline never waives a gate.
+1. Foundation / Production Hardening.
+2. Multi-Database Integration.
+3. PostgreSQL CDC.
+4. Semantic Layer & Metrics.
+5. Semantic Modeling Agent.
+6. Analyst Agent.
+7. Trust & Explainability.
+8. Data Reliability Agent — Limited.
+9. MCP Actions with Human Approval — Limited.
+10. What-if Analysis.
+11. AI Presentation & Executive Report Generation.
+12. AI Evaluation & Security Testing.
+13. Quota / Metering evolution.
+14. Production Deployment / Operations Readiness.
 
-## CANONICAL ARCHITECTURAL DECISIONS
+**OUT OF JANUARY 10 RELEASE SCOPE:** Structured & Unstructured RAG; Proactive Monitoring Agent; Arabic & Voice Support expansion. Preserve existing voice, language behavior, security fixes and tests. No new Knowledge/vector service, dialect/RTL milestone or proactive business-investigation loop. Operational alerts remain required.
 
-1. Logical domain/data ownership comes before physical separation; one managed PostgreSQL cluster is allowed with owner schemas/databases and roles.
-2. HTTP/REST is the control plane; Kafka/events are the data and long-running event plane.
-3. Query is the sole authorized product analytical execution boundary.
-4. Integration/Data Source is a logical domain initially co-deployed as an isolated Query control-plane module/schema; connector workers remain Data Platform.
-5. Direct secure Internet/cloud source transport is first; private network/customer agent are future modes behind the same abstraction.
-6. PostgreSQL CDC first via Debezium + Kafka Connect + Kafka + BIAVORA normalizer. Other CDC claims require identical certification.
-7. Long work uses the durable `QUEUED/RUNNING/RETRYING/SUCCEEDED/FAILED/CANCELLED` job contract.
-8. One governed Analyst Orchestrator uses typed tools and an in-process ModelProvider facade; no multi-agent network or provider microservice by default.
-9. Structured facts use Semantic/Query; unstructured knowledge uses PostgreSQL+pgvector RAG with ACLs/citations/deletion.
-10. Entitlements, Metering Ledger, Billing State, and Payment Provider are separate concepts.
-11. Use a managed container platform and managed state where practical; Kubernetes and multi-region are not Week-14 requirements.
+Keep existing seven snapshot adapters plus guarded CSV/XLSX/SQLite import. PostgreSQL is the sole mandatory CDC engine. PostgreSQL direct production requires C external proof; ClickHouse-source is optional after its own proof. MySQL/MariaDB/MSSQL/Oracle direct production remain blocked until pinning plus verified hostname certification. SQLite is a private-file import, not network CDC. Never infer production support from registry or historical non-TLS snapshots.
 
-## SERVICE OWNERSHIP
+## Non-negotiable architecture
 
-Auth owns identity. Workspace owns organizations/membership/roles. Integration owns sources/secrets/TLS/transport/lifecycle. Query owns logical bindings and analytics. Report owns saved reports; Visualization owns chart specs. Voice owns upload/transcription only. AI owns orchestrator/provider/evaluation integration, not data authorization. Semantic owns published business meaning. Knowledge owns document/index lifecycle. Subscription deployment initially hosts separated Entitlement/Metering/Billing/Payment modules. Notification consumes events/read projections. Data Platform owns connector/extractor/transformer/loader/metadata workers. Tool Gateway is the only new mandatory isolated action service.
+Query alone authorizes and executes analytical queries: trusted workspace/actor, logical dataset IDs, exact nonempty table allowlist, read-only resource/time/row/byte/memory/concurrency/cancel policy. AI/Voice/Report/Presentation/Visualization/providers/MCP never gain arbitrary database access. Existing Metabase downstream rendering of Query-authorized definitions is a bounded compatibility path requiring least-privilege/tenant certification, not independent analytical authority.
 
-## QUERY RULE
+Logical ownership precedes physical service/database separation; one managed PostgreSQL cluster with owner schemas/roles is acceptable. HTTP is control plane; Kafka is data/event pipeline. Integration in Query owns DataSource, encrypted/versioned credentials, transport and lifecycle; Query Dataset is separate. A persisted source is not a permanent TCP socket. No reusable customer passwords/ciphertext in new Kafka source events. Direct connections require TLS, DNS revalidation/pinning, SSRF policy, controlled egress and least privilege.
 
-Every analytical request must carry trusted actor/workspace context and logical dataset identity. Query resolves exact authorized physical tables server-side, supplies a non-empty allowlist, enforces read-only time/rows/bytes/memory/concurrency/cancellation/pagination policy, and audits the result. Voice, AI, Report, Visualization, Gateway, and frontend must never hold direct ClickHouse query credentials or fall back to local execution.
+Semantic owns published business definitions. Modeling proposes → validates → explains → human approval → version/publish. One Analyst orchestrator uses authorized typed tools, durable jobs, budgets and evidence; no unrestricted agent. ModelProvider is an internal facade with per-call token/cost/version telemetry. Preserve deterministic compiler/planner and VisualizationSpec.
 
-## DATA SOURCE RULE
+## Ownership and presentation
 
-Integration owns source definition, engine, connection metadata, opaque versioned secret reference, TLS, transport, selected tables, capabilities, snapshot/CDC state, and lifecycle. Multiple sources per workspace are first-class. Replace is stage/test/load/cutover/rollback; never delete the old source before new success. Do not create a new service merely for the noun “Integration.”
+Auth owns identity; Workspace owns membership/roles. Integration owns sources/credentials; Query owns dataset bindings/analytics. Data Platform owns Connector, snapshot/CDC, Transformer/Loader and scoped metadata. Semantic and Analyst are logical AI/control modules with explicit persistence ownership. Voice maintains existing input and legacy saved-report lifecycle. Report is currently a proxy; **new Presentation logical domain is co-deployed in Report** with owned schema/worker and API references to legacy reports. Do not silently activate duplicate report ORM models, move legacy tables, delete Report or create a Presentation microservice. ADR-023 in 46 explains the decision.
 
-## CDC RULE
+BIAVORA analysis → metrics → evidence → charts/narrative → PresentationSpec → egress/policy/approval → PresentationProvider → artifact.
 
-PostgreSQL is mandatory production CDC. Canonical events include version, tenant/workspace/source/dataset/job, idempotency, correlation/trace, time, producer, and classification. Define order/partition, delete/tombstone, schema compatibility, retry/backoff, DLQ/quarantine, replay, retention, lag, and reconciliation. Adapter presence is not certification. MySQL/MariaDB CDC is conditional; MSSQL/Oracle/ClickHouse remain snapshot unless certified; SQLite is snapshot/incremental.
+```text
+PresentationProvider
+├── SlidesGPTProvider
+└── GammaProvider
+```
 
-## TRANSPORT RULE
+MCP-first when suitable, optional official Gamma REST transport; transport independent of analytical domain. Official contracts/auth/export/privacy/cost must be reverified before implementation and certified before enablement. Both adapters/conformance are required; at least one live certified export path is launch-required. No self-built slide/PPTX engine.
 
-Week-14 production uses `DirectSecureInternetTransport`: verified TLS, least-privilege source account, safe DNS/IP/egress policy, timeout/connection bounds, and audit. Source/UI/event/metering models carry a transport discriminator so `PrivateNetworkTransport` and `AgentTransport` can be added later. Production must not depend on localhost, `host.docker.internal`, or a developer LAN.
+Providers receive only minimum approved aggregates, safe labels/assets and sanitized narrative/evidence summaries; never credentials/refs, tokens, internal URLs, physical table names or dumps. Exact approval for policy-controlled egress; explicit create intent can suffice only for policy-preapproved safe creation. January MCP acceptance includes a real approval-required deck path. Unknown remote dispatch must reconcile before retry/failover. Private artifacts require current authorization, safe fetch/validation, retention/deletion and factuality checks.
 
-## AI RULE
+Never invent causes. Distinguish observed facts, contributions, correlation, likely drivers and causal conclusions. Label OBSERVED, FORECAST and SCENARIO; retain metric/data/query/result/method evidence.
 
-All model calls use one internal `ModelProvider` facade with schema-constrained outputs, timeout/bounded retry/fallback/budget/test doubles/versioning. From Week 1, emit provider/model/input-output-cached tokens/latency/cost/fallback/prompt version/workspace/job/outcome. AI receives minimum authorized context through Schema/Semantic tools and executes through Query Tool. It cannot access global ClickHouse, source/payment/action credentials, arbitrary network/filesystem, authorization, entitlement truth, or semantic publication.
+Entitlements, Metering, Billing and Payments stay separate. Tokens, analytical/forecast work, provider credits/cost, presentation/export/actions and maintained voice usage feed an idempotent reserve/commit/release/adjustment ledger. Paid launch is disabled unless real hosted payments and signed reconciled webhooks pass.
 
-## SEMANTIC RULE
+## Order and exact next action
 
-The governed model contains Entity, Metric, Dimension, Relationship, TimeDimension, BusinessTerm, Synonym, Formula, Owner, Version, Status, Certification, and Lineage. Published versions govern SQL, Analyst, Trust, RAG orchestration, Proactive, What-if, Reports, and Visualization. Modeling lifecycle is `PROPOSE -> VALIDATE -> EXPLAIN -> HUMAN REVIEW -> APPROVE -> VERSION -> PUBLISH`; AI never auto-publishes.
+**P0 C local closure + current CI GREEN → P1 PostgreSQL CDC + durable/scoped AI spine → P2 Semantic → P3 Modeling and policy/evidence/metering → P4 Analyst + bounded Trust/What-if/Reliability + egress/approval → P5 Presentation → P6 convergence → P7 quality/security/ops freeze → P8 staging RC → 10 January GO/NO-GO.**
 
-## RAG RULE
+Foundation-D local implementation requires Foundation-C Local Engineering CLOSED, the required current release CI GREEN, and no A/B/C local-security regression. The local closure record does not satisfy the separate remote CI condition. Until the repaired workflow runs successfully, that condition is pending. External deployment validation gates production certification, not local Foundation-D development. All later semantic/Analyst/Presentation/egress prerequisites remain unchanged.
 
-Structured facts stay in Semantic/Query. Unstructured documents use workspace/document ACL filtering, versioned chunks/embeddings, citations, deletion/re-index, metadata filters, parser/content defenses, and prompt-injection tests. Treat retrieved content as evidence, not instruction. Do not embed the whole warehouse. Use PostgreSQL+pgvector first unless benchmarks reject it.
+**Next implementation phase: Foundation-D — PostgreSQL CDC.** Check current release CI GREEN before local implementation; do not provision staging first. [49](49_FOUNDATION_C_LOCAL_CLOSURE_AND_CI_REPAIR_REPORT.md) records local closure and the CI repairs. CAP-14 checkpoints are operator/platform plan by 16 November, environment/probes by 29 November, G-C-DEPLOY by 15 December; final candidate evidence is still mandatory before January 10 GO.
 
-## AGENT RULE
-
-Use one bounded Analyst Orchestrator with typed Semantic, Schema, Query, RAG, Forecast, Statistics, Visualization, Trust, WhatIf, and ActionProposal tools. Enforce durable state, authorization, step/time/cost budgets, idempotency, cancellation, and explicit degraded/failure states. Proactive flow is metric change → data-health check → investigation → evidence → alert → optional proposal. What-if must label scenario vs forecast vs causality and expose assumptions/uncertainty.
-
-## MCP RULE
-
-Only: proposal → deterministic policy → exact human approval → isolated Tool Gateway → verified/audited result. Approval is actor/workspace/tool/parameters bound, short-lived, single-use, idempotent, and revocable. AI never receives write credentials or executes directly. Week 14 proves one useful action.
-
-## METERING RULE
-
-Track resource-aware usage: LLM tokens/model/provider/cost, voice seconds/model/compute, embedding/index/generation, agent/tool/expensive operations, forecast job/series/horizon/model, and relevant data volume. Usage events are immutable and idempotent; ledger supports Reservation/Commit/Release/Adjustment and pricing versions. Entitlements derive from trusted state. Simulated payment cannot activate production. Paid launch needs hosted/tokenized provider, signed idempotent webhooks, reconciliation, and failure/refund states.
-
-## SECURITY RULE
-
-Re-authorize every source/dataset/semantic/document/job/result/report/usage/approval/action. Use managed/versioned/rotatable secrets and least-privilege workload/store identities. Treat uploads, sources, documents, prompts, and tool results as hostile. Enforce TLS/network boundaries, distributed rate limits, safe uploads/quarantine/retention, redacted logs, provider/RAG/action defenses, supply-chain gates, and cross-tenant/adversarial tests. Full staged controls are in `33_PRODUCTION_SECURITY_BASELINE.md`.
-
-## PRODUCTION RULE
-
-Before release: isolated production-like staging; production process servers/workers; non-root immutable scanned images; health/readiness/graceful drain/resources; HTTPS/domain/secrets/network identities; SLOs/logs/metrics/traces/alerts/runbooks/on-call; backups/PITR and successful restore; migration/rollback; load/soak/failure drills; CI/CD digest promotion; production configuration and support. Managed single-region with tested recovery is sufficient. Local Compose is not production.
-
-## CURRENT PHASE
-
-Foundation-A authoritative analytical security-boundary implementation remains `GREEN`. Foundation-B final gate is `GREEN` (2026-10-18): BIA-003, BIA-006, and BIA-011 are closed. Public CSV/XLSX/SQLite/Voice uploads, ClamAV, private cleanup, tenant isolation, bounded SQLite queue timing, payment containment, secret scanning, and maintained regressions pass. Subscription 0003 and Voice 0014 are applied in local PostgreSQL. The configured small Whisper model was provisioned in the mounted runtime cache and the final public Voice upload returned 200. See `37_FOUNDATION_B_EXTERNAL_BOUNDARY_IMPLEMENTATION.md`.
-
-Foundation-C Part 1 (2026-10-19) is `PARTIAL`: Integration/Data Source is now a logical Django domain in the Query deployment, with a persistent workspace-owned UUID source, separate Query dataset binding, multi-source/non-destructive snapshot and upload behavior, source lifecycle APIs, additive ETL source identity, and frontend dataset/source selection. Source/dataset migration passed forward/reverse/reapply in disposable PostgreSQL; Query, Connector, Extractor, Voice, shared security, frontend, static, and Compose checks passed. The full application stack was stopped, so no new live snapshot/restart claim is made. C3 secret references/DirectTransport/staged cutover, C4 live/security gate, and physical owner grants remain. BIA-005/008/014/030 are partial, not closed. See `38_FOUNDATION_C_SERVICE_OWNERSHIP_INTEGRATION_IMPLEMENTATION.md`.
-
-Foundation-C Part 2 / C3 (2026-10-19) remains `PARTIAL`: Integration now has encrypted versioned source credentials, opaque execution refs, an authenticated ciphertext-only Connector/Extractor resolver, v2 Kafka snapshot events without reusable tenant password ciphertext, staged rotation, and tested candidate source cutover/rollback. Direct secure Internet transport revalidates DNS immediately before a pinned connection; PostgreSQL and ClickHouse have production TLS/pinning contracts, while MySQL/MariaDB/MSSQL/Oracle direct production remains blocked pending safe hostname verification. C1/C2 plus C3 migrations passed PostgreSQL forward/reverse/reapply; focused Query, Connector, Extractor, frontend, Foundation-A/B regressions and changed-source secret scan passed. A disposable PostgreSQL source passed real test/discovery/two-row read and denied write in an explicit nonproduction non-TLS profile. The full running Gateway/Kafka/ClickHouse path, production TLS/egress/managed secret identities, engine matrix, and C4 physical owner grants remain. BIA-005/008/014/018/030 remain partial; no Foundation-C GREEN claim. See `39_FOUNDATION_C_CREDENTIAL_TRANSPORT_IMPLEMENTATION.md`.
-
-Foundation-C Part 3 / C4 (2026-10-19) is **PARTIAL**. A disposable full public Gateway → Integration/Query → Connector → Kafka v2 → Extractor → Transformer → Loader → ClickHouse → Query run passed with two PostgreSQL rows and analytical aggregate; restart persisted the source without password resubmission. Bad/good rotation, candidate test/discovery/snapshot/cutover/rollback, revoke, retire and representative cross-workspace denials passed live. Five Kafka v2 events had credential references without synthetic password/ciphertext. Separate disposable PostgreSQL and ClickHouse TLS fixtures passed hostname/CA/insecure-mode denials. Scoped resolver keys, pruning worker, distributed source operation budgets, bounded discovery and safer public responses were added. A reversible physical owner-schema/role prototype passed PostgreSQL foreign-write denial and rollback, but runtime services were not switched to owner roles. Managed secrets/workload identity, production public egress and integrated TLS, exhaustive public/tenant audit and complete remote release gate remain unproved. BIA-014 is CLOSED; BIA-005/008/018/030 remain PARTIAL. No Foundation-C GREEN claim. See `40_FOUNDATION_C_FINAL_ACCEPTANCE_REPORT.md`.
-
-Foundation-C final closure pass (2026-10-19) remains **PARTIAL**. C5 production settings require five dedicated critical-domain PostgreSQL runtime roles, including a separate Integration alias in Query. Disposable fresh migrations, owner apply/reapply, actual service role/schema and foreign-write denial, WSGI readiness, split-role source/credential/dataset flow, identity-sequence preservation and owner rollback passed; the full live Gateway/Kafka/ETL lifecycle under those roles did not run. A protected mounted-secret consumer, versioned credential rewrap/retirement, scoped resolver identity overlap/retirement tests, default-deny bounded Kafka v1 replay, 22-route Query inventory/Workspace B matrix, Gateway 5xx scrub and expanded permanent CI were added. Local maintained suites, frontend, image build, drift and pinned current-source Gitleaks passed. Canonical `33` still requires a managed secret store and separate deployed workload identities; controlled public egress and combined production-policy TLS ETL, exhaustive public/live tenant audit, v1 topic drain and remote CI are unproved. BIA-014 remains CLOSED; BIA-005/008/018/030 remain PARTIAL. **FOUNDATION-C LOCAL CLOSURE = FAIL; RELEASE CANDIDATE = NOT READY; FINAL = PARTIAL; REMOTE CI = PENDING_PUSH.** See `41_FOUNDATION_C_FINAL_CLOSURE_REPORT.md`. No commit/push or Foundation-D work.
-
-Foundation-C C6 hard-gate pass (2026-10-20) is **BLOCKED_EXTERNAL**. An isolated Gateway → Integration/Query → Connector → Kafka v2 → Extractor → Transformer → Loader → ClickHouse → Query lifecycle completed under five actual restricted PostgreSQL roles, including restart, rotation/revocation, replacement/cutover/rollback, source retirement and two-row analytical Query. Fresh production-profile and historical upgrade migrations, live owner rollback/reapply with unchanged rows, sequences and migration history, and role-bound reconnect passed. Registered URL inventory covers 144 routes across ten services; Query's physical SQL echo was replaced with logical source names, Gateway success/error filtering was strengthened, and 24 distinct live foreign-workspace route cases denied or listed empty. Local deterministic gates exercised in report `42` passed, including current-source Gitleaks. BIA-005 and BIA-030 close for their canonical local defects; BIA-018 closes for the DNS-rebinding defect only. BIA-014 stays CLOSED. **BIA-008 remains PARTIAL/BLOCKED_EXTERNAL**, and mandatory Foundation-C managed KMS/secrets manager, distinct deployed workload identities, stable public egress/customer allowlist, combined production-policy verify-full TLS ETL, actual v1 topic drain, and authoritative remote CI remain unproved. The user confirmed there is **no staging infrastructure yet**. **LOCAL ENGINEERING = PASS for exercised gates; RELEASE CANDIDATE = NOT READY; FINAL = BLOCKED_EXTERNAL; REMOTE CI = PENDING_COMMIT_AND_PUSH.** No commit/push or Foundation-D work. See `42_FOUNDATION_C_HARD_GATE_CLOSURE_REPORT.md` for operator requirements.
-
-## CURRENT BLOCKERS
-
-After C6, BIA-005/014/018 (DNS defect)/030 are locally CLOSED, BIA-008 remains PARTIAL/BLOCKED_EXTERNAL, and Kafka v1 remains TRANSITIONAL pending real topic drain evidence. Foundation-C still requires managed identity/key and public egress/full TLS staging proofs plus future remote CI; see `42`. BIA-003, BIA-006, BIA-010, and BIA-011 remain closed. BIA-009 durable jobs is separate future work. See `20`, `28`, `36`–`42` for evidence.
-
-## FEATURES NOT YET IMPLEMENTED
-
-Certified CDC; governed Semantic Layer/Modeling Agent; production evaluation discipline; permissioned RAG; governed Analyst/Proactive/Reliability/What-if; approval Tool Gateway; production-complete Arabic/RTL; resource ledger; real payment provider; production runtime/staging/operating proof. Absence is planned scope, not automatically a defect.
-
-## NON-GOALS
-
-CDC for every engine; one physical server or container per service; unrestricted/multi-agent autonomy; automatic semantic publication; embeddings for all structured data; unapproved writes; causal claims from correlation; raw card/CVV handling; Kubernetes/service mesh/multi-region by default; VPN/customer agent in the core 14 weeks; deleting uncertain code without dependency/runtime/migration proof.
-
-## MANDATORY INSTRUCTION FOR ALL FUTURE AGENTS
-
-Before implementing any BIAVORA task, read:
-`BIAVORA_PRODUCTION_READINESS_AUDIT/34_BIAVORA_MASTER_CONTEXT_FOR_FUTURE_PROMPTS.md`
-and the task-relevant canonical reference documents.
+Each phase needs implementation/review, tests, security, docs, migrations as applicable, telemetry, CI, acceptance/staging proof and rollback. Only immutable-candidate evidence closes release gates. Supported dependencies, production servers/non-root images, backups/restore, migrations/rollback, alerts/runbooks/support, tenant/secret correctness and cost controls are mandatory. A missed checkpoint triggers re-estimation; reduce optional depth before safety and never silently drop a promised launch capability.

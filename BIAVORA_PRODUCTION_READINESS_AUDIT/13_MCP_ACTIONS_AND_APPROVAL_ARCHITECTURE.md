@@ -1,3 +1,5 @@
+> **SUPERSEDED SUPPORTING PLAN — 2026-10-27.** The body below preserves prior design context, not January commitments. Product Scope revision dated 2026-10-27 in [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md), current architecture 22/30–34, and presentation 44/46 control. Structured & Unstructured RAG, Proactive Monitoring Agent and Arabic & Voice Support expansion are OUT OF JANUARY 10 RELEASE SCOPE; do not implement their old milestones. Existing functionality/security remains maintained.
+
 # MCP actions and approval architecture
 
 > **v2 canonical alignment:** MCP/action support is a planned product feature. Week 14 must prove one useful action end-to-end with `PROPOSE -> POLICY VALIDATE -> HUMAN APPROVE -> TOOL GATEWAY EXECUTE -> AUDIT RESULT`. No model receives write credentials or can bypass approval. Expired/replayed approvals and ambiguous parameters must fail closed.

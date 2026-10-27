@@ -38,6 +38,10 @@ jobs:
           python-version: "3.12"
       - name: Python syntax and merge-marker gate
         run: python scripts/p0c_static_check.py
+      - name: Release workflow contract
+        run: |
+          python -m pip install PyYAML==6.0.2
+          python scripts/verify_release_workflow.py
       - name: POSIX script syntax
         run: bash -n scripts/test.sh scripts/check-migration-drift.sh scripts/run-migrations.sh scripts/start_project.sh
       - name: Compose configuration
@@ -189,6 +193,10 @@ jobs:
   security-regression:
     needs: [backend-and-ai, etl]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [query, visualization, voice, auth, workspace, etl]
     services:
       visualization-postgres:
         image: postgres:16-alpine
@@ -209,36 +217,20 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install security regression dependencies
+      # Each matrix runner has one service dependency domain. Voice Kafka 2.0.2
+      # and ETL Kafka 2.3.0 must never be resolved in one interpreter.
+      - name: Install service-native security dependencies
         run: |
-          python -m pip install --upgrade pip "setuptools<81" wheel
-          pip install -r services/query-service/requirements.txt -r services/visualization-service/requirements.txt -r services/voice-service/requirements.txt -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r etl-final/shared/requirements.txt pytest
-      - name: Query security regression
-        working-directory: services/query-service
-        run: python -m pytest tests/test_clickhouse_credential_redaction.py tests/test_ingestion_callback_security.py tests/test_security_configuration.py -q
-      - name: Visualization security regression
-        working-directory: services/visualization-service
+          python -m pip install --upgrade pip 'setuptools<81' wheel
+          python scripts/run_security_regression.py ${{ matrix.suite }} --install
+      - name: Run every security check for this service
         env:
           DB_NAME: visualization_ci
           DB_USER: visualization_ci
           DB_PASSWORD: visualization_ci_test_password
           DB_HOST: 127.0.0.1
-          DB_PORT: "5432"
-        run: python -m pytest visualization_api/tests/test_security_ownership_and_query_reference.py -q
-      - name: Voice security regression
-        working-directory: services/voice-service
-        run: python -m pytest voice_reports/tests_security_workspace_authorization.py -q
-      - name: Invitation security regression
-        run: |
-          (cd services/auth-service && python manage.py test users.tests_security_invitation --verbosity 1)
-          (cd services/workspace-service && python manage.py test workspace.tests_security_invitation --verbosity 1)
-      - name: ETL security regression
-        env:
-          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/etl-final
-        run: python -m pytest etl-final/shared/security/test_security_controls.py -q
-      - name: Foundation-C public route and response contract
-        working-directory: services/query-service
-        run: python manage.py test integration.test_public_boundary --settings=service_config.sqlite_test_settings --verbosity 1
+          DB_PORT: '5432'
+        run: python scripts/run_security_regression.py ${{ matrix.suite }}
 
   migration-drift:
     runs-on: ubuntu-latest
@@ -304,8 +296,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip "setuptools<81" wheel
           pip install -r services/auth-service/requirements.txt -r services/workspace-service/requirements.txt -r services/subscription-service/requirements.txt -r services/query-service/requirements.txt
+      - name: Production owner environment acceptance and rejection tests
+        run: python -m pytest tests/test_owner_boundary_environment.py -q
       - name: Migrate, apply ownership, and prove actual Django service logins
         env:
+          APP_ENV: production
+          DEBUG: 'false'
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          CORS_ALLOWED_ORIGINS: ''
+          DJANGO_CORS_ALLOWED_ORIGINS: ''
           BIAVORA_C4_ALLOW_OWNER_MIGRATION: "1"
           BIAVORA_C5_DISPOSABLE: "1"
           DB_HOST: 127.0.0.1

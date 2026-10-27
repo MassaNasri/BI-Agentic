@@ -1,61 +1,61 @@
 # 20 — Reconciled Technical Debt, Risk, and Feature Register
 
-> **Reference Version:** 2.0  
+> **Reference Version:** 3.1 / 2026-10-27
 > **Status:** APPROVED_FOR_IMPLEMENTATION_PLANNING  
-> **Target:** Production Deployable in 14 Weeks
+> **Target:** Public launch 10 January 2027; evidence-gated
 
 ## Classification rules
 
-Severity describes present harm; priority describes dependency order. `P0` is reserved for a verified security, tenant-isolation, data-integrity, architecture-safety, production-critical reliability, or financial-integrity defect that must close before dependent feature work. `P1` is foundation work that can proceed in the first implementation waves. A planned capability that is absent is `FEATURE`, not a defect severity. Original IDs remain stable.
+Severity describes present harm; priority describes dependency order. `P0` is reserved for a verified security, tenant-isolation, data-integrity, architecture-safety, production-critical reliability, or financial-integrity defect that must close before dependent feature work. `P1` is foundation work that can proceed in the first implementation waves. A planned capability that is absent is `FEATURE`, not a defect severity. Original IDs remain stable. Current release priorities are P0 release blocker, P1 required launch capability, P2 optional depth; dated closure evidence below is retained. The current dates/gates are in 43/45; old W-targets are superseded. Deployment-only evidence remains P0 for launch, not a prerequisite to isolated local development under the owner decision in 49.
 
-Reconciled defect counts: **4 BLOCKER, 7 CRITICAL, 13 HIGH, 10 MEDIUM, 2 LOW = 36 defects**. Planned-feature entries: **6**. Total tracked entries: **42**. Priority counts across all entries: **P0 9, P1 21, P2 8, P3 4, POST_LAUNCH 0**.
+Historical v2 classification counts (not current open-debt totals): **4 BLOCKER, 7 CRITICAL, 13 HIGH, 10 MEDIUM, 2 LOW = 36 defects**. Planned-feature entries: **6**. Total tracked entries: **42**. Historical v2 priority counts across original entries: **P0 9, P1 21, P2 8, P3 4, POST_LAUNCH 0**.
 
 ## Authoritative register
 
 | ID | Kind / severity | Priority | Decision | Finding or capability | Owner / target |
 |---|---|---|---|---|---|
-| BIA-001 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-14) | Query requires a logical dataset and enforces its exact server-resolved non-empty table set | SE+BOTH / W1 |
-| BIA-002 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-14) | Voice fails closed through Query; local product-data ClickHouse execution capability was removed | SE / W1 |
-| BIA-003 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-15) | Production activation is disabled; sandbox is test/development only, with server-owned state and idempotency | SE / W1 + W11 |
-| BIA-004 | DEFECT / BLOCKER | P1 | RECLASSIFY priority | Compose and development servers are not a production runtime | SE / W10–13 |
-| BIA-005 | DEFECT / CRITICAL | P0 | CLOSED locally (2026-10-20) | Critical logical owner schemas/roles, denied foreign writes and reversible migrations proved in C6 | SE / W1–3 |
-| BIA-006 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-18) | Owner attests historical values were development-only and revoked/replaced; current-tree scan, startup validation, and redaction pass | SE / W1 |
-| BIA-007 | DEFECT / CRITICAL | P1 | RECLASSIFY priority | Kafka, Redis, ClickHouse need production identity/TLS boundaries | SE / W2–10 |
-| BIA-008 | DEFECT / CRITICAL | P0 | PARTIAL / BLOCKED_EXTERNAL (2026-10-20) | Local lifecycle passes; canonical managed store and deployed distinct workload identities require staging | SE / W1–3 |
-| BIA-009 | DEFECT / CRITICAL | P0 | RECLASSIFY evidence | Durable job model exists as an unwired/broken skeleton; active flows remain non-durable | BOTH / W2–3 |
-| BIA-010 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-14) | Live ClickHouse bounds/cancellation and real PostgreSQL multi-worker admission/recovery are verified | SE / W1–2 |
-| BIA-011 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-18) | Live CSV/XLSX/SQLite/audio, ClamAV, tenant isolation, private-path redaction, bounded TTL, and cleanup pass | SE / W1-W2 |
-| BIA-012 | FEATURE | P1 | CONVERT_TO_FEATURE | PostgreSQL-first continuous CDC foundation | SE / W3–6 |
-| BIA-013 | DEFECT / HIGH | P1 | KEEP_AS_IS | Report service is a proxy over Voice plus an unwired duplicate | SE / W2–4 |
-| BIA-014 | DEFECT / HIGH | P1 | CLOSED (2026-10-19) | Source model permits one source per manager and destructive replacement | SE / W2–4 |
-| BIA-015 | DEFECT / HIGH | P1 | KEEP_AS_IS | Gateway rate limiting is process-local; proxy timeout/capacity policy is unsafe | SE / W2, W10 |
-| BIA-016 | DEFECT / HIGH | P1 | RECLASSIFY evidence | Invalid Kafka schema records can become poison records without DLQ/terminal policy | SE / W3–5 |
-| BIA-017 | DEFECT / HIGH | P1 | KEEP_AS_IS | Legacy metadata projection drops workspace/dataset/job scope from stored status | SE / W3–5 |
-| BIA-018 | DEFECT / HIGH | P1 | CLOSED DNS defect (2026-10-20) | Pre-connect revalidation/pinning passes; public TLS/egress acceptance remains a separate Foundation-C gate | SE / W2–3 |
-| BIA-019 | DEFECT / HIGH | P1 | KEEP_AS_IS | LLM/provider calls are fragmented and lack common policy/telemetry | AI / W1–2 |
-| BIA-020 | DEFECT / HIGH | P1 | KEEP_AS_IS | AI can report task success while execution status is `pending_integration` | AI+SE / W2–3 |
-| BIA-021 | DEFECT / HIGH | P1 | KEEP_AS_IS | AI directly enumerates broad ClickHouse schema; cache is process-global | AI+SE / W1–3 |
-| BIA-022 | FEATURE | P1 | CONVERT_TO_FEATURE | AI evaluation, prompt/model registry, and release thresholds | AI / starts W1 |
-| BIA-023 | FEATURE | P1 | CONVERT_TO_FEATURE | Governed Semantic Layer | AI+SE / W5–8 |
-| BIA-024 | FEATURE | P1 | CONVERT_TO_FEATURE | Permissioned hybrid RAG/knowledge lifecycle | AI / W7–9 |
-| BIA-025 | FEATURE | P1 | SPLIT within feature | Governed Analyst tools and one approval-gated MCP action | AI+SE / W8–11 |
-| BIA-026 | DEFECT / HIGH | P1 | KEEP_AS_IS | Quota consumes before success and lacks idempotent reservation/commit/release | SE / telemetry W1, ledger W9–11 |
-| BIA-027 | DEFECT / MEDIUM | P2 | DOWNGRADE | Documentation contradicted runtime; v2 canonical set resolves planning ambiguity | BOTH / v2 complete, source docs later |
-| BIA-028 | DEFECT / HIGH | P1 | UPGRADE priority | Metrics assets are not an owned SLO/dashboard/alert operating system | SE / W2 onward |
-| BIA-029 | DEFECT / HIGH | P1 | UPGRADE priority | Release pipeline lacks full supply-chain, real-system, restore, and deployment gates | SE / W10–13 |
-| BIA-030 | DEFECT / MEDIUM | P2 | CLOSED locally (2026-10-20) | Query SQL logicalization, all-service Gateway filter, route inventory and live tenant matrix pass | SE / W3–4 |
-| BIA-031 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | Browser token/CSP posture magnifies XSS impact | SE / W9–11 |
-| BIA-032 | DEFECT / MEDIUM | P3 | KEEP_AS_IS | Frontend monolith and large bundle impede performance/maintenance | AI/FE / W8–12 |
-| BIA-033 | FEATURE | P2 | CONVERT_TO_FEATURE | Production-complete Arabic/RTL/voice experience and evidence | AI/FE / W1 eval, W7–11 product |
-| BIA-034 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | Duplicate HTTP clients and readiness fan-out amplify coupling | SE / W3–8 |
-| BIA-035 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | Report events lack a repository consumer/outbox guarantee | SE / W4–8 |
-| BIA-036 | DEFECT / MEDIUM | P3 | KEEP_AS_IS | Generated engine state and bytecode are tracked | SE / W12 |
-| BIA-037 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | TimesFM capacity and model artifact lifecycle are unverified | AI / W9–12 |
-| BIA-038 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | Broken dead orchestration and duplicate report code obscure runtime truth | BOTH / W3–12 |
-| BIA-039 | DEFECT / HIGH | P1 | UPGRADE | Raw SQL/prompts/traces can expose tenant analytical context in logs | BOTH / W2–4 |
-| BIA-040 | DEFECT / MEDIUM | P1 | UPGRADE priority | Images/dependencies are not reproducibly hardened | SE / W10–12 |
-| BIA-041 | DEFECT / LOW | P3 | KEEP_AS_IS | Datetime deprecation warnings reduce signal | SE / W12 |
-| BIA-042 | DEFECT / LOW | P3 | KEEP_AS_IS | Encoding/debug/TODO residue lowers maintainability | BOTH / W12 |
+| BIA-001 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-14) | Query requires a logical dataset and enforces its exact server-resolved non-empty table set | SE+BOTH / CLOSED / regressions all phases |
+| BIA-002 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-14) | Voice fails closed through Query; local product-data ClickHouse execution capability was removed | SE / CLOSED / regressions all phases |
+| BIA-003 | DEFECT / BLOCKER | P0 | CLOSED (2026-10-15) | Production activation is disabled; sandbox is test/development only, with server-owned state and idempotency | SE / CLOSED containment / paid path conditional |
+| BIA-004 | DEFECT / BLOCKER | P0 | RECLASSIFY priority | Compose and development servers are not a production runtime | SE / P0–P7 / G-Q |
+| BIA-005 | DEFECT / CRITICAL | P0 | CLOSED locally (2026-10-20) | Critical logical owner schemas/roles, denied foreign writes and reversible migrations proved in C6 | SE / CLOSED locally / CAP-14 deployment |
+| BIA-006 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-18) | Owner attests historical values were development-only and revoked/replaced; current-tree scan, startup validation, and redaction pass | SE / CLOSED / regressions |
+| BIA-007 | DEFECT / CRITICAL | P0 | RECLASSIFY priority | Kafka, Redis, ClickHouse need production identity/TLS boundaries | SE / P0–P4 / G-E |
+| BIA-008 | DEFECT / CRITICAL | P0 | PARTIAL; local engineering complete | Deployment evidence DEFERRED_TO_PRODUCTION_READINESS; managed store/deployed identities still unproved | SE / CAP-14 / G-C-DEPLOY by 15 Dec |
+| BIA-009 | DEFECT / CRITICAL | P0 | RECLASSIFY evidence | Durable job model exists as an unwired/broken skeleton; active flows remain non-durable | BOTH / P1 / G-J |
+| BIA-010 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-14) | Live ClickHouse bounds/cancellation and real PostgreSQL multi-worker admission/recovery are verified | SE / CLOSED / regressions |
+| BIA-011 | DEFECT / CRITICAL | P0 | CLOSED (2026-10-18) | Live CSV/XLSX/SQLite/audio, ClamAV, tenant isolation, private-path redaction, bounded TTL, and cleanup pass | SE / CLOSED / regressions |
+| BIA-012 | FEATURE | P1 | CONVERT_TO_FEATURE | PostgreSQL-first continuous CDC foundation | SE / P1 / G-D |
+| BIA-013 | DEFECT / HIGH | P1 | KEEP_AS_IS | Report remains legacy Voice proxy; new Presentation domain in Report per ADR-023; no blanket deletion | SE / P3–P5 / ADR-023 |
+| BIA-014 | DEFECT / HIGH | P1 | CLOSED (2026-10-19) | Multiple sources and non-destructive replacement/cutover/rollback locally verified | SE / CLOSED / source UX bounded |
+| BIA-015 | DEFECT / HIGH | P0 | KEEP_AS_IS | Gateway rate limiting is process-local; proxy timeout/capacity policy is unsafe | SE / P1–P4 / G-E |
+| BIA-016 | DEFECT / HIGH | P0 | RECLASSIFY evidence | Invalid Kafka schema records can become poison records without DLQ/terminal policy | SE / P1 / G-D |
+| BIA-017 | DEFECT / HIGH | P0 | KEEP_AS_IS | Legacy metadata projection drops workspace/dataset/job scope from stored status | SE / P1 / G-D |
+| BIA-018 | DEFECT / HIGH | P1 | CLOSED DNS defect (2026-10-20) | Pre-connect revalidation/pinning passes; public TLS/egress acceptance remains a separate Foundation-C gate | SE / CLOSED DNS / CAP-14 public transport |
+| BIA-019 | DEFECT / HIGH | P0 | KEEP_AS_IS | LLM/provider calls are fragmented and lack common policy/telemetry | AI / P1 / G-J |
+| BIA-020 | DEFECT / HIGH | P0 | KEEP_AS_IS | AI can report task success while execution status is `pending_integration` | AI+SE / P1 / G-J |
+| BIA-021 | DEFECT / HIGH | P0 | KEEP_AS_IS | AI directly enumerates broad ClickHouse schema; cache is process-global | AI+SE / P1 / G-J |
+| BIA-022 | FEATURE | P0 | CONVERT_TO_FEATURE | AI evaluation, prompt/model registry, and release thresholds | AI / P0 onward / G-Q |
+| BIA-023 | FEATURE | P1 | CONVERT_TO_FEATURE | Governed Semantic Layer | AI+SE / P2 / G-S |
+| BIA-024 | FEATURE | POST_LAUNCH | DEFERRED / OUT OF JANUARY SCOPE | Structured & Unstructured RAG — preserved as historical planned feature | AI / POST-LAUNCH / no January allocation |
+| BIA-025 | FEATURE | P1 | SPLIT within feature | Governed Analyst tools and one approval-gated MCP action | AI+SE / P3–P5 / G-A/G-E/G-P |
+| BIA-026 | DEFECT / HIGH | P0 | KEEP_AS_IS | Quota consumes before success and lacks idempotent reservation/commit/release | SE / P1 telemetry, P2–P4 ledger |
+| BIA-027 | DEFECT / MEDIUM | P2 | DOWNGRADE | v3 scope reconciled; runtime/operating evidence still required; historical percentages retired | BOTH / This reconciliation / ongoing checks |
+| BIA-028 | DEFECT / HIGH | P0 | UPGRADE priority | Metrics assets are not an owned SLO/dashboard/alert operating system | SE / P0 onward / G-R |
+| BIA-029 | DEFECT / HIGH | P0 | UPGRADE priority | Release pipeline lacks full supply-chain, real-system, restore, and deployment gates | SE / P0–P8 / G-R |
+| BIA-030 | DEFECT / MEDIUM | P2 | CLOSED locally (2026-10-20) | Query SQL logicalization, all-service Gateway filter, route inventory and live tenant matrix pass | SE / CLOSED / new-route regression |
+| BIA-031 | DEFECT / MEDIUM | P0 | KEEP_AS_IS | Browser token/CSP posture magnifies XSS impact | SE / P2–P4 / security gate |
+| BIA-032 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | Frontend monolith and large bundle impede performance/maintenance | AI / P2 optional depth |
+| BIA-033 | FEATURE | POST_LAUNCH | OUT OF JANUARY SCOPE / maintain existing | Arabic & Voice Support expansion — existing voice security and behavior retained | AI / POST-LAUNCH expansion / maintain existing |
+| BIA-034 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | Duplicate HTTP clients and readiness fan-out amplify coupling | SE / P2–P6 / bounded cleanup |
+| BIA-035 | DEFECT / MEDIUM | P0 | KEEP_AS_IS | Report events lack a repository consumer/outbox guarantee | SE / P1 jobs, P3–P5 lifecycle |
+| BIA-036 | DEFECT / MEDIUM | POST_LAUNCH | KEEP_AS_IS | Generated engine state and bytecode are tracked | SE / POST-LAUNCH / preserve state |
+| BIA-037 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | TimesFM capacity and model artifact lifecycle are unverified | AI / P4 forecast acceptance |
+| BIA-038 | DEFECT / MEDIUM | P2 | KEEP_AS_IS | Broken dead orchestration and duplicate report code obscure runtime truth | BOTH / P1 job repair / later cleanup |
+| BIA-039 | DEFECT / HIGH | P0 | UPGRADE | Raw SQL/prompts/traces can expose tenant analytical context in logs | BOTH / P1–P4 / security gate |
+| BIA-040 | DEFECT / MEDIUM | P0 | UPGRADE priority | Images/dependencies are not reproducibly hardened | SE / P1–P7 / supported runtime |
+| BIA-041 | DEFECT / LOW | P2 | KEEP_AS_IS | Datetime deprecation warnings reduce signal | SE / P2 optional depth |
+| BIA-042 | DEFECT / LOW | P2 | KEEP_AS_IS | Encoding/debug/TODO residue lowers maintainability | BOTH / P2 optional depth |
 
 ## P0 evidence and acceptance
 
@@ -139,6 +139,31 @@ Active Voice views and AI Dagster calls are synchronous. `VoicePipelineJob` and 
 
 ## Feature—not-defect policy
 
-BIA-012, 022, 023, 024, 025, and 033 are required Week-14 capabilities but their absence is not classified as a current defect. Defects that would make those features unsafe remain separately tracked (for example BIA-008/009/019/021/026). This preserves urgency without inflating severity.
+BIA-012/022/023/025 are required January capabilities; BIA-024 and expansion under BIA-033 are outside January scope. Their absence is not a defect. Presentation is a new planned capability under CAP-11; security risks of implementing it are separately tracked below. Defects that would make those features unsafe remain separately tracked (for example BIA-008/009/019/021/026). This preserves urgency without inflating severity.
 
 Detailed v1 evidence remains in repository history and the other audit files. Reconciliation decisions and path-level evidence are indexed in `28_AUDIT_RECONCILIATION_CHANGELOG.md`.
+
+## 2026-10-27 release risk overlay (no unsupported closures)
+
+Foundation-A/B remain scoped GREEN. **Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.** Previous remote run: **FAILED** (owner-reported Auth production environment and Security Regression dependency conflict). Fix implemented locally; new remote verification: **PENDING_PUSH_AND_RUN**. No repaired remote GREEN is claimed. Existing C6 evidence is preserved; newly run validation is recorded in 49. Closing the local phase does not certify missing deployment controls.
+
+| Risk ID | Rank / priority | State and owner | Acceptance / dependency |
+|---|---|---|---|
+| REL-001 | BLOCKER / P0 for production | DEFERRED_TO_PRODUCTION_READINESS; SE | CAP-14/G-C-DEPLOY: managed store/identities/real rotation, stable public egress/verify-full/allowlist/combined ETL, actual v1 drain and deployment cutover/rollback. Separate G-CI current CI prerequisite remains pending push/run. |
+| REL-002 | CRITICAL / P0 | Open; SE+AI | G-J durable authorized jobs, no false success, minimum scoped schema and provider facade before governed agent growth |
+| REL-003 | CRITICAL / P0 | Open; SE | Supported pinned dependencies, production servers/non-root runtime, identity/TLS, deployed restore/rollback and capacity proof |
+| REL-004 | CRITICAL / P0 | NOT STARTED; SE security + AI reviewer | Presentation outbound positive schema, confidentiality/retention/permission policy, MCP tool allowlist and exact approval; G-E before provider calls |
+| REL-005 | HIGH / P0 | NOT STARTED; BOTH | Provider factuality, safe artifact fetch/private authorization/deletion, injection/XSS/IDOR and deterministic loss fixture; G-P |
+| REL-006 | HIGH / P0 | NOT STARTED; SE | Dispatch uncertainty/reconciliation, duplicate charge protection, reserve/commit/release and provider cost visibility; G-P/G-Q |
+| REL-007 | CRITICAL / P1 | Unverified vendor access/capabilities; BOTH | Official-contract and synthetic sandbox proof; no privacy/export assumption; at least one certified provider and both adapter conformance |
+| REL-008 | CRITICAL / P1 | Schedule unvalidated; BOTH | Gate checkpoints/capacity review in 43; two engineers, no hidden parallelism or safety waiver |
+
+Proactive Monitoring Agent is out of January scope, as are BIA-024 RAG and BIA-033 expansion. Limited reliability and infrastructure observability are retained. Presentation ownership changes the forward BIA-013/MAP-050 resolution, not the historical fact that Report proxies Voice. No broad historical secret-incident reopening, TimesFM cleanup, or working-feature deletion is authorized by this overlay.
+
+## 2026-10-27 owner-approved phase closure
+
+**Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.**
+
+BIA-008 remains technically PARTIAL because its original acceptance includes deployment evidence. BIA-005/014/018/030 local closures remain intact; their deployed verification is not inferred. The dated paragraphs above preserve the earlier external-blocking interpretation, not the current next-work instruction.
+
+Foundation-D local implementation requires Foundation-C Local Engineering CLOSED, the required current release CI GREEN, and no A/B/C local-security regression. The local closure record does not satisfy the separate remote CI condition. Until the repaired workflow runs successfully, that condition is pending. External deployment validation gates production certification, not local Foundation-D development. Managed external secret store/KMS, deployed workload identities and real identity rotation, stable controlled public egress, customer-like PostgreSQL TLS verify-full and allowlist proof, combined full public production-policy ETL, deployed Kafka v1 backlog/drain attestation, and deployment cutover/rollback proof remain mandatory under CAP-14 before public GO. No cloud/staging provisioning or Foundation-D implementation occurs in this repair run.

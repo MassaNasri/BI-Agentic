@@ -161,6 +161,8 @@ def main():
     base = dict(os.environ)
     base.update({
         "PYTHONPATH": str(ROOT), "APP_ENV": "production",
+        "DEBUG": "false",
+        "CORS_ALLOWED_ORIGINS": "", "DJANGO_CORS_ALLOWED_ORIGINS": "",
         "DJANGO_SECRET_KEY": secrets.token_urlsafe(40),
         "ALLOWED_HOSTS": "localhost,127.0.0.1",
         "DJANGO_ALLOWED_HOSTS": "localhost,127.0.0.1",
