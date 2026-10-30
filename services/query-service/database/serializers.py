@@ -5,6 +5,17 @@ from .models import Database
 class DatabaseSerializer(serializers.ModelSerializer):
     """Serializer for Database model."""
     source_tables = serializers.SerializerMethodField()
+    source_id = serializers.UUIDField(read_only=True)
+    etl_message = serializers.SerializerMethodField()
+
+    def get_etl_message(self, obj):
+        # Internal diagnostics may contain physical destinations or driver text.
+        return {
+            'completed': 'Dataset is ready.',
+            'processing': 'Dataset is processing.',
+            'failed': 'Dataset processing failed.',
+            'pending': 'Dataset is queued.',
+        }.get(str(obj.etl_status or '').lower(), 'Dataset status is unavailable.')
 
     def get_source_tables(self, obj):
         """Expose source identity and status, never the physical storage name."""
@@ -28,13 +39,12 @@ class DatabaseSerializer(serializers.ModelSerializer):
             'file_size',
             'source_kind',
             'source_engine',
+            'source_id',
             'source_tables',
             'row_count',
             'column_count',
             'columns_schema',
             'workspace_id',
-            'clickhouse_table_name',
-            'clickhouse_database',
             'upload_date',
             'etl_status',
             'etl_message'

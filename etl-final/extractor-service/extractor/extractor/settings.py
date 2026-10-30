@@ -33,6 +33,9 @@ SECRET_KEY = _SECURITY.secret_key
 DEBUG = _SECURITY.debug
 ALLOWED_HOSTS = list(_SECURITY.allowed_hosts)
 ETL_INTERNAL_API_KEY = os.getenv("ETL_INTERNAL_API_KEY", "")
+from bi_platform_shared.secret_delivery import read_secret
+if APP_ENV == "production" and len(read_secret("CREDENTIAL_RESOLVER_EXTRACTOR_KEY")) < 32:
+    raise RuntimeError("Credential resolver identity is required in production.")
 
 
 # Application definition

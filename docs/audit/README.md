@@ -1,3 +1,5 @@
+> **SUPERSEDED PLANNING — 2026-10-27.** Retained as the Phase-0 design/evidence context. For implementation use [the January scope and roadmap](../../BIAVORA_PRODUCTION_READINESS_AUDIT/43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md) and master context 34. HTTP remains control plane; Kafka remains data/event plane; logical ownership precedes physical separation. Old Kafka-removal, service-move and next-phase directions below are not current instructions.
+
 # Phase 0 audit index
 
 **Audit complete; Phase 0 acceptance PARTIAL; production NOT READY.** Active business data is cleared and local startup smoke passes. Historical archives and Metabase metadata are intentionally preserved. Voice/notification migration parity, failing tests and critical security findings remain open.

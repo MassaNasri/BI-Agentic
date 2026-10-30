@@ -1,3 +1,5 @@
+> **SUPERSEDED PLANNING — 2026-10-27.** Retained as the Phase-0 design/evidence context. For implementation use [the January scope and roadmap](../../BIAVORA_PRODUCTION_READINESS_AUDIT/43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md) and master context 34. HTTP remains control plane; Kafka remains data/event plane; logical ownership precedes physical separation. Old Kafka-removal, service-move and next-phase directions below are not current instructions.
+
 # Target microservices architecture
 
 This is a migration design, not an implemented architecture. Keep Django/React/ClickHouse/Metabase; no framework rewrite is required. Enforce database ownership and HTTP service contracts before changing deployment topology.

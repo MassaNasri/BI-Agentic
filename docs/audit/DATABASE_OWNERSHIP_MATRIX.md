@@ -1,3 +1,5 @@
+> **SUPERSEDED PLANNING — 2026-10-27.** Retained as the Phase-0 design/evidence context. For implementation use [the January scope and roadmap](../../BIAVORA_PRODUCTION_READINESS_AUDIT/43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md) and master context 34. HTTP remains control plane; Kafka remains data/event plane; logical ownership precedes physical separation. Old Kafka-removal, service-move and next-phase directions below are not current instructions.
+
 # Database ownership matrix
 
 Current endpoint identity was queried read-only: Windows PostgreSQL 18.3 at 127.0.0.1:5432, application database `bi_voice_agent`, owner `bi_admin` (not superuser, but has CREATEDB). Containers use `DB_HOST=host.docker.internal`; the same DB_NAME/DB_USER/DB_PASSWORD source is passed through root `.env`. `postgres` is a separate system database and is excluded. A new `phase0_restore_20260913` verification database contains the restored backup and is intentionally preserved.

@@ -1,156 +1,169 @@
-# 22 — Week-14 Deployable Target Architecture
+# 22 — January 2027 target architecture
 
-> **Reference Version:** 2.0  
-> **Status:** APPROVED_FOR_IMPLEMENTATION_PLANNING  
-> **Target:** Production Deployable in 14 Weeks
+Revision 3.0 · 2026-10-27 · Target **10 January 2027**. Design, not deployment proof.
+[43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md) controls scope and dependencies; [45](45_BIAVORA_RELEASE_TRACEABILITY_MATRIX.md) separates current implementation from target.
 
-## Decision summary
-
-BIAVORA evolves into a small set of owned capabilities, not one container per noun. REST/HTTP is the control plane. Kafka/events carry ingestion records, durable job transitions, alerts, usage events, and long-running completion. Query is the sole analytical execution authority. Integration/Data Source becomes a logical owner initially co-deployed in the Query control-plane deployment, with its own module/schema/role; connector workers remain the Data Platform. One Analyst Orchestrator invokes typed governed tools. Entitlements, Metering, Billing, and Payment are separate concepts even when initially co-deployed.
-
-## Plane model
-
-```mermaid
-flowchart TB
-  U[Users / Organizations] --> EDGE[HTTPS Edge: WAF, rate limits, request IDs]
-
-  subgraph SB[Security boundary: authenticated workspace context, least privilege, policy, audit]
-    subgraph CP[Control plane — REST/HTTP]
-      IAM[Identity + Workspace]
-      INT[Integration / Data Source]
-      SEM[Semantic Model]
-      JOB[Durable Job API]
-      QRY[Query]
-      REP[Report]
-      ENT[Entitlements + Billing State]
-    end
-
-    subgraph DP[Data plane — Kafka/events + workers]
-      KC[Kafka Connect + Debezium]
-      NORM[CDC Normalizer]
-      ETL[Snapshot/Transform/Load workers]
-      CH[(ClickHouse)]
-    end
-
-    subgraph AIP[AI plane]
-      VOI[Voice + Normalization]
-      AO[One Analyst Orchestrator]
-      MPG[In-process ModelProvider facade]
-      TOOLS[Typed tools: Semantic, Schema, Query, RAG, Forecast, Stats, Viz, Trust, WhatIf, ActionProposal]
-    end
-
-    subgraph KP[Knowledge plane]
-      DOC[Document lifecycle + ACL]
-      VEC[(PostgreSQL + pgvector)]
-    end
-
-    subgraph AP[Action plane]
-      POL[Policy + Approval]
-      TG[Isolated Tool Gateway]
-    end
-
-    subgraph MP[Metering plane]
-      UE[Usage events]
-      LED[(Immutable usage ledger)]
-      PAY[Hosted payment provider]
-    end
-
-    subgraph OP[Observability plane]
-      OTel[Logs + metrics + traces]
-      SLO[SLOs, dashboards, alerts, runbooks]
-    end
-  end
-
-  EDGE --> IAM
-  EDGE --> INT
-  EDGE --> JOB
-  INT --> KC
-  INT --> ETL
-  KC --> NORM --> ETL --> CH
-  JOB --> AO
-  VOI --> JOB
-  AO --> TOOLS
-  TOOLS --> SEM
-  TOOLS -->|Authorized Query Tool only| QRY
-  QRY -->|logical dataset/table binding + policy| CH
-  QRY --> REP
-  TOOLS --> DOC --> VEC
-  AO --> MPG
-  TOOLS --> POL --> TG
-  MPG --> UE
-  VOI --> UE
-  TOOLS --> UE --> LED
-  PAY --> ENT
-  LED --> ENT
-  CP --> OTel
-  DP --> OTel
-  AIP --> OTel
-  AP --> OTel
-```
-
-Query executes; Report owns saved report lifecycle. Visualization consumes safe result/spec contracts and never queries ClickHouse directly.
-
-## Runtime deployment topology
+## Context
 
 ```mermaid
 flowchart LR
-  EDGE[Managed HTTPS edge] --> WEB[Frontend]
-  EDGE --> API[Gateway + control APIs]
-  API --> PG[(Managed PostgreSQL: owner schemas/roles + pgvector)]
-  API --> REDIS[(Managed Redis)]
-  API --> KAFKA[(Managed/supportable Kafka)]
-  KAFKA --> WORK[Connector / CDC / ETL / analysis workers]
-  WORK --> CH[(Production ClickHouse)]
-  API --> OBJ[(Object/quarantine storage)]
-  WORK --> OBJ
-  API --> SEC[Secrets manager / KMS]
-  WORK --> SEC
-  API --> OBS[Central telemetry]
-  WORK --> OBS
+  U[Business users] --> F[Frontend]
+  F --> E[HTTPS edge / API Gateway]
+  E --> B[BIAVORA owned domains and workers]
+  Sources[Customer databases / private uploads] --> I[Governed Integration / Data Platform]
+  I --> B
+  B --> G[Policy-controlled model and MCP egress]
+  G --> L[Approved model providers]
+  G --> P[SlidesGPT / Gamma renderers]
+  B --> O[Managed stores / secrets / telemetry]
+  B --> A[Authorized reports / private artifacts]
+  A --> U
 ```
 
-Use a managed container platform with separate staging/production environments. Kubernetes is not required unless workload/GPU/network needs justify its operational cost.
+External databases are ingestion sources, not reachable by the LLM or presentation vendor. No external presentation provider becomes an analytical authority.
 
-## Plane contracts
+## Logical domains and initial deployment
 
-### Control plane
+```mermaid
+flowchart TB
+  Edge[Gateway] --> Auth[Auth identity]
+  Edge --> W[Workspace permissions]
+  Edge --> QD
+  Edge --> AI
+  Edge --> RD
+  Edge --> Sub[Subscription: Entitlement / Metering / Billing / Payments]
+  subgraph QD[Existing Query deployment]
+    Int[Integration source / credential / transport owner]
+    Q[Query dataset / analytical owner]
+  end
+  subgraph AI[Existing AI API and worker deployment]
+    Sem[Semantic owner / versions / publication]
+    Model[Modeling proposals]
+    Analyst[One Analyst / model facade / evaluation]
+    Trust[Evidence / What-if / limited reliability]
+    Model --> Sem
+    Analyst --> Sem
+    Analyst --> Trust
+  end
+  subgraph RD[Existing Report deployment]
+    Proxy[Legacy report proxy]
+    Pres[New Presentation logical domain / worker / artifact lifecycle]
+  end
+  Proxy --> Voice[Voice: maintained input and legacy saved-report owner]
+  Pres --> Analyst
+  Analyst --> Q
+  Analyst --> Viz[VisualizationSpec / governed charts]
+  Pres --> Tool[Isolated governed MCP / provider execution boundary]
+  Tool --> Vendor[SlidesGPTProvider / GammaProvider]
+  Int --> Data[Connector / Debezium-Kafka Connect / ETL workers]
+  Data --> K[(Kafka versioned records)]
+  K --> Load[Transformer / Loader / scoped metadata]
+  Load --> CH[(ClickHouse)]
+  Q --> CH
+  Pres --> Obj[(Private artifact storage)]
+  Data --> N[Notification owned projection]
+```
 
-Synchronous APIs create/test sources, submit/cancel/read jobs, manage semantic/document/report objects, request approvals, inspect usage, and administer entitlements. Responses must be bounded and must not proxy long work in a request.
+Each owner writes its own PostgreSQL schema with a least-privilege role and separate migration principal; one managed cluster is allowed. Integration already exists in Query with separate role routing. Semantic, durable jobs, usage ledger, MCP and Presentation are target capabilities, not claimed deployed boxes. Report/Voice coexistence is bounded in [ADR-023](46_ADR_023_PRESENTATION_OWNERSHIP_AND_PROVIDER_ABSTRACTION.md). No automatic new Presentation, Semantic or ModelProvider microservice.
 
-### Data/event plane
+Metabase remains an existing downstream consumer of Query-authorized definitions through Visualization. Its actual query execution is a legacy rendering mechanism, not independent authorization. Keep it within scoped read-only grants/tenant object checks; assess that path during operations hardening. Presentation vendors receive approved result projections/assets only and never Metabase credentials or native warehouse access.
 
-Versioned events carry tenant/workspace/source/job identity, schema version, idempotency key, correlation/trace context, occurred-at time, producer, payload reference, and classification. Owners define partition keys, compatibility, retry, terminal DLQ/quarantine, replay, retention, and PII/logging policy.
+## Governed analytical request
 
-### Query boundary
+```mermaid
+sequenceDiagram
+  actor User
+  participant G as Gateway
+  participant A as Analyst/job owner
+  participant S as Semantic
+  participant Q as Query
+  participant C as ClickHouse
+  participant V as Visualization/Trust
+  User->>G: Question and logical dataset
+  G->>A: Authenticated context
+  A->>A: Reauthorize / budget / durable job
+  A->>S: Resolve published metric/version
+  S-->>A: Typed semantic plan and approved definitions
+  A->>Q: Plan with actor/workspace/dataset and deadline
+  Q->>Q: Resolve exact tables / read-only AST / limits
+  Q->>C: Authorized bounded execution
+  C-->>Q: Results
+  Q-->>A: Bounded result reference / execution evidence
+  A->>V: Reproducible findings and chart request
+  V-->>A: VisualizationSpec / evidence manifest
+  A-->>User: Answer, limitations, facts/forecast/scenario labels
+```
 
-Clients submit logical dataset/table identities. Query resolves immutable authorized physical bindings, requires an exact allowlist, applies read-only/resource settings, executes, and stores or pages bounded results. AI/Voice/Reports/Visualization have no direct ClickHouse credential or fallback. Physical identifiers are not public API fields.
+AI's existing direct schema readers and process-global cache must be removed from authority before G-J/G-A. Authorized Schema tools provide minimum workspace/dataset context. A logical data ID from a client or model is a selector, never authorization.
 
-### Integration and transport
+## PostgreSQL CDC sequence and correctness contract
 
-Integration owns source definition, engine, secret reference, TLS, transport, table selection, capabilities, snapshot/CDC state, and lifecycle. Initial transport is `DirectSecureInternetTransport`; source models also carry a transport discriminator so `PrivateNetworkTransport` and `AgentTransport` can be added post-launch without changing CDC, metering, UI ownership, or events.
+```mermaid
+sequenceDiagram
+  participant I as Integration
+  participant C as Kafka Connect/Debezium
+  participant P as PostgreSQL source
+  participant K as Kafka
+  participant T as Normalizer/Transformer
+  participant L as Loader
+  participant H as ClickHouse
+  participant Q as Query
+  I->>I: Authorize source, configuration version and desired state
+  I->>C: Governed connector configuration / managed secret reference
+  C->>P: Verified TLS, logical replication slot/publication
+  P-->>C: Consistent initial snapshot and WAL continuation
+  C->>K: Source records and durable connector offsets
+  K->>T: Scoped versioned change envelope
+  T->>L: Key / source position / operation / schema / values
+  L->>H: Idempotent versioned row or tombstone
+  H-->>L: Durable application acknowledgement
+  L->>K: Commit consumed position after durable disposition
+  L-->>I: Scoped watermark / lag / reconciliation status
+  Q->>H: Authorized current-state read semantics
+```
 
-PostgreSQL CDC is `remote PostgreSQL -> TLS -> Debezium -> Kafka Connect -> Kafka -> BIAVORA normalizer -> Transformer -> Loader -> ClickHouse`. Engine claims follow certification, not adapter presence.
+Foundation-C local closure, current release CI GREEN and preserved local security boundaries are prerequisites to local CDC. External validation is CAP-14/G-C-DEPLOY before production certification (49). Integration owns desired connector lifecycle; Kafka Connect owns capture offsets; Data Platform owns canonical normalization/materialization; Query owns published analytical bindings. PostgreSQL replication credentials require separately scoped replication/publication privileges, not an unexamined reuse of snapshot SELECT-only credentials. Managed delivery and safe DNS/TLS/egress must cover Connect's own driver; the Python connector pinning proof does not certify a Java Debezium connection.
 
-### Durable jobs
+Choose/test mutable-state storage before loader code: stable primary key, per-key source position/version, duplicate/reorder handling, delete tombstones and a Query-visible current-state view. Background ClickHouse merges alone do not guarantee immediate logical deduplication. Source transactions across tables require an explicit consistency level; January must disclose per-table/per-key eventual consistency unless stronger snapshot visibility is proven. Freeze a repeatable watermark/result reference for multi-query evidence or disclose drift; never claim an atomic multi-table view without tests.
 
-All voice analysis, large query/report, document indexing, semantic proposal, forecast/What-if, proactive investigations, actions, and large ingestion operations use the common state machine:
+Partition for per-key order, handle snapshot-to-WAL handoff without gaps, commit only after durable write or auditable terminal quarantine, and retain restart checkpoints. Quarantine invalid envelopes with scoped references and a controlled replay path; do not silently skip poison records. Require PKs for mutable release tables; reject unsupported no-key updates/deletes. Additive nullable columns can be a tested supported change; drop/rename/type/PK changes pause ingestion pending reviewed mapping/reseed. Source slot/WAL growth, lag, retention, credential rotation and source/target counts/hashes need alerts/runbooks. No blanket exactly-once marketing claim.
 
-`QUEUED -> RUNNING <-> RETRYING -> SUCCEEDED | FAILED | CANCELLED`
+## MCP policy and approval sequence
 
-Each job has `job_id`, workspace/actor, type/version, idempotency/correlation IDs, attempt, timestamps, deadline/budget, input/result references, error class, semantic/model/prompt versions, and audit trail. State transitions use transactional outbox/inbox or an equivalent proven delivery pattern.
+```mermaid
+sequenceDiagram
+  participant A as Analyst/Presentation
+  participant P as Policy and approval owner
+  actor H as Authorized human
+  participant G as Tool gateway
+  participant V as Provider
+  A->>P: Immutable sanitized proposal + provider/tool/payload hash
+  P->>P: Scope / entitlement / classification / cost / egress validation
+  alt Denied
+    P-->>A: POLICY_DENIED
+  else Explicit approval required
+    P->>H: Exact preview, destination, data and cost
+    H->>P: Approve or reject
+    P->>G: Single-use bounded authorization
+  else Preapproved safe create intent
+    P->>G: Audited operation consent
+  end
+  G->>G: Recheck permission/policy/hash/expiry and dispatch idempotency
+  G->>V: Allowlisted invocation
+  V-->>G: Result or uncertain outcome
+  G-->>P: Audit / verify / reconcile / meter
+```
 
-## Ownership and storage
+January includes a tested explicit approval-required deck operation; safe internal analytical calls do not need repeated confirmation. No destructive arbitrary tool/SQL/financial action is in the minimum.
 
-- One managed PostgreSQL cluster is allowed. Critical domains use owner schemas/databases and dedicated roles; no owner writes another domain's tables.
-- ClickHouse is analytical storage, accessed only through Query for product analysis and through owned loader identities for ingestion.
-- PostgreSQL + pgvector is the initial knowledge store; a new vector database needs benchmark evidence.
-- Object storage owns raw/quarantined uploads and document artifacts with tenant keys and retention policy.
-- The usage ledger is immutable/auditable and separated from mutable entitlement/billing state.
+## Presentation sequence and data egress
 
-## Required Week-14 production properties
+The normative [presentation sequence, Data Egress Boundary, typed contracts and state machine are in 44](44_AI_PRESENTATION_AND_EXECUTIVE_REPORT_ARCHITECTURE.md). They complete this architecture's required context, ownership, analytical, CDC, approval, presentation and egress views without duplicating vendor logic. Provider adapters are transport-independent and run only after sanitized payload policy. No slide engine is built.
 
-Exact controls and release evidence are normative in `30_CANONICAL_ARCHITECTURE_RULES.md` and `33_PRODUCTION_SECURITY_BASELINE.md`. The architecture is not considered delivered without staging, secrets management, production process servers/non-root images, resource/rate limits, TLS, observability/SLOs, backup/restore, migration/rollback rehearsal, AI/CDC/security gates, and a real payment path when paid launch is enabled.
+## Platform and deployment
 
-## Explicit post-launch scale enhancements
+HTTP submits/reads/cancels short control operations; Kafka transports versioned asynchronous records and reliable lifecycle/usage facts. Jobs use owned persisted state and transactional outbox/inbox, not HTTP-held orchestration. Correlation IDs connect calls/events without granting permissions.
 
-Private network/customer agent transport, MySQL/MariaDB CDC unless already certified, additional action integrations, a dedicated Integration deployment, dedicated Model Gateway service, separate vector database, multi-region active-active, and service mesh are evidence-driven future options—not Week-14 assumptions.
+Single-region managed containers/state are preferred for the two-person team; Kubernetes is not required. Use isolated staging/production, production process servers/workers, supported pinned dependencies, non-root immutable images, TLS/least-privilege identities, managed secrets/rotation, private artifact/quarantine storage, bounded resources/rates, redacted logs/metrics/traces, measurable SLOs and responder runbooks. Recover PostgreSQL/ClickHouse/Kafka/object storage/metadata/semantic/job/ledger state coherently. Prove migration/rollback and restore/RPO/RTO before launch.
+
+Notification consumes owned events/read projections rather than foreign ORM. Entitlements, immutable Metering, Billing and Payments remain distinct even within Subscription. Paid activation is disabled unless its separate real-provider gate passes. No pgvector/Knowledge plane, Proactive Monitoring Agent or Arabic/Voice expansion is part of this release; existing code remains maintained. All boxes require the tests/deployment evidence in 45 before they can be called production-ready.

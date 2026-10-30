@@ -6,6 +6,9 @@ from django.http import HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
+from bi_platform_shared.public_contract import (
+    forbidden_public_metadata_keys, has_internal_error_diagnostic,
+)
 
 from .routing import resolve_target
 
@@ -71,11 +74,41 @@ class ProxyView(View):
                 status=502,
             )
 
+        if upstream.status_code >= 500:
+            return JsonResponse(
+                {"success": False, "error": {"code": "UPSTREAM_UNAVAILABLE"}}, status=502,
+            )
+        if upstream.content:
+            try:
+                payload = upstream.json()
+            except ValueError:
+                payload = None
+            if upstream.status_code >= 400 and payload is None:
+                logger.error("Gateway blocked a non-JSON upstream error path=%s target=%s", path, target.service)
+                return JsonResponse(
+                    {"success": False, "error": {"code": "UPSTREAM_CONTRACT_INVALID"}}, status=502,
+                )
+            if payload is not None and has_internal_error_diagnostic(payload):
+                logger.error("Gateway blocked an unsafe upstream error path=%s target=%s", path, target.service)
+                return JsonResponse(
+                    {"success": False, "error": {"code": "UPSTREAM_CONTRACT_INVALID"}}, status=502,
+                )
+            if payload is not None and forbidden_public_metadata_keys(payload):
+                logger.error("Gateway blocked an internal metadata field path=%s target=%s", path, target.service)
+                return JsonResponse(
+                    {"success": False, "error": {"code": "UPSTREAM_CONTRACT_INVALID"}}, status=502,
+                )
+
         response = HttpResponse(content=upstream.content, status=upstream.status_code)
 
-        excluded_headers = {"content-encoding", "transfer-encoding", "connection"}
+        excluded_headers = {
+            "content-encoding", "transfer-encoding", "connection", "server",
+            "x-powered-by",
+        }
         for key, value in upstream.headers.items():
             if key.lower() in excluded_headers:
+                continue
+            if key.lower() == "location" and not value.startswith("/"):
                 continue
             response[key] = value
 

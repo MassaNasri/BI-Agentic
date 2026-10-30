@@ -1,3 +1,5 @@
+> **SUPERSEDED PLANNING — 2026-10-27.** Retained as the Phase-0 design/evidence context. For implementation use [the January scope and roadmap](../../BIAVORA_PRODUCTION_READINESS_AUDIT/43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md) and master context 34. HTTP remains control plane; Kafka remains data/event plane; logical ownership precedes physical separation. Old Kafka-removal, service-move and next-phase directions below are not current instructions.
+
 # Service communication matrix
 
 HTTP transport to a database is still direct database access, not an owner-service API. Worker processes within one declared owner are not independent microservices. Configured dependencies are separated from observed source calls.

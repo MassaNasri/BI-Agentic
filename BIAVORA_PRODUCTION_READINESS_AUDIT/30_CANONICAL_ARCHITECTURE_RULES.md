@@ -1,17 +1,17 @@
 # 30 — Canonical Architecture Rules
 
-> **Reference Version:** 2.0  
+> **Reference Version:** 3.0 / 2026-10-27
 > **Status:** APPROVED_FOR_IMPLEMENTATION_PLANNING  
-> **Target:** Production Deployable in 14 Weeks
+> **Target:** Public launch 10 January 2027; evidence-gated
 
-These rules are mandatory for future implementation plans and reviews. `MUST NOT` has the same force as a failed architecture gate. An exception requires a versioned ADR, threat/operations impact, migration/rollback plan, and canonical-document update before implementation.
+Scope/calendar precedence is defined in [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md). These rules are mandatory for future implementation plans and reviews. `MUST NOT` has the same force as a failed architecture gate. An exception requires a versioned ADR, threat/operations impact, migration/rollback plan, and canonical-document update before implementation.
 
 ## 1. Service and domain ownership
 
 - A business object and its authoritative writes **MUST** have one logical owner, API/event contract, migration owner, and on-call owner.
 - Deployment boundaries **SHOULD** follow security isolation, independent scaling, failure containment, or durable team ownership—not nouns.
 - Integration/Data Source **MUST** be a logical domain. It **SHOULD** initially be an isolated module/schema in the Query control-plane deployment while connector workers remain in Data Platform.
-- Report ownership **MUST** be singular: Query executes; Report owns saved report lifecycle; Visualization owns chart/spec generation.
+- Report ownership **MUST** be singular: Query executes; Voice maintains legacy saved reports; the new Presentation domain in Report owns new presentation lifecycle (ADR-023); Visualization owns chart/spec generation.
 - A capability **MUST NOT** read/write another owner's tables through ORM models. Read models require an explicit event/materialization contract.
 - A new network microservice **MUST NOT** be introduced without an ADR proving benefit exceeds latency, deployment, data, and operational cost.
 
@@ -59,7 +59,7 @@ These rules are mandatory for future implementation plans and reviews. `MUST NOT
 
 ## 7. Long-running jobs
 
-- Voice analysis, large query/report, ingestion, indexing, semantic proposal, forecast/What-if, proactive investigation, and action execution **MUST** use a durable job.
+- Maintained voice analysis, large query/report, ingestion, semantic proposal, forecast/What-if, presentation generation, and approved action execution **MUST** use a durable job.
 - The canonical states are `QUEUED`, `RUNNING`, `RETRYING`, `SUCCEEDED`, `FAILED`, and `CANCELLED` with validated transitions.
 - A job **MUST** store workspace/actor, type/version, idempotency/correlation, attempt, timestamps, deadline/budget, input/result refs, error class, and relevant semantic/model/prompt versions.
 - State and event publication **MUST** use a transactional outbox/inbox or an equivalently proven pattern.
@@ -76,31 +76,31 @@ These rules are mandatory for future implementation plans and reviews. `MUST NOT
 ## 9. Semantic Layer
 
 - The Semantic Layer **MUST** be the governed source for entities, metrics, dimensions, relationships, time dimensions, business terms, synonyms, formulas, ownership, versions, status, certification, and lineage.
-- SQL, Analyst, Modeling, Trust, Proactive, RAG orchestration, What-if, Reports, and Visualization **SHOULD** bind to a published semantic version.
+- SQL, Analyst, Modeling, Trust, What-if, Reports, Presentation, and Visualization **SHOULD** bind to a published semantic version.
 - Semantic proposals **MUST** validate permissions/references/types/cycles/ambiguity and follow `PROPOSE -> VALIDATE -> EXPLAIN -> HUMAN REVIEW -> APPROVE -> VERSION -> PUBLISH`.
 - AI **MUST NOT** auto-publish business semantics or silently edit a published version.
 
-## 10. RAG and knowledge
+## 10. Presentation and excluded scope
 
-- Structured facts **MUST** use Semantic/Query; unstructured business knowledge **MUST** use the Knowledge/RAG path. Hybrid answers **MUST** distinguish evidence.
-- PostgreSQL + pgvector **SHOULD** be first; a new vector database requires benchmark/operations evidence.
-- Retrieval **MUST** enforce workspace/document permissions before candidate content enters a prompt and again before citations are returned.
-- Documents/chunks **MUST** have version, source, ACL, retention, deletion/re-index, metadata filters, and lineage.
-- Ingested content **MUST** be treated as untrusted; instructions in documents **MUST NOT** override system/tool policy.
-- RAG **MUST NOT** embed all structured warehouse data by default.
+- Presentation **MUST** follow internal governed analysis → evidence/charts/narrative → PresentationSpec → sanitized egress/policy/approval → PresentationProvider → artifact.
+- `PresentationProvider` **MUST** expose `SlidesGPTProvider` and `GammaProvider` adapters independently from MCP/REST transport. Verify official contracts and certify each enabled provider.
+- Provider/MCP/LLM **MUST NOT** connect to customer databases, execute analytical SQL, receive credentials/credential refs/tokens/internal URLs/physical tables/raw dumps, or redefine business metrics.
+- BIAVORA **MUST NOT** build a slide layout/theme/PPTX serialization engine. Reuse governed VisualizationSpec for chart meaning.
+- Presentation **MUST** use durable jobs, safe idempotency/unknown-outcome reconciliation, authorized private artifacts, retention/deletion, factuality checks and usage/audit. See 44 and ADR-023 in 46.
+- Structured & Unstructured RAG, Proactive Monitoring Agent and Arabic & Voice Support expansion are **OUT OF JANUARY 10 RELEASE SCOPE**. Preserve existing code and security tests; no removed capability may re-enter through a dependency.
 
-## 11. Agents, proactive behavior, reliability, and What-if
+## 11. Analyst, limited reliability, and What-if
 
-- Week 14 **MUST** use one governed Analyst Orchestrator with typed tools and durable state. Multiple conversational agents require later evidence.
+- January release **MUST** use one governed Analyst Orchestrator with typed tools and durable state. Multiple conversational agents require later evidence.
 - The orchestrator **MUST** enforce tool schemas, authorization, step/time/cost budgets, idempotency, cancellation, and explicit degraded/failure states.
-- Proactive flow **MUST** be metric change → data-health check → bounded investigation → evidence → alert → optional action proposal.
+- Limited reliability **MUST** attach scoped pre-analysis freshness/quality warnings; infrastructure alerts remain mandatory, but scheduled business investigations are out of scope.
 - Reliability **MUST** remain constrained to the canonical checks unless separately planned.
 - What-if **MUST** label calculation, forecast, scenario, and causal inference; record baseline, assumptions, model, uncertainty, comparison, and reproduction data.
 - Models **MUST NOT** claim causality without a validated causal design.
 
 ## 12. MCP/actions
 
-- The only allowed write flow is proposal → deterministic policy → exact human approval → isolated Tool Gateway → verified/audited result.
+- External effects **MUST** follow proposal → deterministic policy → bound operation consent/approval → isolated governed gateway → verified/audited result. Exact human approval is required for policy-controlled egress; an explicit create request may suffice only for preapproved sanitized presentation creation. January acceptance must exercise a real approval-required operation (44).
 - Approvals **MUST** be actor/workspace/tool/parameters bound, short-lived, single-use, idempotent, revocable, and fully audited.
 - The Tool Gateway **MUST** hold scoped third-party credentials, enforce egress/policy, and return structured results.
 - AI/orchestrators **MUST NOT** receive write credentials, broaden approved parameters, replay approval, or execute ambiguous/high-risk actions.
@@ -108,7 +108,7 @@ These rules are mandatory for future implementation plans and reviews. `MUST NOT
 ## 13. Entitlements, Metering, Billing, and Payments
 
 - These four concepts **MUST** have distinct states and contracts even if initially co-deployed.
-- Usage **MUST** be immutable/auditable, workspace/job/idempotency scoped, pricing-versioned, and resource-aware across LLM, voice, embeddings/RAG, agents/tools, forecasting, and relevant data volume.
+- Usage **MUST** be immutable/auditable, workspace/job/idempotency scoped, pricing-versioned, and resource-aware across LLM tokens, maintained voice usage where used, agents/tools, forecasting, presentation generations/exports, provider credits/cost and relevant data volume.
 - Expensive work **MUST** use idempotent `Reservation -> Commit` or `Release`; corrections use append-only adjustments.
 - Entitlement decisions **MUST** fail predictably and **MUST NOT** trust a client-provided paid state.
 - Simulated payment **MUST NOT** activate production access. Paid launch **MUST** use hosted/tokenized collection, signed idempotent webhooks, reconciliation, and failure/refund states.
@@ -118,7 +118,7 @@ These rules are mandatory for future implementation plans and reviews. `MUST NOT
 
 - Secrets **MUST** use managed references, encryption in transit/at rest, version/key ID, rotation, audit, owner, and least-privilege delivery.
 - Static derivation salt without key version/rotation **MUST NOT** be the final credential design.
-- Workspace authorization **MUST** be rechecked at source, dataset, semantic, document, job, result, report, usage, approval, and action boundaries.
+- Workspace authorization **MUST** be rechecked at source, dataset, semantic, job, result, report, presentation/artifact, usage, approval, and action boundaries.
 - Internal API keys **SHOULD** be replaced by workload identities/mTLS where platform support exists; shared global keys **MUST NOT** authorize broad lateral access.
 - Uploaded and remote content **MUST** be treated as hostile.
 
@@ -127,12 +127,12 @@ These rules are mandatory for future implementation plans and reviews. `MUST NOT
 - Every request/job/event **MUST** carry correlation and trace context without using it as authorization.
 - Logs **MUST** be structured, redacted, tenant-safe, bounded, access-controlled, and retention-defined. Raw secrets, tokens, card data, full sensitive rows, or unrestricted prompts/SQL **MUST NOT** be logged.
 - Critical journeys **MUST** have service-level indicators/objectives, dashboards, actionable alerts, named owner, and tested runbook.
-- Provider cost, query resources, CDC lag/reconciliation, job states, retrieval quality, action approvals, metering reconciliation, and payment webhooks **MUST** be observable.
+- Provider cost, query resources, CDC lag/reconciliation, job states, presentation factuality/export, action approvals, metering reconciliation, and payment webhooks **MUST** be observable.
 
 ## 16. Testing and release
 
 - Unit tests **MUST NOT** substitute for tenant-negative, contract, integration, real-provider/environment, CDC recovery, backup/restore, load/soak, migration/rollback, abuse/security, AI evaluation, and billing reconciliation evidence.
-- AI evaluation **MUST** start Week 1 and every AI feature **MUST** add versioned cases and thresholds before its gate.
+- AI evaluation **MUST** start in phase P0 and every AI feature **MUST** add versioned cases and thresholds before its gate.
 - Release artifacts **MUST** be immutable/scanned, dependency-locked, SBOMed/signed where platform permits, and promoted by digest.
 - Product claims **MUST** be generated/reviewed against certified capabilities.
 - A fixed deadline **MUST NOT** waive `PRODUCTION_GATE`.

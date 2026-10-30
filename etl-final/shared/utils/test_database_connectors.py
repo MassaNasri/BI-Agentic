@@ -140,11 +140,12 @@ def test_mariadb_primary_key_discovery_falls_back_to_column_flags(monkeypatch):
 
 
 def test_sql_server_driver_construction_requires_ca_for_encryption(monkeypatch):
+    monkeypatch.setattr("shared.security.transport.validate_destination", lambda host, port: ("203.0.113.5",))
     driver = SimpleNamespace(connect=Mock(return_value=object()))
     monkeypatch.setitem(sys.modules, "pytds", driver)
     connector = connector_registry.get("mssql")
     base = {
-        "resolved_host": "203.0.113.5", "port": 1433, "database": "sales",
+        "host": "db.example.test", "resolved_host": "203.0.113.5", "port": 1433, "database": "sales",
         "username": "reader", "password": "secret", "connect_timeout": 10,
         "read_timeout": 60, "encrypt": True,
     }
@@ -158,11 +159,12 @@ def test_sql_server_driver_construction_requires_ca_for_encryption(monkeypatch):
 
 
 def test_oracle_thin_driver_construction_uses_supported_tcps_arguments(monkeypatch):
+    monkeypatch.setattr("shared.security.transport.validate_destination", lambda host, port: ("203.0.113.6",))
     driver = SimpleNamespace(connect=Mock(return_value=object()))
     monkeypatch.setitem(sys.modules, "oracledb", driver)
     connector = connector_registry.get("oracle")
     connector.connect({
-        "resolved_host": "203.0.113.6", "port": 1521, "database": "FREEPDB1",
+        "host": "db.example.test", "resolved_host": "203.0.113.6", "port": 1521, "database": "FREEPDB1",
         "service_name": "FREEPDB1", "username": "reader", "password": "secret",
         "connect_timeout": 10, "read_timeout": 60, "tls": True,
         "wallet_location": "/run/secrets/oracle-wallet",

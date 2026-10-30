@@ -1,3 +1,5 @@
+> **SUPERSEDED SUPPORTING PLAN — 2026-10-27.** The body below preserves prior design context, not January commitments. Product Scope revision dated 2026-10-27 in [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md), current architecture 22/30–34, and presentation 44/46 control. Structured & Unstructured RAG, Proactive Monitoring Agent and Arabic & Voice Support expansion are OUT OF JANUARY 10 RELEASE SCOPE; do not implement their old milestones. Existing functionality/security remains maintained.
+
 # 21 — Design Pattern Recommendations
 
 Patterns below solve evidenced problems. “Required” means required for the Week-14 production target; it does not mean every service should adopt the pattern. Keep direct functions and ordinary transactions where they remain clearer.

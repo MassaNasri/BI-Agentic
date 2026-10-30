@@ -1,6 +1,7 @@
 Django
+cryptography
 djangorestframework
-kafka-python
+kafka-python==2.3.0
 requests
 pymysql
 psycopg2-binary

@@ -2,18 +2,19 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-COPY metadata-service/requirements.txt /app/requirements.txt
+COPY etl-final/metadata-service/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --default-timeout=600 --retries 25 --progress-bar off --upgrade pip "setuptools<81" wheel && pip install --no-cache-dir --default-timeout=600 --retries 25 --progress-bar off -r /app/requirements.txt
 
-COPY metadata-service /app/metadata-service
-COPY shared /app/shared
+COPY etl-final/metadata-service /app/metadata-service
+COPY etl-final/shared /app/shared
+COPY bi_platform_shared /app/bi_platform_shared
 
 ENV PYTHONPATH="/app"
 
 EXPOSE 8000
 
 # Copy and set execute permission for startup script
-COPY metadata-service/start.sh /app/start.sh
+COPY etl-final/metadata-service/start.sh /app/start.sh
 RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 
 CMD ["/app/start.sh"]

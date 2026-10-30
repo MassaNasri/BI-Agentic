@@ -1,119 +1,77 @@
 # 26 — Master Refactor, Build, Move, and Delete Plan
 
-> **Reference Version:** 2.0  
-> **Status:** APPROVED_FOR_IMPLEMENTATION_PLANNING  
-> **Target:** Production Deployable in 14 Weeks
+> Revision 3 / 2026-10-27. Target: **10 January 2027**. Planning only; no implementation authorization in this reconciliation.
+> [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md) controls scope/calendar; [45](45_BIAVORA_RELEASE_TRACEABILITY_MATRIX.md) controls capability gates. Stable MAP/BIA identifiers are retained.
 
-## How to use this map
+## Execution rules
 
-This is the implementation map, not evidence that work is complete. `SE`, `AI`, and `BOTH` are the two-person team allocation. “Risk” is the production harm if omitted. Every deletion requires imports, routes, Compose, tests, CI, runtime, and migration dependencies to be checked first. No deletion is authorized by this document alone.
+SE and AI are the two engineers, with reciprocal review; BOTH means a handoff/review, not extra staffing. Reserve capacity for integration, security and operations. Phase dates and the common Definition of Done are in 43. Each row needs implementation, tests, security review, docs, migrations where applicable, telemetry, CI, acceptance evidence, staging and rollback. Existing closure means preserve and extend evidence, not redo the original defect.
 
-## KEEP
+**Next implementation phase: Foundation-D — PostgreSQL CDC.** Foundation-D local implementation requires Foundation-C Local Engineering CLOSED, the required current release CI GREEN, and no A/B/C local-security regression. The local closure record does not satisfy the separate remote CI condition. Until the repaired workflow runs successfully, that condition is pending. External deployment validation gates production certification, not local Foundation-D development. Later Semantic/Modeling/Analyst/Presentation prerequisites remain ordered. Provider access still requires egress/approval/ledger acceptance. External checkpoints and full production gates remain in 43/45.
 
-| ID | Current location | Problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-001 | `etl-final` connector registry/adapters | Strong snapshots → preserve behind versioned capability/transport contract; avoid redesigning P1-R | P1 / regression | Integration API | SE / W2–6 | All current snapshot regression tests and engine capability claims pass |
-| MAP-002 | ETL manual commit, rewind, idempotency utilities | Useful recovery pieces → retain and add terminal invalid-record semantics | P1 / loss or poison | Event ADR | SE / W3–5 | Restart/duplicate/poison/replay suite passes |
-| MAP-003 | `bi_platform_shared/sql/guard.py` parser | Database-only invocation is unsafe → keep parser but require exact allowlist/resource policy | P0 / tenant breach | Query binding | BOTH / W1–2 | No call can execute without authorized table set |
-| MAP-004 | Deterministic AI compiler/planner/tests | Valuable behavior lacks governance → retain under semantic/provider/tool versions | P1 / quality drift | Provider + semantic | AI / W1–10 | Golden suites improve without bypass paths |
-| MAP-005 | Workspace checks, CI/migration/security regression assets | Incomplete but valuable → extend, do not replace | P1 / release regression | Owner map | BOTH / all | New gates reuse and expand maintained runner |
+No deletion is authorized by this map. A later deletion requires imports, routes, Compose, tests, CI, runtime and migrations checked, data/rollback retained, and a separate scoped change. Never alter dirty TimesFM.
 
-## FIX_NOW
+## Maintain already-closed controls
 
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-010 / BIA-001 | Query execution + SQL guard call | Database-scoped policy → logical dataset binding + exact table allowlist + CH limits | P0 / tenant breach | None | SE+BOTH / W1–2 | Cross-tenant and arbitrary-table tests fail closed |
-| MAP-011 / BIA-002 | Voice query fallback | Local CH execution on Query outage → Query-only durable failure/retry | P0 / auth bypass | MAP-010, jobs | SE / W1–2 | Voice holds no execution credential/fallback |
-| MAP-012 / BIA-003 | Subscription view/frontend | Simulated success activates access → production simulation disabled; provider later | P0 / financial integrity | Config/entitlement | SE / W1 | Production-mode test rejects simulated activation |
-| MAP-013 / BIA-006 | Git/runtime secrets | Historical tracked env → rotate/invalidate and managed references | P0 / credential compromise | Secret inventory | SE / W1 | Rotation evidence and clean secret scan |
-| MAP-014 / BIA-010 | Query/Voice executors | Unbounded query/materialization → enforced limits, page/result ref, cancellation | P0 / outage/cost | MAP-010 | SE / W1–2 | Abuse/load tests prove bounded resources |
-| MAP-015 / BIA-011 | Voice upload endpoint/storage | Writes untrusted file before validation → streaming validation/quarantine/retention | P0 / malware/DoS/data leak | Object storage/AV | SE / W1–2 | Adversarial upload suite and deletion evidence pass |
+| ID / evidence | Target / current state | Owner / phase | Acceptance |
+|---|---|---|---|
+| MAP-001 | Preserve seven-engine snapshot adapters; certify modes separately, never infer production from registry | SE / P0–P1 | 43 engine matrix and existing regressions agree |
+| MAP-002 | Keep manual commit/rewind/idempotency; add poison terminal disposition under CDC | SE / P1 | Restart/duplicate/poison/replay suite |
+| MAP-003; MAP-010 / BIA-001 | Exact Query binding, nonempty table allowlist and resource policy CLOSED in Foundation-A | SE / continuous | Cross-tenant/arbitrary-table negatives and deployed authorization |
+| MAP-004 | Preserve deterministic compiler/planner behavior under semantic/tool/provider versions | AI / P1–P4 | Golden cases and no bypass |
+| MAP-005 | Extend maintained CI, workspace, migration and security regressions | BOTH / continuous | Existing plus new mandatory gates |
+| MAP-011 / BIA-002 | Voice local Query fallback removed, CLOSED | SE / continuous | Query outage fails safely; no local execution |
+| MAP-012 / BIA-003 | Production payment simulation contained, CLOSED | SE / P0 | Disabled in production; no paid claim without provider gate |
+| MAP-013 / BIA-006 | Historical credential incident CLOSED via report 37 evidence | SE / P0 | Preserve attestation/scanner; managed lifecycle remains separate |
+| MAP-014 / BIA-010 | Query limits/cancellation CLOSED | SE / continuous | Abuse/concurrency and cancellation regression |
+| MAP-015 / BIA-011 | Upload hardening CLOSED | SE / continuous | Scanner, hostile input, limits and retention operate in staging |
+| MAP-020 / BIA-005 | Owner-role defect locally CLOSED in C6 | SE / CAP-14 | Exact deployed roles/migrations deny cross-owner access |
+| MAP-021 / BIA-008/014 | Integration local engineering complete, replacement CLOSED; BIA-008 technically PARTIAL for deployment evidence | SE / CAP-14 | KMS/store/deployed identities/rotation/public TLS and G-C-DEPLOY by 15 Dec |
+| MAP-040 / BIA-008 | Logical Integration now in Query deployment; do not recreate domain | SE / P0 local, CAP-14 external | One source API/write owner; external proof by 15 Dec |
+| MAP-042 / BIA-030 | Public physical identifiers locally CLOSED | SE / continuous | Route inventory/logical IDs and new artifact contracts |
 
-## REFACTOR_BEFORE_FEATURE
+## Required implementation sequence
 
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-020 / BIA-005 | Django DB settings/models | Shared owner role/schema → critical owner schemas/roles; one cluster allowed | P0 / lateral data access | Owner ADR | SE / W1–3 | Cross-owner writes denied; reversible migration passes |
-| MAP-021 / BIA-008/014 | Query `Database`, source lifecycle | One source/manager, raw config, destructive replace → persistent Integration aggregate, secret refs, staged cutover | P0 / loss/secrets/CDC unsafe | MAP-020 | SE / W1–4 | Multi-source, rotation, failed-cutover tests pass |
-| MAP-022 / BIA-009/020 | Voice jobs, AI Dagster request path | Unwired job skeleton/synchronous false success → common durable worker state machine | P0 / lost/false work | Outbox/queue | BOTH / W2–3 | Retry/cancel/idempotency/terminal tests pass |
-| MAP-023 / BIA-019 | AI provider clients | Direct fragmented calls → in-process provider facade + telemetry | P1 / cost/reliability blind | Eval registry | AI / W1–2 | Active calls use facade; usage fields complete |
-| MAP-024 / BIA-021 | AI schema provider/cache | Broad direct CH enumeration/global cache → authorized Schema/Semantic tools, tenant/version key | P1 / tenant leak | MAP-010 | BOTH / W1–3 | AI has no CH credential; tenant cache tests pass |
+| ID / debt | Action / target | Priority | Dependencies | Owner / phase | Acceptance |
+|---|---|---|---|---|---|
+| MAP-022 / BIA-009/020 | Replace unwired/synchronous jobs with owned durable state, context, outbox/inbox, cancellation and recovery | P0 | G-C-LOCAL + G-CI | BOTH / P1 | G-J; kill/restart, duplicate, cancellation, no false success |
+| MAP-023; MAP-051 / BIA-019 | Consolidate active model calls through in-process provider facade, policy/budget and usage telemetry | P0 | G-C-LOCAL + G-CI; versioned eval cases | AI / P1 | Every active call covered; no facade bypass |
+| MAP-024; MAP-041 / BIA-021 | Remove AI broad warehouse schema credentials/cache; authorized Schema/Semantic/Query tools | P0 | G-C-LOCAL + G-CI; maintained Query authority | BOTH / P1 | Tenant/version cache isolation; credential inventory |
+| MAP-030 / BIA-012/016/017 | PostgreSQL Debezium/Connect → Kafka → transform → ClickHouse current state | P1 with P0 correctness | G-C-LOCAL + G-CI; event/offset/transport ADRs | SE / P1 | G-D; handoff, insert/update/delete, restart, dedup, drift, reconcile |
+| MAP-031 / BIA-023 | Governed metric/entity DSL, versioned publish, deterministic compiler and lineage | P1 | G-D, G-J | BOTH / P2 | G-S; access/type/cycle/formula/drift tests |
+| MAP-033 / BIA-025 | Single bounded Analyst orchestrator; Modeling proposals precede Analyst | P1 | G-S, G-J, G-M | AI / P3–P4 | G-M/G-A; human semantic publish, typed tools and evidence |
+| MAP-034; MAP-060 / BIA-026 | Separate Entitlements/Metering/Billing/Payments; reserve/commit/release and append-only adjustments | P0 | P1 facade/context; provider pricing contracts | SE / P2–P4 | G-E; token/provider/deck/export usage; concurrent/retry/reconcile tests |
+| MAP-036 / BIA-028 | Operational SLOs, redacted telemetry, infrastructure alerts, runbooks | P0 | P0 infrastructure decisions | SE / all phases | Alert drills, correlated journeys, measured thresholds |
+| MAP-050 / BIA-013/035 | Maintain Voice legacy report owner; add new Presentation domain/schema/worker in Report deployment | P1 | G-J; ADR-023; G-S | SE / P3 design/spine, P5 feature | One owner per object; no duplicate ORM activation or bulk migration |
+| MAP-061 / BIA-025 | Governed MCP execution separate from Analyst; exact human approval, scoped secret/egress and audit | P0 boundary, P1 capability | Identity, G-J, policy, ledger | SE / P4 | G-E; replay/expiry/mutation/denial; approved deck action proves CAP-09 |
+| MAP-090 / BIA-022 | Versioned AI/security/factuality corpus, harness and release thresholds | P0 | Start design now; runtime harness follows foundation | AI / P0 onward | Each feature evaluated before its own gate, aggregate G-Q |
+| MAP-091 / BIA-004/040 | Supported pinned runtimes/dependencies, production servers, non-root images, isolated staging | P0 | Platform choice and compatibility review | SE / P0 onward | CAP-14 G-C-DEPLOY environment; G-Q/G-R deployment, scan, shutdown, rollback |
+| MAP-092 / BIA-029 | Exact-SHA remote CI plus integration/eval/restore/deploy gates, immutable promotion | P0 | Staging and runner credentials | SE / P0 onward | Nine current prerequisites plus new gates; digest evidence |
+| MAP-094 | Limited pre-analysis reliability and bounded arithmetic What-if; forecast only under evidence | P1 | G-S, G-M, G-J, trust | AI / P4 | Freshness/missingness warnings; deterministic scenario; uncertainty |
+| MAP-095 | Hosted/tokenized real payments only if paid launch is chosen | Conditional | MAP-060; verified webhook/reconciliation | SE / P4–P6 if enabled | Payment gate or server-controlled free entitlements; no simulation |
+| MAP-096 (new) | PresentationRequest/AnalysisPlan/evidence → PresentationSpec → governed provider → private artifact | P1 with P0 security | G-A, G-E; ADR-023 | AI + SE review / P5 | G-P; both adapters conform, at least one live-certified export |
+| MAP-097 (new) | Presentation product UI, async status/cancel/retry, safe download, audit and usage | P1 | MAP-096; shared job/artifact contracts | SE + AI review / P5–P6 | Tenant E2E, permission revocation, export and safe failure |
 
-## REFACTOR_DURING_FEATURE
+## Deferred and conditional cleanup (IDs preserved)
 
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-030 / BIA-012/016/017 | ETL/Kafka pipeline | Snapshot plus incomplete terminal/scoped semantics → PostgreSQL CDC, versioned envelope, DLQ/replay/status | P1 / corrupt/stuck pipeline | MAP-021, event ADR | SE / W3–6 | `CDC_GATE` passes |
-| MAP-031 / BIA-023 | AI/schema/query context | Heuristics only → governed semantic owner, versions/status/certification/lineage | P1 / inconsistent answers | Query owner | BOTH / W4–8 | `SEMANTIC_GATE` passes |
-| MAP-032 / BIA-024 | No knowledge lifecycle | No RAG → ACL/version/delete/re-index/citations on pgvector | P1 / tenant/content risk | Jobs, object store | AI / W7–9 | ACL, delete, injection, citation tests pass |
-| MAP-033 / BIA-025 | AI pipeline/subscription flag | No governed tools/actions → one bounded orchestrator + proposal/approval gateway | P1 / autonomous writes | Semantic, jobs, identity | BOTH / W8–11 | `AI_AGENT_GATE`; replay/expiry fail closed |
-| MAP-034 / BIA-026 | Quota counters | Consume-first counter → usage events + reservation/commit/release ledger | P1 / over/under billing | Provider telemetry | SE / W1, W9–11 | Concurrent retry/reconciliation tests pass |
-| MAP-035 / BIA-033 | Voice/frontend | Partial language support → benchmarked Arabic voice + RTL user journey | P2 / exclusion/quality | Evaluation + upload | AI / W1, W7–11 | Accepted corpus thresholds and RTL E2E pass |
-| MAP-036 / BIA-028 | Metrics/logs | Assets without operating ownership → SLOs, dashboards, alerts, runbooks | P1 / undetected incidents | Telemetry backend | SE / W2–14 | Alert drills route to named owner |
+| ID | Disposition | Reason / later acceptance |
+|---|---|---|
+| MAP-032 / BIA-024; MAP-093 | Structured & Unstructured RAG OUT OF JANUARY SCOPE | No knowledge/vector lifecycle milestone; retain dormant code; separate later approval |
+| MAP-035 / BIA-033 | Arabic & Voice Support expansion OUT OF JANUARY SCOPE | Preserve working voice and safety tests; no dialect/RTL expansion milestone |
+| MAP-094 historical proactive component | Proactive Monitoring Agent OUT OF JANUARY SCOPE | Limited reliability is request-time signals; operational infrastructure alerts remain required |
+| MAP-070 / BIA-036 | Generated artifact cleanup deferred unless a release blocker | Reproducibility and dependency audit before any deletion |
+| MAP-080 / BIA-013/038 | Legacy report migration/deletion POST_LAUNCH | ADR-023 keeps Voice ownership; never activate duplicate Report models |
+| MAP-081 / BIA-019 | Delete obsolete clients only after facade migration/parity | Security bypass must be disabled before launch; deletion itself is optional |
+| MAP-082 / BIA-009/038 | Broken orchestration cleanup after durable path proof | No startup/import/route/migration regression; removal not required for scope |
+| MAP-100 | MySQL/MariaDB CDC POST_LAUNCH | PostgreSQL-only CDC commitment; no conditional January CDC breadth |
+| MAP-101 | Other continuous engines POST_LAUNCH | Snapshot/local claims follow certified matrix; SQLite is import, not launch CDC |
+| MAP-102 / BIA-032/041/042 | Broad cleanup/polish deferred | Only concrete correctness/security/ops blockers enter January |
+| MAP-110 | Private-network/customer-agent transport POST_LAUNCH | Preserve discriminator; separate threat model/certification |
+| MAP-111 | Multi-region active-active POST_LAUNCH | Requires measured business/SLO need |
+| MAP-112 | Physical Integration/Model Gateway/Presentation extraction POST_LAUNCH | Logical ownership first; no automatic new services or vector store |
 
-## MOVE
+## Shared-file coordination and acceptance
 
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-040 / BIA-008 | Query source model/API | Query owns source business lifecycle → Integration logical module/schema, initially same deployment | P0 / ownership drift | MAP-021 | SE / W2–4 | Public APIs and migrations have one owner; no duplicated write path |
-| MAP-041 / BIA-002/021 | Voice/AI direct CH paths | Multiple execution authorities → authorized Query/Schema tools | P0/P1 / bypass | MAP-010/024 | BOTH / W1–3 | Credential inventory proves sole product executor |
-| MAP-042 / BIA-030 | Public serializers | Physical database/table names leak → internal binding record only | P2 / reconnaissance/coupling | Integration/Query API | SE / W3–4 | Public contract exposes logical IDs only |
+SE owns migrations, owner roles, Integration/CDC, job persistence, policy/ledger/artifact storage and deployment. AI owns semantic compiler/proposals, Analyst, trust, evaluations and provider mapping. Freeze shared DTO/event/usage/evidence versions together before either changes consumers. Avoid concurrent edits to shared contracts, Query authorization, database routers or release workflow; designate one writer and one reviewer.
 
-## MERGE
-
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-050 / BIA-013/035 | Report proxy + Voice report persistence | Proxy/duplicate/no consumer → one Report owner; Query executes, Visualization specifies | P1 / split truth | Jobs/events | SE / W3–8 | One write model/route; migration and event consumer/outbox pass |
-| MAP-051 / BIA-019 | Multiple LLM/OpenAI/Ollama clients | Policy/telemetry fragments → provider facade library | P1 / cost/safety drift | MAP-023 | AI / W1–3 | Direct-call allowlist is empty except facade adapters |
-
-## SPLIT
-
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-060 / BIA-003/026 | Subscription service | Plan, entitlement, counter, fake payment conflated → Entitlements, Metering Ledger, Billing State, Provider adapter | P0/P1 / financial error | Usage telemetry | SE / W1, W9–12 | Owned states/events and reconciliation tests pass |
-| MAP-061 / BIA-025 | Agent/action scope | “Agents and MCP” conflated → Analyst tool orchestration vs separately isolated approval/action execution | P1 / unsafe autonomy | Identity/policy | BOTH / W8–11 | Analyst cannot execute write action directly |
-
-## DELETE_SAFE
-
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-070 / BIA-036 | Tracked bytecode/generated engine state | Noise/stale artifacts → ignore and remove only generated files proven reproducible | P3 / drift | Inventory | SE / W12 | Import/route/CI/runtime checks clear; clean regeneration works |
-
-## DELETE_AFTER_MIGRATION
-
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-080 / BIA-013/038 | Duplicate report models/routes | Unwired alternative obscures truth → remove after Report data/route migration | P2 / accidental revival | MAP-050 | SE / W8–12 | No import/route/Compose/test/CI/migration dependency; backup retained |
-| MAP-081 / BIA-019 | Direct provider clients | Legacy paths bypass facade → delete after call-site migration/eval parity | P2 / policy bypass | MAP-051 | AI / W3–10 | Static scan + runtime tests show no bypass |
-| MAP-082 / BIA-009/038 | Broken Voice orchestration modules | Missing imports/unwired skeleton → either migrate useful state model or remove obsolete implementation | P2 / confusion | MAP-022 | BOTH / W3–12 | Runtime/route/import/migration audit and job migration complete |
-
-## ADD
-
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-090 / BIA-022 | Test/eval tooling | No model-quality release gate → corpora, harness, registry, thresholds, reports | P1 / silent AI regression | Provider facade | AI / starts W1 | Every AI feature has versioned cases and gate |
-| MAP-091 / BIA-004/040 | Docker/deployment | Dev runtime/root/unlocked → production servers, non-root immutable images, managed staging/prod | P1 / public outage/compromise | Platform choice | SE / W10–14 | Runtime/scan/deploy/rollback gates pass |
-| MAP-092 / BIA-029 | CI/CD | Incomplete release evidence → SBOM/sign/scan/integration/eval/restore/deploy approvals | P1 / unsafe release | Staging | SE / W10–13 | Signed candidate satisfies release policy |
-| MAP-093 | Knowledge plane | No document owner/vector lifecycle → PostgreSQL+pgvector, object store, ACL jobs | P1 / RAG absent/unsafe | MAP-022/031 | BOTH / W7–9 | RAG production tests pass |
-| MAP-094 | Reliability/proactive/What-if | Partial signals/forecast only → bounded governed capabilities | P1 / misleading product | Semantic/Trust | AI / W8–11 | Evidence/uncertainty/alert tests pass |
-| MAP-095 | Payment provider | Fake payment only → hosted/tokenized provider + signed webhooks if paid launch | P1 / financial integrity | MAP-060 | SE / W11–12 | Staging reconciliation/refund/failure tests pass or paid launch disabled |
-
-## DEFER
-
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-100 | MySQL/MariaDB CDC | Adapter does not prove CDC → certify only after PostgreSQL; otherwise snapshot claim | P2 / overcommit | CDC Gate + capacity | SE / conditional W6–9 | Same production CDC suite passes before claim |
-| MAP-101 | MSSQL/Oracle/ClickHouse/SQLite continuous modes | Contracts/snapshots only → keep honest mode matrix | POST_LAUNCH / false claims | Engine labs | SE / later | Marketing/API capability agrees with certified tests |
-| MAP-102 / BIA-032/041/042 | Broad cleanup/performance polish | Useful but not critical path → address only within release headroom | P3 / maintainability | Gates stable | BOTH / W12 | No release-critical work displaced |
-
-## POST_LAUNCH
-
-| ID | Current location | Current problem → target state / reason | Priority / risk | Dependencies | Owner / week | Acceptance criterion |
-|---|---|---|---|---|---|---|
-| MAP-110 | Transport | Direct secure only → private network and customer agent without source-model redesign | FUTURE / enterprise reach | Transport discriminator | SE / post | Separate threat model and production certification |
-| MAP-111 | Deployment | Single-region managed production → multi-region/active-active only from SLO/business evidence | FUTURE / cost/complexity | Scale evidence | SE / post | Approved business/RTO case |
-| MAP-112 | Architecture | Co-deployed logical modules → extract Integration/Model Gateway/vector store only for scale/security/team evidence | FUTURE / microservice sprawl | Metrics/ownership | BOTH / post | ADR proves extraction benefit and migration plan |
-
-## Release traceability
-
-All map rows trace to the weekly gates in `25`, the Definition of Done in `16`, the security stages in `33`, and the issue IDs in `20`. Any implementation prompt that changes a target state must update the canonical set before code is merged.
+Product UI is AI-led with SE integrating authorization and lifecycle APIs, inside existing phases; no third frontend engineer assumed. P6 integrates; P7 proves quality/operations; P8 is release candidate only. A missed gate blocks dependents and triggers re-estimation/P2 cuts, never a silent date or safety change. Every implementation prompt cites CAP/MAP/BIA IDs and exact prerequisite evidence.

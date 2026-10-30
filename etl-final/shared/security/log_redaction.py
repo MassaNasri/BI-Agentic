@@ -50,7 +50,11 @@ def install_secret_redaction(environment):
              'NOTIFICATION_SERVICE_API_KEY', 'AI_SERVICE_INTERNAL_API_KEY',
              'INTERNAL_SERVICE_TOKEN', 'INTERNAL_API_TOKEN', 'SERVICE_INTERNAL_TOKEN',
              'REDIS_PASSWORD', 'KAFKA_PASSWORD')
-    secrets = tuple(environment.get(name, '') for name in names)
+    secrets = tuple(environment.get(name, '') for name in names) + tuple(
+        value for name, value in environment.items()
+        if name.startswith(('CREDENTIAL_SECRET_KEY_V', 'CREDENTIAL_RESOLVER_'))
+        and not name.endswith('_FILE')
+    )
     previous = logging.getLogRecordFactory()
 
     def factory(*args, **kwargs):

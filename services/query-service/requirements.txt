@@ -15,6 +15,7 @@ django-cors-headers==4.3.1
 
 # HTTP Requests (for ETL and ClickHouse communication)
 requests==2.31.0
+cryptography==46.0.5
 
 # ClickHouse HTTP Client (for query execution)
 clickhouse-connect==0.15.1
