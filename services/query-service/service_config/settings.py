@@ -22,11 +22,31 @@ if not SECRET_KEY:
 if APP_ENV == 'production' and any(marker in SECRET_KEY.lower() for marker in ('change_me', 'change-me', 'replace-with', 'django-insecure')):
     raise ImproperlyConfigured('Production DJANGO_SECRET_KEY is a placeholder.')
 from bi_platform_shared.security_config import validate_production_secrets
+from bi_platform_shared.secret_delivery import read_secret
+from bi_platform_shared.credential_crypto import active_key_name
 validate_production_secrets(APP_ENV, SECRET_KEY)
-if APP_ENV == 'production' and not all(os.getenv(name, '').strip() for name in ('DB_PASSWORD', 'CLICKHOUSE_PASSWORD', 'ETL_INTERNAL_API_KEY', 'INGESTION_CALLBACK_API_KEY')):
+if APP_ENV == 'production' and not all((read_secret(name).strip() if name == 'DB_PASSWORD' else os.getenv(name, '').strip()) for name in ('DB_PASSWORD', 'CLICKHOUSE_PASSWORD', 'ETL_INTERNAL_API_KEY', 'INGESTION_CALLBACK_API_KEY')):
     raise ImproperlyConfigured('Database and ingestion credentials are required in production.')
 INGESTION_CALLBACK_API_KEY = os.getenv('INGESTION_CALLBACK_API_KEY', '')
 ETL_INTERNAL_API_KEY = os.getenv('ETL_INTERNAL_API_KEY', '')
+CREDENTIAL_RESOLVER_API_KEY = read_secret('CREDENTIAL_RESOLVER_API_KEY')
+CREDENTIAL_RESOLVER_CONNECTOR_KEY = read_secret('CREDENTIAL_RESOLVER_CONNECTOR_KEY')
+CREDENTIAL_RESOLVER_EXTRACTOR_KEY = read_secret('CREDENTIAL_RESOLVER_EXTRACTOR_KEY')
+CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS = read_secret('CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS')
+CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS = read_secret('CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS')
+_connector_resolver_keys = {CREDENTIAL_RESOLVER_CONNECTOR_KEY, CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS} - {''}
+_extractor_resolver_keys = {CREDENTIAL_RESOLVER_EXTRACTOR_KEY, CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS} - {''}
+if APP_ENV == 'production' and (
+    len(CREDENTIAL_RESOLVER_CONNECTOR_KEY) < 32
+    or len(CREDENTIAL_RESOLVER_EXTRACTOR_KEY) < 32
+    or any(len(value) < 32 for value in (
+        CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS,
+        CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS,
+    ) if value)
+    or bool(_connector_resolver_keys & _extractor_resolver_keys)
+    or len(read_secret(active_key_name())) < 32
+):
+    raise ImproperlyConfigured('Production source credential protection is unavailable.')
 ETL_PROCESSING_TIMEOUT_SECONDS = int(os.getenv('ETL_PROCESSING_TIMEOUT_SECONDS', '240'))
 
 
@@ -62,6 +82,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'database',
+    'integration',
     'query_api',
 ]
 
@@ -102,12 +123,22 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('DB_NAME', 'bi_voice_agent'),
         'USER': os.getenv('DB_USER', 'bi_admin'),
-        'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        'PASSWORD': read_secret('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST', 'postgres-query'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'CONN_MAX_AGE': 600,
     }
 }
+if APP_ENV == 'production':
+    from bi_platform_shared.db_ownership import configure_domain_connection
+
+    configure_domain_connection(DATABASES['default'], 'query', profile=APP_ENV)
+    DATABASES['integration'] = configure_domain_connection({
+        **DATABASES['default'],
+        'USER': os.getenv('INTEGRATION_DB_USER', '') or (DATABASES['default']['USER'] if os.getenv('DB_ACCESS_MODE') == 'migration' else ''),
+        'PASSWORD': read_secret('INTEGRATION_DB_PASSWORD') or (DATABASES['default']['PASSWORD'] if os.getenv('DB_ACCESS_MODE') == 'migration' else ''),
+    }, 'integration', profile=APP_ENV)
+    DATABASE_ROUTERS = ['bi_platform_shared.db_ownership.IntegrationDatabaseRouter']
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'

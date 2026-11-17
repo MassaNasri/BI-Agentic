@@ -1,4 +1,5 @@
-﻿import os
+import os
+from bi_platform_shared.secret_delivery import read_secret
 import sys
 from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
@@ -23,7 +24,7 @@ if APP_ENV == 'production' and any(marker in SECRET_KEY.lower() for marker in ('
     raise ImproperlyConfigured('Production DJANGO_SECRET_KEY is a placeholder.')
 from bi_platform_shared.security_config import validate_production_secrets
 validate_production_secrets(APP_ENV, SECRET_KEY)
-if APP_ENV == 'production' and not os.getenv('DB_PASSWORD', '').strip():
+if APP_ENV == 'production' and not read_secret('DB_PASSWORD').strip():
     raise ImproperlyConfigured('DB_PASSWORD is required in production.')
 if APP_ENV == 'production' and not any(os.getenv(name, '').strip() for name in ('INTERNAL_SERVICE_TOKEN', 'INTERNAL_API_TOKEN', 'SERVICE_INTERNAL_TOKEN')):
     raise ImproperlyConfigured('An internal service token is required in production.')
@@ -100,7 +101,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('DB_NAME', 'bi_voice_agent'),
         'USER': os.getenv('DB_USER', 'bi_admin'),
-        'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        'PASSWORD': read_secret('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST', 'postgres-auth'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'CONN_MAX_AGE': 600,
@@ -179,3 +180,7 @@ CORS_ALLOWED_ORIGINS = _csv_env('CORS_ALLOWED_ORIGINS', os.getenv('DJANGO_CORS_A
 if DEBUG and not CORS_ALLOWED_ORIGINS:
     CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:5173']
 CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)
+
+if APP_ENV == 'production':
+    from bi_platform_shared.db_ownership import configure_domain_connection
+    configure_domain_connection(DATABASES['default'], 'auth', profile=APP_ENV)

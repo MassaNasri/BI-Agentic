@@ -25,6 +25,7 @@ def _binding():
         clickhouse_db="workspace_test",
         table_name="sales",
         allowed_tables=frozenset({"sales"}),
+        source_kind="",
     )
 
 

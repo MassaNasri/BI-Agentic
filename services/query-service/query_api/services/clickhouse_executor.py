@@ -139,9 +139,10 @@ def sanitize_numeric_value(value: Any) -> Any:
     if value is None:
         return None
     
-    # Handle Python int - never NaN/Infinity, return as-is
+    # JSON numbers above JavaScript's safe-integer range lose precision in the
+    # browser. Keep exact Int64/UInt64 values as decimal text.
     if isinstance(value, int):
-        return value
+        return str(value) if abs(value) > 9007199254740991 else value
     
     # Handle float types (NaN, Infinity) - direct check
     if isinstance(value, float):
@@ -165,8 +166,10 @@ def sanitize_numeric_value(value: Any) -> Any:
                     return 0  # Replace NaN with 0
                 elif math.isinf(float_val):
                     return 0  # Replace Infinity/-Infinity with 0
-                # Return as float for JSON compatibility (Decimal isn't JSON serializable)
-                return float_val
+                # Preserve exact source decimals when JSON's float rendering
+                # would change their value. Ordinary numeric responses retain
+                # their existing representation; column metadata stays Decimal.
+                return float_val if Decimal(str(float_val)) == value else str(value)
             except (ValueError, OverflowError, TypeError):
                 # If conversion fails, return 0 as fallback
                 return 0
@@ -186,7 +189,8 @@ def sanitize_numeric_value(value: Any) -> Any:
                 return 0  # Replace Infinity/-Infinity with 0
             # Convert numpy types to Python native types for JSON serialization
             if isinstance(value, np.integer):
-                return int(value)
+                exact = int(value)
+                return str(exact) if abs(exact) > 9007199254740991 else exact
             return float_val
     except (ImportError, ValueError, OverflowError, TypeError):
         # numpy not available or conversion failed, continue to generic check
@@ -228,18 +232,19 @@ def sanitize_query_results(rows: List[Dict]) -> List[Dict]:
     Returns:
         Sanitized list of dictionaries with all NaN/Infinity values replaced
     """
+    def sanitize_nested(value):
+        if isinstance(value, dict):
+            return {key: sanitize_nested(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [sanitize_nested(item) for item in value]
+        return sanitize_numeric_value(value)
+
     sanitized_rows = []
     
     for row in rows:
         sanitized_row = {}
         for key, value in row.items():
-            # Recursively sanitize nested structures
-            if isinstance(value, dict):
-                sanitized_row[key] = sanitize_query_results([value])[0] if value else {}
-            elif isinstance(value, list):
-                sanitized_row[key] = [sanitize_numeric_value(item) for item in value]
-            else:
-                sanitized_row[key] = sanitize_numeric_value(value)
+            sanitized_row[key] = sanitize_nested(value)
         sanitized_rows.append(sanitized_row)
     
     return sanitized_rows

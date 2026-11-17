@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Upload, Database as DatabaseIcon, FileText, Trash2, 
@@ -21,22 +21,21 @@ import {
 
 function DatabaseManagement() {
   const [database, setDatabase] = useState(null)
+  const [datasets, setDatasets] = useState([])
   const [previewData, setPreviewData] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [showReplaceModal, setShowReplaceModal] = useState(false)
-  const [fileToUpload, setFileToUpload] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
   const [sourceMode, setSourceMode] = useState('file')
   const [selectedTableId, setSelectedTableId] = useState(null)
 
-  const loadPreview = useCallback(async (tableId = null) => {
+  const loadPreview = useCallback(async (tableId = null, datasetId = null) => {
     try {
       setIsLoadingPreview(true)
-      const response = await databaseAPI.getDatabasePreview(tableId)
+      const response = await databaseAPI.getDatabasePreview(tableId, datasetId)
       if (response.data.success) {
         setPreviewData(response.data.data)
       }
@@ -47,17 +46,26 @@ function DatabaseManagement() {
     }
   }, [])
 
-  const loadDatabaseInfo = useCallback(async () => {
+  const refreshDatasets = useCallback(async () => {
+    try {
+      const response = await databaseAPI.listDatasets()
+      if (response.data.success) setDatasets(response.data.data)
+    } catch (error) {
+      console.error('Could not load datasets:', error)
+    }
+  }, [])
+
+  const loadDatabaseInfo = useCallback(async (datasetId = null) => {
     try {
       setIsLoading(true)
-      const response = await databaseAPI.getDatabaseInfo()
+      const response = await databaseAPI.getDatabaseInfo(datasetId)
       if (response.data.success) {
         setDatabase(response.data.data)
         // Load preview if database is completed
         if (response.data.data.etl_status === 'completed') {
           const firstTableId = response.data.data.source_tables?.[0]?.id || null
           setSelectedTableId(firstTableId)
-          loadPreview(firstTableId)
+          loadPreview(firstTableId, response.data.data.id)
         }
       }
     } catch (error) {
@@ -67,6 +75,7 @@ function DatabaseManagement() {
       ) {
         // No database found - this is normal for new users
         setDatabase(null)
+        setPreviewData(null)
       } else if (error.response?.status === 503) {
         console.error('Backend service unavailable:', error)
         // Don't show error for initial load - user hasn't uploaded yet
@@ -85,7 +94,8 @@ function DatabaseManagement() {
 
   useEffect(() => {
     loadDatabaseInfo()
-  }, [loadDatabaseInfo])
+    refreshDatasets()
+  }, [loadDatabaseInfo, refreshDatasets])
 
   useEffect(() => {
     if (database?.etl_status !== 'processing') return undefined
@@ -96,7 +106,7 @@ function DatabaseManagement() {
 
     const checkStatus = async () => {
       try {
-        const response = await databaseAPI.getDatabaseInfo()
+        const response = await databaseAPI.getDatabaseInfo(database.id)
         if (cancelled || !response.data.success) return
         consecutiveErrors = 0
         const db = response.data.data
@@ -108,7 +118,8 @@ function DatabaseManagement() {
           toast.success('Database processing completed!')
           const firstTableId = db.source_tables?.[0]?.id || null
           setSelectedTableId(firstTableId)
-          loadPreview(firstTableId)
+          loadPreview(firstTableId, db.id)
+          refreshDatasets()
         } else if (outcome.failed) {
           toast.error(db.etl_message || 'Database processing failed')
         }
@@ -127,7 +138,7 @@ function DatabaseManagement() {
       cancelled = true
       if (intervalId) clearInterval(intervalId)
     }
-  }, [database?.etl_status, loadPreview])
+  }, [database?.id, database?.etl_status, loadPreview, refreshDatasets])
 
   const handleFileSelect = (file) => {
     if (!file) return
@@ -137,13 +148,7 @@ function DatabaseManagement() {
       return
     }
 
-    // Check if database exists (replace mode)
-    if (database) {
-      setFileToUpload(file)
-      setShowReplaceModal(true)
-    } else {
-      uploadFile(file)
-    }
+    uploadFile(file)
   }
 
   const uploadFile = async (file) => {
@@ -159,8 +164,8 @@ function DatabaseManagement() {
       if (response.data.success) {
         toast.success(response.data.message)
         setDatabase(response.data.data)
-        setShowReplaceModal(false)
-        setFileToUpload(null)
+        setPreviewData(null)
+        refreshDatasets()
         
       }
     } catch (error) {
@@ -204,13 +209,15 @@ function DatabaseManagement() {
 
   const handleDelete = async () => {
     try {
-      const response = await databaseAPI.deleteDatabase()
+      const response = await databaseAPI.deleteDatabase(database?.id)
       if (response.data.success) {
-        toast.success('Database deleted successfully')
+        toast.success('Dataset deleted successfully')
         setDatabase(null)
         setPreviewData(null)
         setSelectedTableId(null)
         setShowDeleteModal(false)
+        await refreshDatasets()
+        await loadDatabaseInfo()
       }
     } catch (error) {
       console.error('Delete error:', error)
@@ -272,8 +279,8 @@ function DatabaseManagement() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">Database Management</h1>
-          <p className="mt-2 text-[var(--c-muted)]">Upload and manage your data source</p>
+          <h1 className="text-3xl font-bold text-white">Data Sources and Datasets</h1>
+          <p className="mt-2 text-[var(--c-muted)]">Connect a source and import datasets for analysis</p>
         </div>
         {database && (
           <Button
@@ -281,13 +288,13 @@ function DatabaseManagement() {
             icon={Trash2}
             onClick={() => setShowDeleteModal(true)}
           >
-            Delete Database
+            Delete Dataset
           </Button>
         )}
       </div>
 
-      {/* Upload Area or Database Info */}
-      {!database ? (
+      {/* Source and file import controls remain available for additional datasets. */}
+      <>
         <motion.div variants={cardVariants} initial="hidden" animate="visible">
           <div className="space-y-4">
             <div className="flex gap-2" role="tablist" aria-label="Data source type">
@@ -312,13 +319,31 @@ function DatabaseManagement() {
               <DatabaseSourcePanel
                 onStarted={(data) => {
                   setDatabase(data)
+                  setPreviewData(null)
+                  refreshDatasets()
                 }}
               />
             )}
           </div>
         </motion.div>
-      ) : (
+      </>
+
+      {database && (
         <>
+          {datasets.length > 1 && (
+            <label className="block text-sm text-[var(--c-muted)]">
+              Dataset
+              <select
+                value={database.id}
+                onChange={(event) => loadDatabaseInfo(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-brand-700/50 bg-[var(--c-surface)] p-3 text-white"
+              >
+                {datasets.map((item) => (
+                  <option key={item.id} value={item.id}>{item.filename} · {item.etl_status}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <motion.div variants={cardVariants} initial="hidden" animate="visible">
             <DatabaseInfo database={database} />
           </motion.div>
@@ -332,7 +357,7 @@ function DatabaseManagement() {
                   disabled={isLoadingPreview}
                   onSelect={(tableId) => {
                     setSelectedTableId(tableId)
-                    loadPreview(tableId)
+                    loadPreview(tableId, database.id)
                   }}
                 />
               )}
@@ -359,70 +384,13 @@ function DatabaseManagement() {
         </>
       )}
 
-      {/* Replace Database Modal */}
-      <AnimatePresence>
-        {showReplaceModal && (
-          <Modal
-            isOpen={showReplaceModal}
-            onClose={() => {
-              setShowReplaceModal(false)
-              setFileToUpload(null)
-            }}
-            title="Replace Database"
-          >
-            <div className="space-y-4">
-              <div className="flex items-start space-x-3 p-4 bg-amber-500/15 border border-amber-500/30 rounded-lg">
-                <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="font-semibold text-amber-400">Warning: This action cannot be undone</p>
-                  <p className="text-sm text-amber-400 mt-1">
-                    This will permanently delete your current database and all data stored in ClickHouse.
-                    The new file will be uploaded and processed automatically.
-                  </p>
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <p className="text-sm text-[var(--c-muted)]">
-                  <strong>Current file:</strong> {database?.filename}
-                </p>
-                <p className="text-sm text-[var(--c-muted)]">
-                  <strong>New file:</strong> {fileToUpload?.name}
-                </p>
-              </div>
-
-              <div className="flex space-x-3">
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setShowReplaceModal(false)
-                    setFileToUpload(null)
-                  }}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => uploadFile(fileToUpload)}
-                  disabled={isUploading}
-                  className="flex-1"
-                >
-                  {isUploading ? 'Replacing...' : 'Replace Database'}
-                </Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-      </AnimatePresence>
-
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
         {showDeleteModal && (
           <Modal
             isOpen={showDeleteModal}
             onClose={() => setShowDeleteModal(false)}
-            title="Delete Database"
+            title="Delete Dataset"
           >
             <div className="space-y-4">
               <div className="flex items-start space-x-3 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -430,7 +398,7 @@ function DatabaseManagement() {
                 <div className="flex-1">
                   <p className="font-semibold text-red-900">Warning: This action cannot be undone</p>
                   <p className="text-sm text-red-700 mt-1">
-                    This will permanently delete your database and all associated data from ClickHouse.
+                    This deletes the selected dataset and its imported ClickHouse tables. The source remains available.
                   </p>
                 </div>
               </div>
@@ -461,6 +429,9 @@ function DatabaseManagement() {
 
 function DatabaseSourcePanel({ onStarted }) {
   const [connectors, setConnectors] = useState([])
+  const [sources, setSources] = useState([])
+  const [sourceId, setSourceId] = useState('')
+  const [sourceName, setSourceName] = useState('')
   const [engine, setEngine] = useState('')
   const [configuration, setConfiguration] = useState({})
   const [schemas, setSchemas] = useState([])
@@ -469,6 +440,7 @@ function DatabaseSourcePanel({ onStarted }) {
   const [selectedTables, setSelectedTables] = useState([])
   const [state, setState] = useState('idle')
   const [message, setMessage] = useState('')
+  const handledSourceRef = useRef('')
 
   const connector = connectors.find((item) => item.id === engine)
 
@@ -477,31 +449,66 @@ function DatabaseSourcePanel({ onStarted }) {
     databaseAPI.getSourceCapabilities()
       .then((response) => {
         if (!active) return
-        const available = response.data?.data?.connectors || []
+        const available = (response.data?.data?.connectors || []).filter((item) => item.capabilities?.snapshot_extraction)
         setConnectors(available)
         if (available.length) setEngine(available[0].id)
       })
       .catch(() => setMessage('Could not load database connector capabilities.'))
+    databaseAPI.listSources()
+      .then((response) => { if (active) setSources(response.data?.data || []) })
+      .catch(() => { if (active) setSources([]) })
     return () => { active = false }
   }, [])
 
   useEffect(() => {
     if (!connector) return
-    setConfiguration(buildInitialConfiguration(connector))
+    if (sourceId && handledSourceRef.current === sourceId) return
+    const existing = sources.find((item) => item.id === sourceId)
+    setConfiguration({ ...buildInitialConfiguration(connector), ...(existing?.connection_metadata || {}) })
     setSchemas([])
     setSchema('')
     setTables([])
     setSelectedTables([])
     setState('idle')
     setMessage('')
-  }, [connector])
+  }, [connector, sourceId, sources])
 
   const setField = (name, value) => setConfiguration((current) => ({ ...current, [name]: value }))
+  const existingSource = sources.find((item) => item.id === sourceId)
+  const storedMetadata = () => Object.fromEntries(Object.entries(configuration).filter(([key]) =>
+    ['host', 'port', 'database', 'service_name', 'username', 'schema', 'sslmode', 'ssl_mode', 'tls',
+      'encrypt', 'trust_server_certificate', 'secure', 'verify', 'connect_timeout', 'read_timeout'].includes(key)))
+
+  const ensureSource = async () => {
+    if (sourceId) {
+      if (!existingSource?.credential_configured) {
+        if (!configuration.password) throw new Error('Enter a password to configure this source.')
+        await databaseAPI.configureSourceCredential(sourceId, configuration.password)
+        setSources((current) => current.map((item) => item.id === sourceId ? { ...item, credential_configured: true } : item))
+        setConfiguration((current) => ({ ...current, password: '' }))
+      }
+      return sourceId
+    }
+    if (!configuration.password) throw new Error('Enter the source password.')
+    const response = await databaseAPI.createSource({
+      name: sourceName || `${engine} source`, engine,
+      connection_metadata: storedMetadata(), selected_tables: [],
+      password: configuration.password,
+    })
+    const source = response.data.data
+    handledSourceRef.current = source.id
+    setSources((current) => [source, ...current])
+    setSourceId(source.id)
+    setConfiguration((current) => ({ ...current, password: '' }))
+    return source.id
+  }
+
   const testConnection = async () => {
     setState('testing')
     setMessage('')
     try {
-      await databaseAPI.testSourceConnection(engine, configuration)
+      const id = await ensureSource()
+      await databaseAPI.testSourceConnection(id)
       setState('test-success')
       setMessage('Connection successful. You can now discover tables.')
     } catch (error) {
@@ -514,7 +521,7 @@ function DatabaseSourcePanel({ onStarted }) {
     setState('discovering')
     setMessage('')
     try {
-      const response = await databaseAPI.discoverSource(engine, configuration, selectedSchema || null)
+      const response = await databaseAPI.discoverSource(sourceId, selectedSchema || null)
       const data = response.data?.data || {}
       setSchemas(data.schemas || [])
       setTables(data.tables || [])
@@ -556,14 +563,48 @@ function DatabaseSourcePanel({ onStarted }) {
     setState('starting')
     setMessage('Starting snapshot ingestion…')
     try {
-      const response = await databaseAPI.startSnapshot(engine, configuration, selectedTables)
+      const response = await databaseAPI.startSnapshot(engine, configuration, selectedTables, 1000, sourceId || null, sourceName)
       setConfiguration((current) => redactTransientSecrets(current))
       setState('started')
       setMessage('Snapshot extraction started.')
       onStarted(response.data.data)
+      setSourceId(response.data.data?.source_id || '')
+      databaseAPI.listSources()
+        .then((refreshed) => setSources(refreshed.data?.data || []))
+        .catch(() => {})
     } catch (error) {
       setState('failed')
       setMessage(sourceErrorMessage(error, 'Snapshot could not be started.'))
+    }
+  }
+
+  const rotateCredential = async () => {
+    if (!sourceId || !configuration.password) return
+    setState('testing')
+    try {
+      await databaseAPI.rotateSourceCredential(sourceId, configuration.password)
+      setConfiguration((current) => ({ ...current, password: '' }))
+      setState('idle')
+      setMessage('Credential rotated and validated.')
+    } catch (error) {
+      setState('failed')
+      setMessage(sourceErrorMessage(error, 'Credential rotation failed.'))
+    }
+  }
+
+  const changeSourceState = async (action) => {
+    if (!sourceId) return
+    setState('starting')
+    try {
+      if (action === 'retire') await databaseAPI.retireSource(sourceId)
+      else await databaseAPI.updateSource(sourceId, { state: 'disabled' })
+      setSources((current) => current.filter((item) => item.id !== sourceId))
+      setSourceId('')
+      setState('idle')
+      setMessage(action === 'retire' ? 'Source retired. Existing datasets remain available.' : 'Source disabled.')
+    } catch (error) {
+      setState('failed')
+      setMessage(sourceErrorMessage(error, 'Could not change source state.'))
     }
   }
 
@@ -577,11 +618,51 @@ function DatabaseSourcePanel({ onStarted }) {
       </div>
 
       <label className="block text-sm text-[var(--c-muted)]">
+        Data source
+        <select
+          value={sourceId}
+          onChange={(event) => {
+            const selected = sources.find((item) => item.id === event.target.value)
+            handledSourceRef.current = event.target.value
+            setSourceId(event.target.value)
+            if (selected) {
+              const selectedEngine = selected.engine === 'postgresql' ? 'postgres' : selected.engine
+              setEngine(selectedEngine)
+              setConfiguration({ ...buildInitialConfiguration(connectors.find((item) => item.id === selectedEngine)), ...selected.connection_metadata, password: '' })
+            }
+            setState('idle')
+            setTables([])
+            setSelectedTables([])
+          }}
+          disabled={busy}
+          className="mt-1 w-full rounded-lg border border-brand-700/50 bg-[var(--c-surface)] p-3 text-white"
+        >
+          <option value="">New source</option>
+          {sources.filter((item) => item.state === 'active').map((item) => (
+            <option key={item.id} value={item.id}>{item.name}</option>
+          ))}
+        </select>
+      </label>
+
+      {!sourceId && (
+        <label className="block text-sm text-[var(--c-muted)]">
+          Source name
+          <input
+            value={sourceName}
+            onChange={(event) => setSourceName(event.target.value)}
+            maxLength={255}
+            placeholder="e.g. Sales PostgreSQL"
+            className="mt-1 w-full rounded-lg border border-brand-700/50 bg-[var(--c-surface)] p-3 text-white"
+          />
+        </label>
+      )}
+
+      <label className="block text-sm text-[var(--c-muted)]">
         Database engine
         <select
           value={engine}
           onChange={(event) => setEngine(event.target.value)}
-          disabled={busy}
+          disabled={busy || Boolean(sourceId)}
           className="mt-1 w-full rounded-lg border border-brand-700/50 bg-[var(--c-surface)] p-3 text-white"
         >
           {connectors.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -599,11 +680,11 @@ function DatabaseSourcePanel({ onStarted }) {
             <label key={field.name} className="text-sm text-[var(--c-muted)]">
               {field.label}{field.required ? ' *' : ''}
               {field.type === 'select' ? (
-                <select value={configuration[field.name] ?? ''} onChange={(event) => setField(field.name, event.target.value)} disabled={busy} className="mt-1 w-full rounded-lg border border-brand-700/50 bg-[var(--c-surface)] p-3 text-white">
+                <select value={configuration[field.name] ?? ''} onChange={(event) => setField(field.name, event.target.value)} disabled={busy || Boolean(sourceId)} className="mt-1 w-full rounded-lg border border-brand-700/50 bg-[var(--c-surface)] p-3 text-white">
                   {(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               ) : field.type === 'boolean' ? (
-                <input type="checkbox" checked={Boolean(configuration[field.name])} onChange={(event) => setField(field.name, event.target.checked)} disabled={busy} className="ml-3" />
+                <input type="checkbox" checked={Boolean(configuration[field.name])} onChange={(event) => setField(field.name, event.target.checked)} disabled={busy || Boolean(sourceId)} className="ml-3" />
               ) : (
                 <input
                   type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
@@ -612,6 +693,7 @@ function DatabaseSourcePanel({ onStarted }) {
                   required={field.required}
                   autoComplete={field.type === 'password' ? 'new-password' : 'off'}
                   disabled={busy}
+                  readOnly={Boolean(sourceId) && field.type !== 'password'}
                   className="mt-1 w-full rounded-lg border border-brand-700/50 bg-[var(--c-surface)] p-3 text-white"
                 />
               )}
@@ -624,6 +706,10 @@ function DatabaseSourcePanel({ onStarted }) {
         <div className="flex flex-wrap gap-3">
           <Button icon={PlugZap} onClick={testConnection} disabled={busy}>Test connection</Button>
           <Button variant="secondary" icon={Table} onClick={() => discover()} disabled={busy || state !== 'test-success'}>Discover tables</Button>
+          {sourceId && <span className="text-sm text-[var(--c-muted)]">Credential: {existingSource?.credential_configured ? 'configured' : 'not configured'}</span>}
+          {sourceId && configuration.password && existingSource?.credential_configured && <Button variant="secondary" onClick={rotateCredential} disabled={busy}>Validate and rotate credential</Button>}
+          {sourceId && <Button variant="secondary" onClick={() => changeSourceState('disable')} disabled={busy}>Disable source</Button>}
+          {sourceId && <Button variant="secondary" onClick={() => changeSourceState('retire')} disabled={busy}>Retire source</Button>}
         </div>
       )}
 

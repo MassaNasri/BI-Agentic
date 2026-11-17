@@ -21,6 +21,25 @@ from query_api.services.clickhouse_executor import ClickHouseExecutor  # noqa: E
 from query_api.resource_policy import QueryResourcePolicy  # noqa: E402
 
 
+def test_source_decimal_precision_survives_public_json_serialization():
+    from decimal import Decimal
+    from query_api.services.clickhouse_executor import sanitize_numeric_value
+    exact = '999999999999999999999999.123456'
+    assert sanitize_numeric_value(Decimal(exact)) == exact
+    assert sanitize_numeric_value(Decimal('250.0000')) == 250.0
+
+
+def test_int64_outside_json_safe_range_is_exact_decimal_text():
+    from query_api.services.clickhouse_executor import sanitize_numeric_value, sanitize_query_results
+
+    assert sanitize_numeric_value(9007199254740991) == 9007199254740991
+    assert sanitize_numeric_value(9007199254740992) == '9007199254740992'
+    assert sanitize_numeric_value(-9223372036854775000) == '-9223372036854775000'
+    assert sanitize_numeric_value(True) is True
+    assert sanitize_query_results([{'records': [(7, 9223372036854775000)]}]) == [{
+        'records': [[7, '9223372036854775000']]}]
+
+
 class _FakeType:
     def __init__(self, name: str) -> None:
         self.name = name

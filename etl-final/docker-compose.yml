@@ -88,8 +88,8 @@ services:
 
   connector-service:
     build:
-      context: .
-      dockerfile: connector-service/Dockerfile
+      context: ..
+      dockerfile: etl-final/connector-service/Dockerfile
     container_name: connector-service
     ports:
       - "127.0.0.1:8001:8000"
@@ -127,8 +127,8 @@ services:
 
   detector-service:
     build:
-      context: .
-      dockerfile: detector-service/Dockerfile
+      context: ..
+      dockerfile: etl-final/detector-service/Dockerfile
     container_name: detector-service
     profiles:
       - optional
@@ -158,8 +158,8 @@ services:
 
   extractor-service:
     build:
-      context: .
-      dockerfile: extractor-service/Dockerfile
+      context: ..
+      dockerfile: etl-final/extractor-service/Dockerfile
     container_name: extractor-service
     ports:
       - "127.0.0.1:8003:8000"
@@ -191,8 +191,8 @@ services:
 
   transformer-service:
     build:
-      context: .
-      dockerfile: transformer-service/Dockerfile
+      context: ..
+      dockerfile: etl-final/transformer-service/Dockerfile
     container_name: transformer-service
     ports:
       - "127.0.0.1:8004:8000"
@@ -221,8 +221,8 @@ services:
 
   loader-service:
     build:
-      context: .
-      dockerfile: loader-service/Dockerfile
+      context: ..
+      dockerfile: etl-final/loader-service/Dockerfile
     container_name: loader-service
     ports:
       - "127.0.0.1:8005:8000"
@@ -252,8 +252,8 @@ services:
 
   metadata-service:
     build:
-      context: .
-      dockerfile: metadata-service/Dockerfile
+      context: ..
+      dockerfile: etl-final/metadata-service/Dockerfile
     container_name: metadata-service
     ports:
       - "127.0.0.1:8006:8000"

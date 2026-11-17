@@ -317,6 +317,12 @@ services:
       METADATA_SERVICE_URL: ${METADATA_SERVICE_URL:-http://etl-metadata:8000}
       ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
       INGESTION_CALLBACK_API_KEY: ${INGESTION_CALLBACK_API_KEY:?INGESTION_CALLBACK_API_KEY must be set}
+      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:-}
+      CREDENTIAL_RESOLVER_API_KEY: ${CREDENTIAL_RESOLVER_API_KEY:-}
+      CREDENTIAL_RESOLVER_CONNECTOR_KEY: ${CREDENTIAL_RESOLVER_CONNECTOR_KEY:-}
+      CREDENTIAL_RESOLVER_EXTRACTOR_KEY: ${CREDENTIAL_RESOLVER_EXTRACTOR_KEY:-}
+      CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS: ${CREDENTIAL_RESOLVER_CONNECTOR_KEY_PREVIOUS:-}
+      CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS: ${CREDENTIAL_RESOLVER_EXTRACTOR_KEY_PREVIOUS:-}
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -338,6 +344,35 @@ services:
       timeout: 5s
       retries: 20
       start_period: 20s
+
+  credential-prune-worker:
+    build:
+      context: .
+      dockerfile: services/query-service/Dockerfile
+    container_name: credential-prune-worker
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: credential-prune-worker
+      APP_ENV: ${APP_ENV:-development}
+      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:-}
+      CREDENTIAL_RESOLVER_CONNECTOR_KEY: ${CREDENTIAL_RESOLVER_CONNECTOR_KEY:-}
+      CREDENTIAL_RESOLVER_EXTRACTOR_KEY: ${CREDENTIAL_RESOLVER_EXTRACTOR_KEY:-}
+    command: ["python", "manage.py", "run_credential_prune_worker"]
+    depends_on:
+      query-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import os,time; p='/tmp/credential-prune-heartbeat'; assert os.path.isfile(p) and time.time()-os.path.getmtime(p) < 90
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   visualization-service:
     build:
@@ -639,8 +674,8 @@ services:
 
   etl-connector:
     build:
-      context: ./etl-final
-      dockerfile: connector-service/Dockerfile
+      context: .
+      dockerfile: etl-final/connector-service/Dockerfile
     container_name: etl-connector
     ports:
       - "127.0.0.1:8101:8000"
@@ -656,7 +691,12 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
       ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
-      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:?CREDENTIAL_SECRET_KEY must be set}
+      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:-}
+      CREDENTIAL_RESOLVER_API_KEY: ${CREDENTIAL_RESOLVER_API_KEY:-}
+      CREDENTIAL_RESOLVER_CONNECTOR_KEY: ${CREDENTIAL_RESOLVER_CONNECTOR_KEY:-}
+      ETL_SOURCE_PG_CA_FILE: ${ETL_SOURCE_PG_CA_FILE:-}
+      ETL_SOURCE_CLICKHOUSE_CA_FILE: ${ETL_SOURCE_CLICKHOUSE_CA_FILE:-}
+      QUERY_SERVICE_URL: http://query-service:8006
       ETL_APPROVED_DESTINATION_CIDRS: ${ETL_APPROVED_DESTINATION_CIDRS:-}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
@@ -694,8 +734,8 @@ services:
 
   etl-detector:
     build:
-      context: ./etl-final
-      dockerfile: detector-service/Dockerfile
+      context: .
+      dockerfile: etl-final/detector-service/Dockerfile
     container_name: etl-detector
     ports:
       - "127.0.0.1:8102:8000"
@@ -736,8 +776,8 @@ services:
 
   etl-extractor:
     build:
-      context: ./etl-final
-      dockerfile: extractor-service/Dockerfile
+      context: .
+      dockerfile: etl-final/extractor-service/Dockerfile
     container_name: etl-extractor
     ports:
       - "127.0.0.1:8103:8000"
@@ -753,7 +793,12 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DJANGO_SECRET_KEY: ${ETL_DJANGO_SECRET_KEY:?ETL_DJANGO_SECRET_KEY must be set}
       ETL_INTERNAL_API_KEY: ${ETL_INTERNAL_API_KEY:?ETL_INTERNAL_API_KEY must be set}
-      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:?CREDENTIAL_SECRET_KEY must be set}
+      CREDENTIAL_SECRET_KEY: ${CREDENTIAL_SECRET_KEY:-}
+      CREDENTIAL_RESOLVER_API_KEY: ${CREDENTIAL_RESOLVER_API_KEY:-}
+      CREDENTIAL_RESOLVER_EXTRACTOR_KEY: ${CREDENTIAL_RESOLVER_EXTRACTOR_KEY:-}
+      ETL_SOURCE_PG_CA_FILE: ${ETL_SOURCE_PG_CA_FILE:-}
+      ETL_SOURCE_CLICKHOUSE_CA_FILE: ${ETL_SOURCE_CLICKHOUSE_CA_FILE:-}
+      QUERY_SERVICE_URL: http://query-service:8006
       ETL_APPROVED_DESTINATION_CIDRS: ${ETL_APPROVED_DESTINATION_CIDRS:-}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLE_TOPIC_ALIASING: "true"
@@ -785,8 +830,8 @@ services:
 
   etl-transformer:
     build:
-      context: ./etl-final
-      dockerfile: transformer-service/Dockerfile
+      context: .
+      dockerfile: etl-final/transformer-service/Dockerfile
     container_name: etl-transformer
     ports:
       - "127.0.0.1:8104:8000"
@@ -828,8 +873,8 @@ services:
 
   etl-loader:
     build:
-      context: ./etl-final
-      dockerfile: loader-service/Dockerfile
+      context: .
+      dockerfile: etl-final/loader-service/Dockerfile
     container_name: etl-loader
     ports:
       - "127.0.0.1:8105:8000"
@@ -871,8 +916,8 @@ services:
 
   etl-metadata:
     build:
-      context: ./etl-final
-      dockerfile: metadata-service/Dockerfile
+      context: .
+      dockerfile: etl-final/metadata-service/Dockerfile
     container_name: etl-metadata
     ports:
       - "127.0.0.1:8106:8000"

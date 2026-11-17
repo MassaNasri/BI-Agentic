@@ -1,0 +1,61 @@
+{
+  "foundation": "D",
+  "gate": "G-D",
+  "status": "LOCAL_READY_REMOTE_CI_PENDING",
+  "branch": "foundation-c-staging",
+  "commit_sha": "",
+  "entry_head": "ca4547eb683bab21dbcbb8dab6cb1d18453632fa",
+  "performance": {
+    "rows": 5000,
+    "source_to_query_seconds": 72.641,
+    "repeat_seconds": [132.281, 135.906],
+    "median_seconds": 132.281,
+    "historical_unoptimized_seconds": 1535.679,
+    "budget_seconds": 300,
+    "pass": true,
+    "broker_recovery_seconds": [19.469, 17.672],
+    "broker_budget_seconds": 120,
+    "broker_pass": true,
+    "broker_result": "TWO_INDEPENDENT_EXACT_MATCH; supplemental post-fix 75-second outage exact in 32.579 seconds",
+    "d6_r1_fresh_seconds": [53.594, 45.719],
+    "post_fix_long_outage_seconds": 32.579,
+    "pre_fix_long_outage_result": "EXACT_QUERY_TIMEOUT at 300 seconds; preserved failure"
+  },
+  "reconciliation": {
+    "optimized_fresh_run": "MATCH_AND_CUTOVER",
+    "final_post_broker_run": "TWO_MATCH_AND_CUTOVER"
+  },
+  "d6_r1": {
+    "local_exit": "LOCAL_READY_FOR_RELEASE_CANDIDATE",
+    "clean_broker_recovery_seconds": [19.469, 17.672],
+    "post_fix_long_outage_recovery_seconds": 32.579,
+    "pre_fix_long_outage": "FAILED_AT_300_SECONDS_PRESERVED",
+    "candidate_certificates": 2,
+    "candidate_certificate_status": "WATERMARK_RECONCILIATION_V1_MATCH",
+    "normalizer_live_restart": "PASS",
+    "transformer_live_restart": "PASS",
+    "loader_crash_after_write": "PASS",
+    "pause_resume": "PASS",
+    "owner_role_local": "PASS",
+    "security_and_rotation_local": "PASS"
+  },
+  "secret_scan": {
+    "status": "PASS",
+    "pinned_gitleaks_findings": 0,
+    "timesfm_excluded": true,
+    "live_kafka_records_scanned": 30976,
+    "live_kafka_findings": 0
+  },
+  "tests": {
+    "passed": 1803,
+    "failed": 0,
+    "skipped": 17,
+    "count_scope": "Distinct completed final suite test cases; excluded forecasting/TimesFM-sensitive test and live recovery drills are not counted as unit-test skips"
+  },
+  "remote_ci": {
+    "run_id": "",
+    "commit_sha": "",
+    "status": "NOT_RUN_D6_R1_LOCAL_READY"
+  },
+  "production_readiness": "NO_GO"
+}

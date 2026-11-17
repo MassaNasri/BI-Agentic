@@ -646,7 +646,7 @@ def _resolve_dataset_binding_context(
 
     data = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
     resolved_dataset_id = str(data.get("id") or "").strip()
-    resolved_table_name = str(data.get("clickhouse_table_name") or "").strip()
+    resolved_table_name = str(explicit_table_name or "").strip()
     resolved_workspace_id = str(data.get("workspace_id") or "").strip()
     if (
         not resolved_dataset_id

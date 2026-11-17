@@ -49,15 +49,19 @@ def test_discovery_scope_is_derived_from_authenticated_workspace():
     upstream.json.return_value = {"success": True, "data": {"schemas": [], "tables": []}}
     request = APIRequestFactory().post(
         "/database/sources/discover/",
-        {"engine": "postgres", "configuration": {"host": "db.example", "password": "secret"}},
+        {"source_id": "f462c858-f0dd-4e7e-b484-495e21f4ef02"},
         format="json",
     )
     force_authenticate(request, user=_principal(workspace_id="19"))
-    with patch("database.views.requests.post", return_value=upstream) as post:
+    with patch("database.views._source_probe", return_value=(object(), ("probe-31", "job-31"), None)) as probe, patch(
+        "database.views.execution_reference", return_value={"source_id": "opaque-source-ref"}
+    ), patch("database.views.requests.post", return_value=upstream) as post:
         response = DatabaseSourceDiscoveryView.as_view()(request)
     assert response.status_code == 200
+    assert probe.call_args.args[1:] == (19, "discover")
     assert post.call_args.kwargs["headers"]["X-Workspace-ID"] == "19"
-    assert post.call_args.kwargs["json"]["configuration"]["password"] == "secret"
+    assert post.call_args.kwargs["json"]["credential_ref"]["source_id"] == "opaque-source-ref"
+    assert "configuration" not in post.call_args.kwargs["json"]
 
 
 def test_non_manager_cannot_probe_database_sources():
@@ -76,10 +80,10 @@ def test_snapshot_table_name_is_tenant_and_dataset_qualified():
 def test_preview_lookup_is_workspace_scoped():
     request = APIRequestFactory().get("/database/preview/")
     force_authenticate(request, user=_principal(workspace_id="23"))
-    with patch("database.views.Database.objects.get", side_effect=__import__("database.models", fromlist=["Database"]).Database.DoesNotExist) as get:
+    with patch("database.views._manager_dataset", return_value=None) as get:
         response = DatabasePreviewView.as_view()(request)
     assert response.status_code == 404
-    get.assert_called_once_with(manager=11, workspace_id=23)
+    assert get.call_args.args[1:] == (11, 23)
 
 
 def test_database_snapshot_does_not_complete_during_first_batch_race():
@@ -161,7 +165,7 @@ def test_preview_selects_only_an_allowlisted_imported_table():
         "rows": [{"Total Value": "12.34"}],
     }
     client.get_table_count.return_value = {"success": True, "count": 4}
-    with patch("database.views.Database.objects.get", return_value=database), patch(
+    with patch("database.views._manager_dataset", return_value=database), patch(
         "database.views.ClickHouseClient", return_value=client
     ):
         response = DatabasePreviewView.as_view()(request)
@@ -183,7 +187,7 @@ def test_preview_rejects_arbitrary_physical_table_name():
     )
     request = APIRequestFactory().get("/database/preview/?table=system.users")
     force_authenticate(request, user=_principal())
-    with patch("database.views.Database.objects.get", return_value=database), patch(
+    with patch("database.views._manager_dataset", return_value=database), patch(
         "database.views.ClickHouseClient"
     ) as clickhouse:
         response = DatabasePreviewView.as_view()(request)
@@ -208,10 +212,10 @@ def test_schema_endpoint_is_table_aware_and_workspace_scoped():
         "success": True,
         "schema": [{"name": "id", "type": "Int64"}],
     }
-    with patch("database.views.Database.objects.get", return_value=database) as get, patch(
+    with patch("database.views._manager_dataset", return_value=database) as get, patch(
         "database.views.ClickHouseClient", return_value=client
     ):
         response = DatabaseSchemaView.as_view()(request)
     assert response.status_code == 200
-    get.assert_called_once_with(manager=11, workspace_id=23)
+    assert get.call_args.args[1:] == (11, 23)
     client.get_table_schema.assert_called_once_with("etl", "w7_d31_sales_company_data_products")

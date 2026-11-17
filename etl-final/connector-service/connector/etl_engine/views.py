@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import json
+import uuid
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -30,6 +31,7 @@ from shared.utils.db_type_utils import normalize_db_type
 from shared.utils.schema_contract_store import build_schema_contract_store_from_env
 from shared.security.internal_auth import ETLInternalAuthentication, require_etl_scope
 from shared.security.destination_policy import DestinationPolicyError
+from shared.security.credential_client import resolve_source_execution
 from shared.connectors import ConnectorError, connector_registry, safe_connector_error
 
 
@@ -57,6 +59,25 @@ def _request_configuration(request):
     return dict(value)
 
 
+def _authorized_configuration(request, scope):
+    reference = request.data.get("credential_ref")
+    if reference is None:
+        if os.getenv("APP_ENV") == "production" and str(request.data.get("engine") or request.data.get("db_type") or "").lower() not in {"sqlite", "sqlite3"}:
+            raise ConnectorError("SOURCE_REQUIRED", "A governed source execution is required.", status_code=403)
+        return request.data.get("engine") or request.data.get("db_type"), _request_configuration(request), None, None
+    if request.data.get("configuration") not in (None, {}) or request.data.get("password") is not None:
+        raise ConnectorError("INVALID_CREDENTIAL_REFERENCE", "Credential authority cannot be mixed.")
+    if not isinstance(reference, dict) or any(str(reference.get(key)) != str(value) for key, value in (
+        ("workspace_id", scope.workspace_id), ("dataset_id", scope.dataset_id),
+        ("job_id", scope.ingestion_job_id),
+    )):
+        raise ConnectorError("INVALID_CREDENTIAL_REFERENCE", "Invalid source execution reference.")
+    engine, configuration, transport, version = resolve_source_execution(reference, service="etl-connector")
+    if transport != "direct_secure_internet":
+        raise ConnectorError("TRANSPORT_UNAVAILABLE", "The source transport is unavailable.")
+    return engine, configuration, reference, version
+
+
 class DatabaseCapabilitiesView(APIView):
     authentication_classes = [ETLInternalAuthentication]
 
@@ -70,8 +91,8 @@ class DatabaseConnectionTestView(APIView):
     def post(self, request):
         scope = require_etl_scope(request)
         try:
-            connector = connector_registry.get(request.data.get("engine") or request.data.get("db_type"))
-            configuration = _request_configuration(request)
+            engine, configuration, _, _ = _authorized_configuration(request, scope)
+            connector = connector_registry.get(engine)
             configuration["workspace_id"] = scope.workspace_id
             return Response({"success": True, "data": connector.test_connection(configuration)})
         except Exception as exc:
@@ -84,8 +105,8 @@ class DatabaseDiscoveryView(APIView):
     def post(self, request):
         scope = require_etl_scope(request)
         try:
-            connector = connector_registry.get(request.data.get("engine") or request.data.get("db_type"))
-            configuration = _request_configuration(request)
+            engine, configuration, _, _ = _authorized_configuration(request, scope)
+            connector = connector_registry.get(engine)
             configuration["workspace_id"] = scope.workspace_id
             data = connector.discover(
                 configuration,
@@ -140,8 +161,16 @@ class DatabaseSnapshotView(APIView):
     def post(self, request):
         scope = require_etl_scope(request)
         try:
-            connector = connector_registry.get(request.data.get("engine") or request.data.get("db_type"))
-            configuration = _request_configuration(request)
+            integration_source_id = request.data.get("integration_source_id")
+            if integration_source_id is not None:
+                try:
+                    integration_source_id = str(uuid.UUID(str(integration_source_id)))
+                except (TypeError, ValueError, AttributeError) as exc:
+                    raise ConnectorError("INVALID_CONFIGURATION", "Invalid integration source identifier.") from exc
+            engine, configuration, credential_ref, configuration_version = _authorized_configuration(request, scope)
+            if credential_ref is not None and integration_source_id != credential_ref.get("source_id"):
+                raise ConnectorError("INVALID_CREDENTIAL_REFERENCE", "Source execution reference does not match the source.")
+            connector = connector_registry.get(engine)
             configuration["workspace_id"] = scope.workspace_id
             validated = connector.validate_configuration(configuration)
             selected_tables = request.data.get("tables")
@@ -172,7 +201,9 @@ class DatabaseSnapshotView(APIView):
                 key: value for key, value in validated.items()
                 if key not in {"resolved_host", "sqlite_path", "workspace_id"}
             }
-            if "password" in event_config:
+            if credential_ref is not None:
+                event_config = {key: value for key, value in event_config.items() if key != "password"}
+            elif "password" in event_config:
                 event_config["password"] = get_encryption_instance().encrypt(str(event_config["password"]))
                 event_config["_password_encrypted"] = True
             message = {
@@ -185,6 +216,14 @@ class DatabaseSnapshotView(APIView):
                 "chunk_size": max(100, min(int(request.data.get("chunk_size", 1000)), 10000)),
                 **scope.as_message_fields(),
             }
+            if credential_ref is not None:
+                message["contract_version"] = 2
+                message["credential_ref"] = credential_ref
+                message["configuration_version"] = configuration_version
+            if integration_source_id is not None:
+                # P1 source_id remains the dataset-scoped extraction identity.
+                # The Integration aggregate has a separate stable UUID.
+                message["integration_source_id"] = integration_source_id
             if connector.key == "sqlite":
                 # Query ends a SQLite processing attempt within one hour; the
                 # staged source remains private for 24 hours from this dispatch.
@@ -343,6 +382,8 @@ class ConnectDBView(APIView):
     authentication_classes = [ETLInternalAuthentication]
 
     def post(self, request):
+        if os.getenv("APP_ENV") == "production":
+            return _connector_response_error(ConnectorError("SOURCE_REQUIRED", "Use a governed source execution.", status_code=410))
         scope = require_etl_scope(request)
         # Validate payload size
         is_valid_size, size_error = validate_json_payload_size(request.data)

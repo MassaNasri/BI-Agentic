@@ -41,6 +41,61 @@ class TestExtractorListenerP0Fixes(unittest.TestCase):
             }))
         connector.assert_not_called()
 
+    def test_v2_event_without_reference_cannot_use_legacy_configuration(self):
+        listener, _, _ = self._build_listener()
+        message = {
+            'type': 'database', 'db_type': 'postgresql', 'contract_version': 2,
+            'workspace_id': 23, 'dataset_id': '42', 'ingestion_job_id': 'job',
+            'configuration': {'host': 'example.org', 'password': 'legacy-secret'},
+        }
+        with patch.object(listener.db_connector, 'get_connector') as connector:
+            self.assertFalse(listener.process_database(message))
+        connector.assert_not_called()
+
+    def test_v2_event_uses_resolved_configuration(self):
+        listener, _, _ = self._build_listener()
+        reference = {
+            'source_id': 'source', 'workspace_id': 23, 'dataset_id': '42',
+            'job_id': 'job', 'credential_id': 'credential', 'credential_version': 1,
+        }
+        message = {
+            'type': 'database', 'db_type': 'postgresql', 'contract_version': 2,
+            'workspace_id': 23, 'dataset_id': '42', 'ingestion_job_id': 'job',
+            'integration_source_id': 'source', 'configuration_version': 3,
+            'credential_ref': reference, 'configuration': {'host': 'ignored.example'},
+        }
+        resolved = {'host': 'real.example', 'database': 'db', 'password': 'resolved-secret'}
+        connector = Mock()
+        connector.key = 'postgresql'
+        connector.validate_configuration.return_value = resolved
+        connector.connect.side_effect = RuntimeError('stop after credential selection')
+        with patch('shared.security.credential_client.resolve_source_execution',
+                   return_value=('postgresql', resolved, 'direct_secure_internet', 3)) as resolver, \
+             patch.object(listener.db_connector, 'get_connector', return_value=connector) as get_connector:
+            self.assertFalse(listener.process_database(message))
+        resolver.assert_called_once_with(reference, service='etl-extractor')
+        self.assertEqual(get_connector.call_args.args[0]['host'], 'real.example')
+        self.assertEqual(get_connector.call_args.args[0]['password'], 'resolved-secret')
+
+    def test_v2_event_rejects_mismatched_configuration_version(self):
+        listener, _, _ = self._build_listener()
+        reference = {
+            'source_id': 'source', 'workspace_id': 23, 'dataset_id': '42',
+            'job_id': 'job', 'credential_id': 'credential', 'credential_version': 1,
+        }
+        message = {
+            'type': 'database', 'db_type': 'postgresql', 'contract_version': 2,
+            'workspace_id': 23, 'dataset_id': '42', 'ingestion_job_id': 'job',
+            'integration_source_id': 'source', 'configuration_version': 3,
+            'credential_ref': reference,
+        }
+        with patch('shared.security.credential_client.resolve_source_execution',
+                   return_value=('postgresql', {'host': 'real.example'},
+                                 'direct_secure_internet', 4)), \
+             patch.object(listener.db_connector, 'get_connector') as connector:
+            self.assertFalse(listener.process_database(message))
+        connector.assert_not_called()
+
     def test_completed_sqlite_cleanup_requires_exact_workspace_and_generated_name(self):
         with TemporaryDirectory() as root, patch.dict(os.environ, {'ETL_SQLITE_ROOT': root}):
             own = Path(root) / ('sqlite_23_' + 'a' * 32 + '.db')

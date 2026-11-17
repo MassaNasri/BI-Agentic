@@ -1,0 +1,269 @@
+# Isolated acceptance stack. Explicit --project-name and external --env-file.
+# Never production: production transport and deployment certification are gated.
+x-worker: &worker
+  build:
+    context: .
+    dockerfile: etl-final/shared/cdc/Dockerfile
+  image: biavora-foundation-d-worker:local
+  restart: unless-stopped
+  mem_limit: 384m
+  cpus: 1
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  volumes: [./scripts:/acceptance:ro]
+  healthcheck:
+    test: [CMD, python, -m, shared.cdc.health]
+    interval: 10s
+    timeout: 3s
+    start_period: 45s
+    retries: 3
+  depends_on:
+    query: {condition: service_healthy}
+    connect: {condition: service_healthy}
+  environment: &worker-env
+    APP_ENV: test
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    CDC_CONTROL_URL: http://query:8006/internal/v1/cdc/
+
+services:
+  postgres:
+    image: postgres@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+    command: [postgres, -c, wal_level=logical, -c, max_replication_slots=80, -c, max_wal_senders=80, -c, max_slot_wal_keep_size=512MB]
+    environment:
+      POSTGRES_PASSWORD: ${CDC_PG_PASSWORD:?external fixture secret required}
+      POSTGRES_DB: biavora
+    volumes: [postgres-data:/var/lib/postgresql]
+    ports: [127.0.0.1:18094:5432]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    mem_limit: 384m
+  zookeeper:
+    image: confluentinc/cp-zookeeper@sha256:02f6c042bb9a7844382fc4cedc513a44585d8a5acae873fb9e510e3ca9dcabc6
+    environment: {ZOOKEEPER_CLIENT_PORT: 2181, ZOOKEEPER_TICK_TIME: 2000}
+    mem_limit: 384m
+  kafka:
+    image: confluentinc/cp-kafka@sha256:fbbb6fa11b258a88b83f54d4f0bddfcffbf2279f99d66a843486e3da7bdfbf41
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: 536870912
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes: [kafka-data:/var/lib/kafka/data]
+    mem_limit: 1g
+    healthcheck:
+      test: [CMD-SHELL, kafka-topics --bootstrap-server kafka:9092 --list >/dev/null]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+  connect:
+    image: quay.io/debezium/connect:3.4.3.Final@sha256:4f807bd409b47268077e1142524f368db170560d5caceaee48a6a7a7fd288570
+    restart: unless-stopped
+    depends_on:
+      kafka: {condition: service_healthy}
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: biavora-cdc-connect-v1
+      CONFIG_STORAGE_TOPIC: _biavora_cdc_connect_config_v1
+      OFFSET_STORAGE_TOPIC: _biavora_cdc_connect_offsets_v1
+      STATUS_STORAGE_TOPIC: _biavora_cdc_connect_status_v1
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_CONFIG_PROVIDERS: file
+      CONNECT_CONFIG_PROVIDERS_FILE_CLASS: org.apache.kafka.common.config.provider.FileConfigProvider
+      CONNECT_CONFIG_PROVIDERS_FILE_PARAM_ALLOWED_PATHS: /run/cdc-secrets
+      CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY: None
+      CONNECT_TASK_SHUTDOWN_GRACEFUL_TIMEOUT_MS: 60000
+      # A lone worker can otherwise leave tasks UNASSIGNED for the Kafka
+      # Connect default five-minute cooperative rebalance delay after an outage.
+      CONNECT_SCHEDULED_REBALANCE_MAX_DELAY_MS: 10000
+      CONNECT_PRODUCER_REQUEST_TIMEOUT_MS: 10000
+      CONNECT_PRODUCER_DELIVERY_TIMEOUT_MS: 30000
+      CONNECT_PRODUCER_MAX_BLOCK_MS: 10000
+      HEAP_OPTS: -Xms256m -Xmx768m
+      OFFSET_FLUSH_INTERVAL_MS: 1000
+    volumes: [connect-secrets:/run/cdc-secrets:ro]
+    # REST has no host port or gateway route.
+    healthcheck:
+      test: [CMD-SHELL, curl -fsS http://localhost:8083/ >/dev/null]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+    mem_limit: 1280m
+    cpus: 2
+  clickhouse:
+    image: clickhouse/clickhouse-server@sha256:0b2d7824347397b2ba6fcb216f0ae772568105f1f47e19f0d3247e24c79bc10a
+    environment:
+      CLICKHOUSE_DB: etl
+      CLICKHOUSE_USER: cdc_loader
+      CLICKHOUSE_PASSWORD: ${CDC_CH_PASSWORD:?external fixture secret required}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    volumes: [clickhouse-data:/var/lib/clickhouse]
+    ports: [127.0.0.1:18095:8123]
+    mem_limit: 1g
+    healthcheck:
+      test: [CMD-SHELL, wget -qO- http://localhost:8123/ping]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  auth-bootstrap:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    command: [sh, -c, 'python manage.py migrate --noinput && python manage.py shell -c "from users.models import User; [User.objects.get_or_create(id=i, defaults=dict(email=str(i)+chr(64)+\"cdc.invalid\", name=\"CDC fixture\", role=\"manager\", password=\"!\", is_verified=True)) for i in (11,22)]"']
+    environment: &bootstrap-env
+      APP_ENV: test
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: biavora
+      DB_USER: postgres
+      DB_PASSWORD: ${CDC_PG_PASSWORD}
+    depends_on:
+      postgres: {condition: service_healthy}
+  workspace-bootstrap:
+    build:
+      context: .
+      dockerfile: services/workspace-service/Dockerfile
+    command: [sh, -c, 'python manage.py migrate --noinput && python manage.py shell -c "from workspace.models import Workspace; [Workspace.objects.get_or_create(id=i, defaults=dict(name=\"CDC workspace\", owner=i)) for i in (11,22)]"']
+    environment: *bootstrap-env
+    depends_on:
+      auth-bootstrap: {condition: service_completed_successfully}
+  query:
+    build:
+      context: .
+      dockerfile: services/query-service/Dockerfile
+    command: [sh, -c, 'python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8006 --noreload']
+    environment:
+      APP_ENV: test
+      DEBUG: 'false'
+      ALLOWED_HOSTS: localhost,127.0.0.1,query
+      DJANGO_SECRET_KEY: ${CDC_JWT_KEY:?external fixture secret required}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: biavora
+      DB_USER: postgres
+      DB_PASSWORD: ${CDC_PG_PASSWORD:?external fixture secret required}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_USER: cdc_query
+      CLICKHOUSE_PASSWORD: ${CDC_QUERY_CH_PASSWORD:?external fixture secret required}
+      CLICKHOUSE_DATABASE: etl
+      CREDENTIAL_SECRET_KEY: ${CDC_CREDENTIAL_KEY:?external fixture secret required}
+      ETL_SERVICE_URL: http://connector:8000
+      ETL_INTERNAL_API_KEY: ${CDC_ETL_KEY:?external fixture secret required}
+      CREDENTIAL_RESOLVER_CONNECTOR_KEY: ${CDC_RESOLVER_KEY:?external fixture secret required}
+      CDC_ENABLED: '1'
+      CDC_CONTROLLER_KEY: ${CDC_CONTROLLER_KEY:?external fixture secret required}
+      CDC_NORMALIZE_KEY: ${CDC_NORMALIZE_KEY:?external fixture secret required}
+      CDC_TRANSFORM_KEY: ${CDC_TRANSFORM_KEY:?external fixture secret required}
+      CDC_LOAD_KEY: ${CDC_LOAD_KEY:?external fixture secret required}
+      CDC_RESEED_OPERATOR_KEY: d5-r1-isolated-fixture-only
+      QUERY_INTERNAL_API_KEY: ${CDC_QUERY_KEY:?external fixture secret required}
+      QUERY_CONCURRENCY_BACKEND: local
+    ports: [127.0.0.1:18096:8006]
+    depends_on:
+      workspace-bootstrap: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:8006/health/")']
+      interval: 5s
+      timeout: 3s
+      retries: 40
+    mem_limit: 384m
+  secret-init:
+    image: biavora-foundation-d-worker:local
+    user: '0:0'
+    entrypoint: [sh, -c, 'chown 1001:1001 /run/cdc-secrets && chmod 700 /run/cdc-secrets']
+    volumes: [connect-secrets:/run/cdc-secrets]
+  connector:
+    build:
+      context: .
+      dockerfile: etl-final/connector-service/Dockerfile
+    command: [python, connector-service/connector/manage.py, runserver, '0.0.0.0:8000', --noreload]
+    environment:
+      APP_ENV: test
+      DJANGO_ALLOWED_HOSTS: connector,localhost,127.0.0.1
+      ETL_INTERNAL_API_KEY: ${CDC_ETL_KEY}
+      CREDENTIAL_RESOLVER_CONNECTOR_KEY: ${CDC_RESOLVER_KEY}
+      CREDENTIAL_SECRET_KEY: ${CDC_CREDENTIAL_KEY}
+      QUERY_SERVICE_URL: http://query:8006
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ETL_APPROVED_DESTINATION_CIDRS: 172.16.0.0/12
+    mem_limit: 384m
+  controller:
+    <<: *worker
+    command: [--stage, controller]
+    environment:
+      <<: *worker-env
+      CDC_SERVICE_KEY: ${CDC_CONTROLLER_KEY}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_HTTP_PORT: 8123
+      CLICKHOUSE_USER: cdc_loader
+      CLICKHOUSE_PASSWORD: ${CDC_CH_PASSWORD:?external fixture secret required}
+      CLICKHOUSE_DATABASE: etl
+      CDC_CONNECT_URL: http://connect:8083
+      CDC_D5_R4A_GATE_SCOPE_TOKEN: ${CDC_D5_R4A_GATE_SCOPE_TOKEN:-}
+      CDC_D5_R4A_RECONCILE_GATE_SCOPE_TOKEN: ${CDC_D5_R4A_RECONCILE_GATE_SCOPE_TOKEN:-}
+      CDC_SECRET_DIRECTORY: /run/cdc-secrets
+      CREDENTIAL_SECRET_KEY: ${CDC_CREDENTIAL_KEY}
+      ETL_APPROVED_DESTINATION_CIDRS: 172.16.0.0/12
+    volumes: [connect-secrets:/run/cdc-secrets]
+    depends_on:
+      query: {condition: service_healthy}
+      connect: {condition: service_healthy}
+      secret-init: {condition: service_completed_successfully}
+  normalizer:
+    <<: *worker
+    command: [--stage, normalize]
+    environment:
+      <<: *worker-env
+      CDC_SERVICE_KEY: ${CDC_NORMALIZE_KEY}
+  transformer:
+    <<: *worker
+    command: [--stage, transform]
+    environment:
+      <<: *worker-env
+      CDC_SERVICE_KEY: ${CDC_TRANSFORM_KEY}
+  loader:
+    <<: *worker
+    command: [--stage, load]
+    environment:
+      <<: *worker-env
+      CDC_SERVICE_KEY: ${CDC_LOAD_KEY}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_HTTP_PORT: 8123
+      CLICKHOUSE_USER: cdc_loader
+      CLICKHOUSE_PASSWORD: ${CDC_CH_PASSWORD:?external fixture secret required}
+      CLICKHOUSE_DATABASE: etl
+  acceptance:
+    <<: *worker
+    profiles: [acceptance]
+    restart: 'no'
+    entrypoint: [python, /acceptance/foundation_d_kafka_probe.py]
+    environment:
+      <<: *worker-env
+      CDC_SERVICE_KEY: ${CDC_NORMALIZE_KEY}
+      CDC_CONTROLLER_KEY: ${CDC_CONTROLLER_KEY}
+      CDC_SOURCE_PASSWORD: ${CDC_SOURCE_PASSWORD}
+      CDC_SOURCE_ROTATED_PASSWORD: ${CDC_SOURCE_ROTATED_PASSWORD}
+      CDC_CREDENTIAL_KEY: ${CDC_CREDENTIAL_KEY}
+      CDC_CONNECT_URL: http://connect:8083
+volumes:
+  postgres-data:
+  kafka-data:
+  clickhouse-data:
+  connect-secrets:

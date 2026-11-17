@@ -46,6 +46,11 @@ def is_public_path(path: str) -> bool:
 
 
 def resolve_target(path: str) -> Optional[RouteTarget]:
+    if path.startswith('/workspace/internal/') or path in {
+        '/notification/events/',
+        '/notification/subscriptions/expiry-warnings/run/',
+    }:
+        return None
     if path.startswith('/admin/users'):
         return RouteTarget(service='auth-service', base_url=AUTH_SERVICE_URL)
 

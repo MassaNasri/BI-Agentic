@@ -1,13 +1,19 @@
 """Network destination policy for user supplied database connections."""
 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as ResolverTimeout
 import ipaddress
 import os
 import socket
+import threading
 
 
 class DestinationPolicyError(ValueError):
     pass
+
+
+_DNS_WORKERS = ThreadPoolExecutor(max_workers=4, thread_name_prefix="source-dns")
+_DNS_SLOTS = threading.BoundedSemaphore(4)
 
 
 def _approved_networks():
@@ -24,6 +30,8 @@ def _approved_networks():
 
 
 def _is_explicitly_approved(address, networks) -> bool:
+    if os.getenv("APP_ENV") == "production":
+        return False
     return any(address.version == network.version and address in network for network in networks)
 
 
@@ -35,6 +43,7 @@ def _is_forbidden(address) -> bool:
         address.is_multicast,
         address.is_reserved,
         address.is_unspecified,
+        not address.is_global,
     ))
 
 
@@ -42,7 +51,20 @@ def validate_destination(host: str, port: int):
     """Resolve every address and reject the destination if any result violates policy."""
 
     try:
-        resolved = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
+        port = int(port)
+        if not 1 <= port <= 65535:
+            raise ValueError
+        if not _DNS_SLOTS.acquire(timeout=3):
+            raise ResolverTimeout()
+        try:
+            future = _DNS_WORKERS.submit(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
+        except Exception:
+            _DNS_SLOTS.release()
+            raise
+        future.add_done_callback(lambda _future: _DNS_SLOTS.release())
+        resolved = future.result(timeout=3)
+    except ResolverTimeout as exc:
+        raise DestinationPolicyError("Database destination could not be resolved within the time limit.") from exc
     except (socket.gaierror, OSError, TypeError, ValueError) as exc:
         raise DestinationPolicyError("Database destination could not be resolved.") from exc
     addresses = {ipaddress.ip_address(item[4][0]) for item in resolved}

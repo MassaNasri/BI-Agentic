@@ -49,6 +49,7 @@ def _resolver(workspace_id, *, dataset_id=None, **_kwargs):
         clickhouse_db=database,
         table_name=table,
         allowed_tables=frozenset({table}),
+        source_kind="snapshot",
     )
 
 

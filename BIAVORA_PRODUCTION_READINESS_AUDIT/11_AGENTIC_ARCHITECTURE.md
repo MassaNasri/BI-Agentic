@@ -1,3 +1,5 @@
+> **SUPERSEDED SUPPORTING PLAN — 2026-10-27.** The body below preserves prior design context, not January commitments. Product Scope revision dated 2026-10-27 in [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md), current architecture 22/30–34, and presentation 44/46 control. Structured & Unstructured RAG, Proactive Monitoring Agent and Arabic & Voice Support expansion are OUT OF JANUARY 10 RELEASE SCOPE; do not implement their old milestones. Existing functionality/security remains maintained.
+
 # Agentic architecture
 
 > **v2 canonical alignment:** Week 14 uses **one governed Analyst Orchestrator** with typed tools, durable job state, bounded steps/budget, and policy enforcement. Separate worker pools are permitted for compute or isolation; a conversational multi-agent network is not in scope. Long operations use the canonical `QUEUED/RUNNING/RETRYING/SUCCEEDED/FAILED/CANCELLED` job model.

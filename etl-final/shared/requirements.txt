@@ -1,4 +1,4 @@
-kafka-python
+kafka-python==2.3.0
 requests
 cryptography
 clickhouse-driver

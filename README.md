@@ -1,8 +1,12 @@
 # BI Voice Agent - Unified Microservices + ETL Stack
 
+## Release planning source of truth
+
+The **10 January 2027** release blueprint starts with [the master context](BIAVORA_PRODUCTION_READINESS_AUDIT/34_BIAVORA_MASTER_CONTEXT_FOR_FUTURE_PROMPTS.md) and [scope/roadmap](BIAVORA_PRODUCTION_READINESS_AUDIT/43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md). **Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.** Next phase: Foundation-D — PostgreSQL CDC after current release CI GREEN; repaired remote verification is PENDING_PUSH_AND_RUN. See the [local closure and CI repair report](BIAVORA_PRODUCTION_READINESS_AUDIT/49_FOUNDATION_C_LOCAL_CLOSURE_AND_CI_REPAIR_REPORT.md).
+
 ## Full Architecture
 
-### Microservices Layer (8 services)
+### Business/API Layer (10 services)
 1. `api-gateway`
 2. `auth-service`
 3. `workspace-service`
@@ -11,6 +15,10 @@
 6. `ai-service`
 7. `query-service`
 8. `visualization-service`
+9. `subscription-service`
+10. `notification-service`
+
+Root Compose also defines credential-prune and notification-expiry worker processes. Domain ownership is documented separately from deployment count in the canonical ownership map.
 
 ### ETL Platform (discovered from `etl-final/docker-compose.yml`)
 1. `etl-connector` - file upload entrypoint (`/api/upload/`, `/api/connect-db/`) and Kafka trigger publisher.
@@ -29,11 +37,9 @@
 - `clamav`
 - volumes: `uploaded-files`, `clickhouse_data`, `clickhouse_logs`, `surreal_data`, `clamav_data`
 
-### External Services (not containerized)
-- PostgreSQL (external)
-- Metabase (external)
+### Root Compose dependencies
 
-`PostgreSQL` and `Metabase` are intentionally excluded from `docker-compose.yml`.
+Application PostgreSQL remains externally configured. Root `docker-compose.yml` includes Redis, Metabase and its `metabase-db` PostgreSQL container, alongside the ETL infrastructure. The historical `etl-final/docker-compose.yml` is not the complete unified topology. Local Compose is a development/reference environment, not production certification.
 
 ## ETL Components Discovered
 Runtime inspection of `etl-final/` found:

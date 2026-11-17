@@ -1,3 +1,5 @@
+> **SUPERSEDED SUPPORTING PLAN — 2026-10-27.** The body below preserves prior design context, not January commitments. Product Scope revision dated 2026-10-27 in [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEASE_ROADMAP_2027.md), current architecture 22/30–34, and presentation 44/46 control. Structured & Unstructured RAG, Proactive Monitoring Agent and Arabic & Voice Support expansion are OUT OF JANUARY 10 RELEASE SCOPE; do not implement their old milestones. Existing functionality/security remains maintained.
+
 # Semantic layer and modeling agent plan
 
 > **v2 canonical alignment:** The Semantic Layer is a P1 foundational platform feature, not a missing-feature P0 and not a UI convenience. It governs SQL, Analyst, Modeling, Proactive, Trust, RAG, What-if, Reports, and Visualization. The modeling agent may only `PROPOSE -> VALIDATE -> EXPLAIN -> HUMAN REVIEW -> APPROVE -> VERSION -> PUBLISH`; it may never auto-publish business meaning.
