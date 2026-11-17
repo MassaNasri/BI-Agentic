@@ -328,7 +328,7 @@ jobs:
           for service in auth-service workspace-service subscription-service query-service; do
             (cd "services/$service" && python manage.py migrate --noinput --verbosity 0)
           done
-          python -c 'import os, psycopg2; c=psycopg2.connect(host=os.environ["DB_HOST"], dbname=os.environ["DB_NAME"], user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"]); k=c.cursor(); k.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=%s AND table_name LIKE %s", ("public", "integration_%")); assert k.fetchone()[0] == 7; c.close()'
+          python -c 'import os, psycopg2; c=psycopg2.connect(host=os.environ["DB_HOST"], dbname=os.environ["DB_NAME"], user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"]); k=c.cursor(); k.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=%s AND table_name LIKE %s", ("public", "integration_%")); assert k.fetchone()[0] == 8; c.close()'
           python scripts/foundation_c4_owner_schemas.py apply
           python scripts/verify_foundation_c5_service_roles.py
           python scripts/foundation_c4_owner_schemas.py rollback

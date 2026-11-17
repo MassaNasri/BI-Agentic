@@ -76,35 +76,35 @@ Python/static compile passed 883 maintained files; the workflow verifier passed 
 
 ## Commit Evidence
 
-Pending reviewed commit.
+Initial reviewed candidate commit `67399c7d207d28157265c1f38a9c76c4ac1dfe8e` contained the 137-file frozen tree. The first remote run exposed two release-gate repository defects; a narrow follow-up candidate commit is pending. No Foundation-D production/runtime file changed after report 63.
 
 ## Post-Commit Tree State
 
-Pending. Expected exclusions are the pre-existing TimesFM dirty marker and disposable SQLite database.
+After the initial commit, the only remaining paths were the pre-existing TimesFM dirty marker and disposable SQLite database. The follow-up workflow/inventory/report edits are the required CI remediation, not unrelated work.
 
 ## Push Evidence
 
-Pending normal push to `origin/foundation-c-staging`; no force push.
+Normal push of `67399c7d207d28157265c1f38a9c76c4ac1dfe8e` to `origin/foundation-c-staging` succeeded without force. GitHub PR #1 confirmed its remote head SHA matched. Follow-up candidate push pending.
 
 ## Remote Workflow
 
-Canonical `.github/workflows/p0c-release-gate.yml` (`P0-C release gate`) supports `pull_request` and `workflow_dispatch`. Existing open PR #1 has head `foundation-c-staging` and base `main`, so the normal push triggers the complete workflow. Run ID, URL, SHA, timing and conclusion pending.
+Canonical `.github/workflows/p0c-release-gate.yml` (`P0-C release gate`) supports `pull_request` and `workflow_dispatch`. Existing open PR #1 has head `foundation-c-staging` and base `main`, so the normal push triggered run [44161926966](https://github.com/MassaNasri/BI-Agentic/actions/runs/44161926966) at `2026-11-17T19:45:03Z`. Its `head_sha` exactly matched the first candidate; its conclusion was failure. The corrected candidate's run is pending.
 
 ## Remote Exact-SHA Verification
 
-Pending comparison of accepted commit, remote branch head and workflow `head_sha`.
+The first attempt had local commit = remote PR head = workflow `head_sha` = `67399c7d207d28157265c1f38a9c76c4ac1dfe8e` (PASS). Its CI failed, so it cannot close G-D. The corrected candidate requires a fresh exact-SHA comparison.
 
 ## Nine-Job CI Matrix
 
-Required prerequisite jobs: `current-tree-secret-scan`, `static-and-compose`, `frontend`, `backend-and-ai`, `etl`, `security-regression` (six service environments), `migration-drift`, `docker-build`, `foundation-c-owner-boundary`. The always-running `release-gate` aggregator must also succeed. Remote per-job status, conclusion, duration and failures pending.
+Required prerequisite jobs: `current-tree-secret-scan`, `static-and-compose`, `frontend`, `backend-and-ai`, `etl`, `security-regression` (six service environments), `migration-drift`, `docker-build`, `foundation-c-owner-boundary`. The always-running `release-gate` aggregator must also succeed. First attempt: six prerequisite successes (`current-tree-secret-scan`, `static-and-compose`, `frontend`, `etl`, `migration-drift`, `docker-build`); two failures (`backend-and-ai`, `foundation-c-owner-boundary`); `security-regression` skipped due failed prerequisites; `release-gate` failed. No partial result is GREEN. Corrected candidate's full matrix is pending.
 
 ## Remote Security Results
 
-Pending actual `current-tree-secret-scan`, all six `security-regression` matrix environments, and owner-boundary job; no skipped or continue-on-error substitutes accepted.
+First attempt's `current-tree-secret-scan` passed, but `security-regression` was skipped and owner-boundary failed. The corrected candidate must run all six security environments and owner-boundary successfully; no skipped or continue-on-error substitutes are accepted.
 
 ## CI Failure / Retry History
 
-None yet. Any repository defect requires a new commit and affected local revalidation; an older SHA's workflow cannot close G-D.
+First exact-SHA run `44161926966` failed for two repository defects. The owner job's inline assertion expected seven `integration_%` tables, while the applied Foundation-D migrations create eight; a disposable PostgreSQL query confirmed eight. The backend job's reviewed public-route inventory omitted three new CDC URLs. The fix changes the expected count to eight and adds the two authorized source CDC routes as `PUBLIC` and `internal/v1/cdc/` as `INTERNAL_ONLY`. The local route verifier passed for all ten services; the Query CDC/public-boundary suite passed 55 tests; the workflow contract verifier passed. The owner-role CRUD/denial/rollback and Foundation-D migration round trip had already passed in separate fresh disposable databases. No production/runtime file was changed, so report 63's performance, broker and local regression evidence remains valid. A new exact-SHA CI run is required; the failed run remains historical.
 
 ## Final D1-D6 Acceptance Matrix
 
@@ -136,7 +136,7 @@ Hosted TLS verify-full, Kafka ACL/TLS, workload identities, managed secrets/KMS,
 
 ## Final Git / Repository State
 
-Pending commit, push and remote exact-SHA verification. This report is an accurate pre-CI status record for the release candidate; post-CI evidence may be recorded outside the candidate SHA to avoid a self-referential status commit.
+The first candidate was committed and pushed; its remote CI failed. The narrow corrected candidate is under local review. Until it is committed, pushed and passes a complete exact-SHA run, Foundation-D remains LOCAL READY, G-D BLOCKED and Production Readiness NO-GO. Post-CI GREEN evidence may be recorded outside the candidate SHA to avoid a self-referential status commit.
 
 ## Entry Path Appendix
 
