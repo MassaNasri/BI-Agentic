@@ -10,8 +10,11 @@ from .views import (
     DatabaseSourceDiscoveryView, DatabaseSnapshotStartView, SQLiteSourcePrepareView
 )
 from integration.views import SourcesView, SourceDetailView, SourceCredentialView, SourceReplacementView, SourceReplacementActionView
+from integration.cdc import SourceCdcView
 
 urlpatterns = [
+    path('sources/<uuid:source_id>/cdc/', SourceCdcView.as_view(), name='source-cdc'),
+    path('sources/<uuid:source_id>/cdc/<str:action>/', SourceCdcView.as_view(), name='source-cdc-action'),
     # Health check endpoint
     path('health/', DatabaseHealthCheckView.as_view(), name='database-health'),
     

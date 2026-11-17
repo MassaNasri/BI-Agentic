@@ -21,6 +21,8 @@ OWNERS = {
         "integration_data_sources", "integration_source_credentials",
         "integration_source_executions", "integration_source_candidates",
         "integration_source_operation_budgets",
+        "integration_cdc_pipelines", "integration_cdc_audit",
+        "integration_cdc_generations",
     ),
     "query": ("manager_databases", "authorized_query_definitions"),
     "entitlement": (

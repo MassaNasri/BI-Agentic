@@ -38,6 +38,8 @@ class PublicBoundaryTests(TestCase):
             "database/health/", "database/upload/", "database/datasets/", "database/",
             "database/preview/", "database/schema/", "database/sources/capabilities/",
             "database/sources/", "database/sources/<uuid:source_id>/",
+            "database/sources/<uuid:source_id>/cdc/",
+            "database/sources/<uuid:source_id>/cdc/<str:action>/",
             "database/sources/<uuid:source_id>/credential/<str:action>/",
             "database/sources/<uuid:source_id>/replacement/",
             "database/sources/<uuid:source_id>/replacement/<str:action>/",

@@ -15,12 +15,12 @@ Original scope-reconciliation baseline: branch `foundation-c-staging`, HEAD `9ed
 |---|---|---|
 | CLOSED | Acceptance for a named defect or explicitly scoped local development phase | A: BIA-001/002/010; B: BIA-003/006/011; C local defects in 36–42; C local phase closure in 49, without deployment certification |
 | LOCAL PASS | Executed deterministic/disposable checks; not deployed certification | C6 restricted-role lifecycle, migration/rollback, 24 foreign-workspace cases, v2 replay; report 42 |
-| PARTIAL | Useful implementation with remaining requirements | BIA-008 credential lifecycle; durable job skeleton; provider/evaluation/metering/operating foundations |
+| PARTIAL | Useful implementation with remaining requirements | Foundation-D PostgreSQL CDC (50); BIA-008 credential lifecycle; durable job skeleton; provider/evaluation/metering/operating foundations |
 | DEFERRED_TO_PRODUCTION_READINESS | Missing deployment proof retained as a mandatory production gate; no longer a local development blocker | CAP-14 / G-C-DEPLOY; report 49 supersedes sequencing in 42 |
 | TRANSITIONAL | Compatibility with a bounded retirement condition | Kafka v1 reader, default OFF in production; real backlog/drain not attested |
-| NOT STARTED | Required release capability has no implemented governed runtime found | PostgreSQL CDC, persisted governed semantics/model publication, Presentation domain/provider adapters, governed MCP approvals |
+| NOT STARTED | Required release capability has no implemented governed runtime found | Persisted governed semantics/model publication, Presentation domain/provider adapters, governed MCP approvals |
 
-Foundation-A/B retain their scoped GREEN reports. **Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.** The owner-approved sequencing change is recorded in [49](49_FOUNDATION_C_LOCAL_CLOSURE_AND_CI_REPAIR_REPORT.md); report 42 remains unchanged evidence of the earlier external-blocking interpretation. Previous remote run: **FAILED** (owner-reported Auth production environment and Security Regression dependency conflict). Fix implemented locally; new remote verification: **PENDING_PUSH_AND_RUN**. No repaired remote GREEN is claimed. The workflow runs on PRs, main pushes or manual dispatch; a branch push alone is not proof of a run.
+Foundation-A/B retain their scoped GREEN reports. **Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.** The owner-approved sequencing change is recorded in [49](49_FOUNDATION_C_LOCAL_CLOSURE_AND_CI_REPAIR_REPORT.md); report 42 remains unchanged evidence of the earlier external-blocking interpretation. The Foundation-D entry mission attests current baseline CI **GREEN**. This is owner-provided entry evidence; the unstaged Foundation-D changes have not been pushed or remotely certified. Local checks and their limits are recorded in report 50. The workflow runs on PRs, main pushes or manual dispatch; a branch push alone is not proof of a run.
 
 ## Product and customer release contract
 
@@ -57,7 +57,7 @@ Paid checkout is conditional, not silently added to the 14 capabilities. Initial
 
 | Engine/input | Existing snapshot/import evidence | Direct secure production today | January promise | CDC |
 |---|---|---|---|---|
-| PostgreSQL (`postgres` registry key) | P1-R live, C6 full local lifecycle | Pin/verify-full fixtures pass; combined public TLS/egress blocked externally | Required, after CAP-14 external deployment gate | Required after CDC gate; currently false |
+| PostgreSQL (`postgres` registry key) | P1-R live, C6 full local lifecycle | Pin/verify-full fixtures pass; combined public TLS/egress blocked externally | Required, after CAP-14 external deployment gate | Local implementation PARTIAL (50); registry certification flag remains false |
 | MySQL | P1-R live snapshot | Explicitly blocked in production transport | Preserve bounded development snapshot; no production claim until pin/hostname certification | Not required; post-launch |
 | MariaDB | Independent P1-R live snapshot | Explicitly blocked | Same bounded status; no inferred MySQL parity | Not required; post-launch |
 | SQLite | P1-R and B guarded file import | N/A; private staged token | Required file import, new upload when token expires/is consumed | No |
@@ -100,7 +100,7 @@ flowchart TD
   R --> L[10 January GO or NO-GO]
 ```
 
-Diagram P0–P8 labels mean calendar phases, not priority. G-C-LOCAL names local engineering closure; G-CI requires the current mandatory release CI GREEN; G-C-DEPLOY names the deferred external deployment proof. Foundation-D local implementation requires Foundation-C Local Engineering CLOSED, the required current release CI GREEN, and no A/B/C local-security regression. The local closure record does not satisfy the separate remote CI condition. Until the repaired workflow runs successfully, that condition is pending. External deployment validation gates production certification, not local Foundation-D development. No Analyst before published semantics, Presentation analysis before Analyst foundations, or provider calls before egress/approval. Trust/evaluation/metering/operations begin early. Semantic implementation remains after local CDC acceptance. Documentation/access research and evaluation-corpus design can proceed independently without live customer calls.
+Diagram P0–P8 labels mean calendar phases, not priority. G-C-LOCAL names local engineering closure; G-CI requires the current mandatory release CI GREEN; G-C-DEPLOY names the deferred external deployment proof. Foundation-D local implementation requires Foundation-C Local Engineering CLOSED, the required current release CI GREEN, and no A/B/C local-security regression. The owner attested that baseline entry condition GREEN for this Foundation-D run. New changes require their own reviewed CI result before release. External deployment validation gates production certification, not local Foundation-D development. No Analyst before published semantics, Presentation analysis before Analyst foundations, or provider calls before egress/approval. Trust/evaluation/metering/operations begin early. Semantic implementation remains after local CDC acceptance. Documentation/access research and evaluation-corpus design can proceed independently without live customer calls.
 
 ## Calendar and two-person capacity
 
@@ -108,7 +108,7 @@ Dates use Asia/Damascus for planning; persisted evidence timestamps are UTC. **S
 
 | Phase / dates | SE primary work | AI primary work | Entry, current state and exit evidence | Risk |
 |---|---|---|---|---|
-| P0 · 27 Oct–2 Nov 2026 | Repair strict CI, record C local closure and Foundation-D readiness; no staging provisioning now | Evaluation corpus, scoped AI/provider design and C regression review | C local engineering CLOSED; G-CI PENDING_PUSH_AND_RUN. Exit: G-C-LOCAL, current CI GREEN and preserved A/B/C boundaries | HIGH CI verification dependency |
+| P0 · 27 Oct–2 Nov 2026 | Preserve strict CI and C local closure; no staging provisioning now | Evaluation corpus, scoped AI/provider design and C regression review | C local engineering CLOSED; entry G-CI GREEN owner-attested. New D changes require their own reviewed CI; preserve A/B/C boundaries | HIGH new-change CI verification dependency |
 | P1 · 3–16 Nov | Foundation-D PostgreSQL CDC: capture, normalize, transform/load, checkpoint and recovery; terminal poison/scoped metadata fixes | Durable job/provider/evaluation spine and remove AI global schema access; integration tests with SE | CDC NOT STARTED; jobs PARTIAL. Requires G-C-LOCAL plus G-CI. Exit G-D plus G-J jobs/context/no false success, source/target reconciliation and outage/rollback proof | CRITICAL, two tightly coupled gates |
 | P2 · 17–29 Nov | Semantic persistence/compiler/Query integration and owned migrations; reservation/usage transaction contract | Semantic authoring/resolve/review UX and deterministic metric cases | Governed semantics NOT STARTED. Requires G-D/G-J. Exit G-S: published-version queries, exact totals, cross-tenant/version denial, semantic rollback | HIGH |
 | P3 · 30 Nov–6 Dec | Report/Presentation ownership seam, artifact-store/role design, metering ledger and MCP policy/approval spine | Bounded Modeling Agent with validation/review/publish, Trust evidence contract, reliability/scenario fixtures | Modeling/MCP NOT STARTED; evidence PARTIAL. Requires G-S. Exit G-M and reviewed policy/evidence/usage contracts; no provider calls yet | HIGH |
@@ -150,7 +150,7 @@ Freeze numerical quality/latency/cost and RPO/RTO targets from measured baseline
 
 | Rank | Risk | Owner / containment |
 |---|---|---|
-| BLOCKER | Repaired remote CI pending; external C deployment proofs still absent | SE; G-CI before local Foundation-D implementation; CAP-14/G-C-DEPLOY by 15 December and again on RC before public GO |
+| BLOCKER | D bounded recovery gate open; external C deployment proofs still absent | SE; G-CI baseline owner-attested GREEN; D acceptance and new-change CI remain; CAP-14/G-C-DEPLOY by 15 December and again on RC before public GO |
 | CRITICAL | Durable jobs/context, AI schema access, runtime/dependency support and restore gaps | SE+AI; G-J and runtime track before exposure; never infer from old readiness scores |
 | CRITICAL | Compressed serial dependency chain and vendor confidentiality/export behavior | BOTH; checkpoint re-estimates; provider sandbox/access/retention checks early; reduce P2 only |
 | HIGH | Report/Voice ownership migration risk, presentation factuality, duplicate charges, metering reconciliation | BOTH; ADR-023 bounded split, exact numeric fixtures, dispatch reconciliation |
@@ -158,10 +158,19 @@ Freeze numerical quality/latency/cost and RPO/RTO targets from measured baseline
 | MEDIUM | Forecast model capacity, browser bundle, replacement-source UX | AI; bounded supported forecasts with explicit degraded states, minimum customer flow |
 | LOW | Cosmetic/deprecation/debug cleanup outside safety paths | BOTH; defer unless it breaks a gate |
 
-**Next implementation phase: Foundation-D — PostgreSQL CDC.** Foundation-D local implementation requires Foundation-C Local Engineering CLOSED, the required current release CI GREEN, and no A/B/C local-security regression. The local closure record does not satisfy the separate remote CI condition. Until the repaired workflow runs successfully, that condition is pending. External deployment validation gates production certification, not local Foundation-D development. The next human action is review → stage → commit → push → observe required GitHub Actions (PR or manual dispatch if needed). This run does not implement Foundation-D, provision staging or deploy cloud resources.
+**Next exact work: close the Foundation-D bounded recovery gate and remaining local debt in [50](50_FOUNDATION_D_POSTGRESQL_CDC_IMPLEMENTATION_REPORT.md).** Do not start Semantic implementation automatically. Owner-attested baseline CI GREEN authorized entry; this run did not stage, commit, push, provision staging or deploy cloud resources.
 
 ## Owner-approved local closure policy — 2026-10-27
 
 **Foundation-C Local Engineering: CLOSED. Foundation-C External Deployment Validation: DEFERRED_TO_PRODUCTION_READINESS. Production Readiness: NO-GO.**
 
 Managed external secret store/KMS, deployed workload identities and real identity rotation, stable controlled public egress, customer-like PostgreSQL TLS verify-full and allowlist proof, combined full public production-policy ETL, deployed Kafka v1 backlog/drain attestation, and deployment cutover/rollback proof remain mandatory under CAP-14 before public GO. BIA-008 remains technically PARTIAL until its original deployment acceptance passes. Closing a development phase does not close that evidence obligation. Historical reports 36–42 and 47 retain earlier conclusions.
+
+## Foundation-D implementation evidence - 2026-10-27
+
+**Foundation-D Local Engineering: PARTIAL. Production Readiness: NO-GO.** [Report 50](50_FOUNDATION_D_POSTGRESQL_CDC_IMPLEMENTATION_REPORT.md) records real PostgreSQL -> Debezium -> Kafka -> Data Platform -> ClickHouse -> authorized Query execution. Inserts, updates, deletes, replay, several restarts/outages, rotation, controlled nullable ADD, incompatible-DDL pause, tenant denial and exact reconciliation passed. Automatic Kafka recovery on pinned Debezium 3.4.3 eventually caught up but exceeded the 120-second acceptance budget; the 5,000-row snapshot race exceeded 300 seconds before eventual exact agreement. These are local test observations, not an invented production SLA. G-D remains open; CAP-14 external validation stays DEFERRED_TO_PRODUCTION_READINESS.
+
+
+## D6 final acceptance - 2026-11-16
+
+**Foundation-D: PARTIAL. G-D: BLOCKED. Production Readiness: NO-GO.** The optimized fresh 5,000-row authorized Query gate passed in 72.641 seconds (three passing runs; median 132.281 seconds), but full-pipeline broker recovery missed 120 seconds and the clean post-interruption candidate timed out. Full local regression and release CI remain incomplete. No release candidate was committed or pushed. See [report 62](62_FOUNDATION_D_FINAL_ACCEPTANCE_AND_RELEASE_REPORT.md) and root FOUNDATION_D_RESULTS.json; historical D0-D5 evidence remains valid in its stated scope.

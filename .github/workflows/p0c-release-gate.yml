@@ -187,6 +187,7 @@ jobs:
           python -m pytest etl-final/transformer-service/transformer/engine -q
           python -m pytest etl-final/loader-service/loader/engine -q
           python -m pytest etl-final/tests/test_p0_transform_loader_listeners.py -q
+          python -m pytest etl-final/tests/test_cdc_contract.py etl-final/tests/test_cdc_offsets.py -q
           (cd etl-final/detector-service/detector && python manage.py test --verbosity 1)
           (cd etl-final/metadata-service/metadata && python manage.py test --verbosity 1)
 
@@ -258,6 +259,7 @@ jobs:
         run: |
           cp .env.example .env
           docker compose build
+          docker build -f etl-final/shared/cdc/Dockerfile -t biavora-cdc-ci:local .
 
   foundation-c-owner-boundary:
     runs-on: ubuntu-latest
@@ -326,10 +328,22 @@ jobs:
           for service in auth-service workspace-service subscription-service query-service; do
             (cd "services/$service" && python manage.py migrate --noinput --verbosity 0)
           done
-          python -c 'import os, psycopg2; c=psycopg2.connect(host=os.environ["DB_HOST"], dbname=os.environ["DB_NAME"], user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"]); k=c.cursor(); k.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=%s AND table_name LIKE %s", ("public", "integration_%")); assert k.fetchone()[0] == 5; c.close()'
+          python -c 'import os, psycopg2; c=psycopg2.connect(host=os.environ["DB_HOST"], dbname=os.environ["DB_NAME"], user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"]); k=c.cursor(); k.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema=%s AND table_name LIKE %s", ("public", "integration_%")); assert k.fetchone()[0] == 7; c.close()'
           python scripts/foundation_c4_owner_schemas.py apply
           python scripts/verify_foundation_c5_service_roles.py
           python scripts/foundation_c4_owner_schemas.py rollback
+      - name: Foundation-D migration round trip
+        env:
+          APP_ENV: test
+          BIAVORA_MIGRATION_DISPOSABLE: '1'
+          DB_HOST: 127.0.0.1
+          DB_PORT: '5432'
+          DB_NAME: foundation_d_migration_ci
+          DB_USER: postgres
+          DB_PASSWORD: c4-ci-disposable-only-password
+        run: |
+          python -c 'import os, psycopg2; c=psycopg2.connect(host=os.environ["DB_HOST"], user=os.environ["DB_USER"], password=os.environ["DB_PASSWORD"], dbname="postgres"); c.autocommit=True; c.cursor().execute("CREATE DATABASE foundation_d_migration_ci"); c.close()'
+          PYTHONPATH="$PWD:$PWD/services/query-service" python scripts/verify_foundation_d_migration.py
 
   release-gate:
     if: always()

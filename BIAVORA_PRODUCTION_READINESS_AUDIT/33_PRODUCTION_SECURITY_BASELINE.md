@@ -24,7 +24,7 @@ Current local statuses use 36/37/42 plus CI-repair validation in 49. **Foundatio
 | Durable context (BIA-009/020) | PARTIAL skeleton; active flows synchronous/pending integration | Persisted job/context/idempotency/outbox/recovery, no false success before dependent work |
 | AI schema/provider boundary (BIA-019/021) | Open | Authorized minimum Schema/Query tools, tenant/version keyed cache, facade and no broad AI warehouse credentials |
 | Upload boundary (BIA-011) | CLOSED for Foundation-B | Preserve maintained voice/file/SQLite scanner/limits/retention tests and staged operating proof |
-| Kafka compatibility / CI | v1 TRANSITIONAL; previous remote FAILED; repair PENDING_PUSH_AND_RUN | Actual deployed v1 retention/drain under CAP-14; current mandatory CI GREEN before local Foundation-D |
+| Kafka compatibility / CI | v1 TRANSITIONAL; baseline CI GREEN owner-attested; new D changes not remotely run | Actual deployed v1 retention/drain under CAP-14; current mandatory CI GREEN before local Foundation-D |
 
 ## PRE-STAGING
 
@@ -123,3 +123,14 @@ Structured & Unstructured RAG, Proactive Monitoring Agent and Arabic & Voice Sup
 ## Deployment checkpoint retained
 
 Managed external secret store/KMS, deployed workload identities and real identity rotation, stable controlled public egress, customer-like PostgreSQL TLS verify-full and allowlist proof, combined full public production-policy ETL, deployed Kafka v1 backlog/drain attestation, and deployment cutover/rollback proof remain mandatory under CAP-14 before public GO. CAP-14 dates: operator/platform plan 16 November, environment/probes 29 November, G-C-DEPLOY 15 December; revalidate the final candidate before public GO. This sequencing decision changes no production guard or test acceptance threshold.
+
+## Foundation-D implementation evidence - 2026-10-27
+
+**Foundation-D Local Engineering: PARTIAL. Production Readiness: NO-GO.** [Report 50](50_FOUNDATION_D_POSTGRESQL_CDC_IMPLEMENTATION_REPORT.md) records real PostgreSQL -> Debezium -> Kafka -> Data Platform -> ClickHouse -> authorized Query execution. Inserts, updates, deletes, replay, several restarts/outages, rotation, controlled nullable ADD, incompatible-DDL pause, tenant denial and exact reconciliation passed. Automatic Kafka recovery on pinned Debezium 3.4.3 eventually caught up but exceeded the 120-second acceptance budget; the 5,000-row snapshot race exceeded 300 seconds before eventual exact agreement. These are local test observations, not an invented production SLA. G-D remains open; CAP-14 external validation stays DEFERRED_TO_PRODUCTION_READINESS.
+
+The local CDC API requires `CDC_ENABLED=1` and rejects production. Separate controller/normalize/transform/load identities protect callbacks; only controller receives ciphertext. Connect REST is private and its persisted configuration contains FileConfigProvider references. Production JDBC DNS/TLS/egress, managed credentials and Kafka ACLs require CAP-14 certification.
+
+
+## D6 final acceptance - 2026-11-16
+
+**Foundation-D: PARTIAL. G-D: BLOCKED. Production Readiness: NO-GO.** The optimized fresh 5,000-row authorized Query gate passed in 72.641 seconds (three passing runs; median 132.281 seconds), but full-pipeline broker recovery missed 120 seconds and the clean post-interruption candidate timed out. Full local regression and release CI remain incomplete. No release candidate was committed or pushed. See [report 62](62_FOUNDATION_D_FINAL_ACCEPTANCE_AND_RELEASE_REPORT.md) and root FOUNDATION_D_RESULTS.json; historical D0-D5 evidence remains valid in its stated scope.

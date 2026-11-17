@@ -32,6 +32,7 @@ class Database(models.Model):
     file_size = models.BigIntegerField(help_text="File size in bytes")
     file_path = models.CharField(max_length=500, help_text="Path to file in ETL system")
     source_kind = models.CharField(max_length=20, default='file')
+    cdc_generation = models.PositiveIntegerField(null=True, blank=True)
     source_engine = models.CharField(max_length=32, blank=True, default='')
     source_tables = models.JSONField(default=list, blank=True)
     source = models.ForeignKey(

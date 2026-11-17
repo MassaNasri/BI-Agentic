@@ -4,9 +4,11 @@ from django.contrib import admin
 from django.urls import include, path
 from database.views import IngestionDatasetStatusView
 from integration.internal_views import ResolveSourceCredentialView
+from integration.cdc import InternalCdcView
 from bi_platform_shared.http.health import liveness_view, readiness_view
 
 urlpatterns = [
+    path('internal/v1/cdc/', InternalCdcView.as_view(), name='internal-cdc'),
     path('health/', liveness_view, name='health'),
     path('ready/', readiness_view, name='ready'),
     path('admin/', admin.site.urls),

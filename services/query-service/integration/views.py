@@ -112,8 +112,11 @@ class SourceDetailView(APIView):
         source, error = self._source(request, source_id)
         if error:
             return error
+        actor_id = principal_user_id(request.user)
+        if actor_id is None:
+            return _credential_error("INVALID_PRINCIPAL", 401)
         try:
-            update_source(source, request.data)
+            source = update_source(source, request.data, actor_id=actor_id)
         except ValueError as exc:
             return Response({"success": False, "error": {"code": "INVALID_SOURCE", "message": str(exc)}}, status=400)
         return Response({"success": True, "data": public_source(source)})
@@ -122,8 +125,11 @@ class SourceDetailView(APIView):
         source, error = self._source(request, source_id)
         if error:
             return error
-        retire_source(source)
-        revoke_credential(source.pk)
+        actor_id = principal_user_id(request.user)
+        if actor_id is None:
+            return _credential_error("INVALID_PRINCIPAL", 401)
+        source = retire_source(source, actor_id=actor_id)
+        revoke_credential(source.pk, actor_id=actor_id)
         logger.info("source_credential_retired workspace=%s source=%s actor=%s", source.workspace_id, source.pk, principal_user_id(request.user))
         return Response({"success": True, "data": public_source(source)})
 
@@ -139,7 +145,10 @@ class SourceCredentialView(SourceDetailView):
         if action not in {"configure", "rotate", "revoke"}:
             return _credential_error("INVALID_OPERATION")
         if action == "revoke":
-            revoke_credential(source.pk)
+            actor_id = principal_user_id(request.user)
+            if actor_id is None:
+                return _credential_error("INVALID_PRINCIPAL", 401)
+            revoke_credential(source.pk, actor_id=actor_id)
             logger.info("source_credential_revoked workspace=%s source=%s actor=%s", source.workspace_id, source.pk, principal_user_id(request.user))
             return Response({"success": True, "data": public_source(source)})
         if set(request.data) != {"password"}:
@@ -297,6 +306,10 @@ class SourceReplacementActionView(SourceDetailView):
                 source = DataSource.objects.select_for_update().get(pk=source.pk)
                 if source.state != DataSource.ACTIVE:
                     return _credential_error("SOURCE_DISABLED", 409)
+                if source.cdc_pipelines.exists():
+                    # A live pipeline is bound to this source configuration;
+                    # D5 must implement a generation-safe cutover/reseed.
+                    return _credential_error("CDC_SOURCE_BOUND", 409)
                 candidate = SourceCandidate.objects.select_for_update().get(source=source)
                 if action == "cutover":
                     from database.models import Database

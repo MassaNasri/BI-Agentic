@@ -104,6 +104,19 @@ def test_unknown_callback_fields_are_rejected():
 
 
 @patch('database.views.Database.objects')
+def test_generic_ingestion_callback_cannot_publish_cdc_dataset(objects):
+    database = Mock(pk=91, workspace_id=23, source_kind='cdc', etl_status='pending')
+    objects.select_for_update.return_value.filter.return_value.first.return_value = database
+    response = IngestionDatasetStatusView.post.__wrapped__(
+        IngestionDatasetStatusView(),
+        _callback_request(expected_state='pending', etl_status='completed'),
+        uuid.uuid4(),
+    )
+    assert response.status_code == 409
+    database.save.assert_not_called()
+
+
+@patch('database.views.Database.objects')
 def test_identical_callback_is_idempotent(objects):
     database = Mock(pk=91, workspace_id=23, etl_status='completed')
     objects.select_for_update.return_value.filter.return_value.first.return_value = database

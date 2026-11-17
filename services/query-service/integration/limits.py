@@ -9,6 +9,7 @@ from .models import SourceOperationBudget
 
 
 LIMITS_PER_MINUTE = {
+    "cdc": 20,
     "test": 12,
     "discover": 12,
     "snapshot": 6,

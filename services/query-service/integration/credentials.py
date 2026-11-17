@@ -7,7 +7,8 @@ from bi_platform_shared.db_ownership import integration_atomic
 from django.db.models import Max
 from django.utils import timezone
 
-from .models import DataSource, SourceCredential, SourceExecution
+from .models import DataSource, SourceCredential, SourceExecution, CdcPipeline
+from .cdc_lifecycle import record_command
 
 
 class CredentialUnavailable(ValueError):
@@ -73,7 +74,7 @@ def activate_credential(source_id, credential_id, *, expected_active_id=None):
 
 
 @integration_atomic
-def revoke_credential(source_id):
+def revoke_credential(source_id, *, actor_id):
     source = DataSource.objects.select_for_update().get(pk=source_id)
     # A rotated source can still have live grants bound to superseded versions.
     # Explicit revocation invalidates every version, including staged candidates.
@@ -83,6 +84,16 @@ def revoke_credential(source_id):
     ).update(
         state=SourceCredential.REVOKED, revoked_at=timezone.now(), ciphertext="",
     )
+    for pipeline in CdcPipeline.objects.select_for_update().filter(source=source).iterator():
+        if pipeline.desired_state == "STOPPED":
+            continue
+        previous_desired, previous_observed = pipeline.desired_state, pipeline.observed_state
+        pipeline.desired_state = "STOPPED"
+        if pipeline.observed_state != "RESEED_REQUIRED":
+            pipeline.observed_state = "STOPPING"
+        pipeline.save(update_fields=["desired_state", "observed_state", "updated_at"])
+        record_command(pipeline, actor_id, "credential_revoked", previous_desired,
+                       previous_observed, "CDC_ACCEPTED")
 
 
 @integration_atomic

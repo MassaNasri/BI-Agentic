@@ -292,7 +292,11 @@ class IntegrationOwnershipTests(TestCase):
         from django.core.management import call_command
         from integration.management.commands import run_credential_prune_worker as worker
 
-        with TemporaryDirectory() as directory, patch.object(worker, "HEARTBEAT", Path(directory) / "heartbeat"):
+        # A TestCase owns a transaction on this connection. Closing it inside
+        # the command would invalidate the test transaction and later cases.
+        with (TemporaryDirectory() as directory,
+              patch.object(worker, "HEARTBEAT", Path(directory) / "heartbeat"),
+              patch.object(worker, "close_old_connections")):
             call_command("run_credential_prune_worker", "--once", verbosity=0)
             self.assertTrue(worker.HEARTBEAT.exists())
 

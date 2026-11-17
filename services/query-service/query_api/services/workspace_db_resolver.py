@@ -54,6 +54,7 @@ class WorkspaceDatasetBinding:
     table_name: str
     allowed_tables: frozenset[str]
     etl_status: str
+    source_kind: str = ""
 
 
 def _required_positive_int(value: object, *, field_name: str) -> int:
@@ -213,6 +214,7 @@ def resolve_workspace_dataset_binding(
         table_name=stored_table_name,
         allowed_tables=frozenset(allowed_tables),
         etl_status=etl_status,
+        source_kind=str(getattr(database, "source_kind", "") or ""),
     )
 
 

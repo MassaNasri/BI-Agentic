@@ -12,7 +12,7 @@ REQUIRED = {
 }
 EXPECTED_TESTS = {
     'query': {'tests/test_clickhouse_credential_redaction.py', 'tests/test_ingestion_callback_security.py',
-              'tests/test_security_configuration.py', 'integration.test_public_boundary'},
+              'tests/test_security_configuration.py', 'integration.test_public_boundary', 'integration.test_cdc'},
     'visualization': {'visualization_api/tests/test_security_ownership_and_query_reference.py'},
     'voice': {'voice_reports/tests_security_workspace_authorization.py'},
     'auth': {'users.tests_security_invitation'},
@@ -55,6 +55,9 @@ def main():
     assert fixture['ALLOWED_HOSTS'] == 'localhost,127.0.0.1'
     assert fixture['CORS_ALLOWED_ORIGINS'] == fixture['DJANGO_CORS_ALLOWED_ORIGINS'] == ''
     assert any('tests/test_owner_boundary_environment.py' in s.get('run', '') for s in owner['steps'])
+    assert any('verify_foundation_d_migration.py' in s.get('run', '') for s in owner['steps'])
+    assert any('etl-final/tests/test_cdc_contract.py etl-final/tests/test_cdc_offsets.py' in s.get('run', '') for s in jobs['etl']['steps'])
+    assert any('etl-final/shared/cdc/Dockerfile' in s.get('run', '') for s in jobs['docker-build']['steps'])
     print('PASS: YAML parsed; all nine jobs mandatory; six native security environments; all original security suites retained; no continue-on-error; production fixture explicit.')
 
 

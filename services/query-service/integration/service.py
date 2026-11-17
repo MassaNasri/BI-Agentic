@@ -1,7 +1,9 @@
 """The only application write interface for Integration source definitions."""
 
 from .metadata import safe_connection_metadata
-from .models import DataSource
+from .models import DataSource, CdcPipeline
+from .cdc_lifecycle import record_command
+from bi_platform_shared.db_ownership import integration_atomic
 import uuid
 
 
@@ -53,7 +55,9 @@ def record_selection(source, tables):
     source.save(update_fields=["selected_tables", "updated_at"])
 
 
-def update_source(source, changes):
+@integration_atomic
+def update_source(source, changes, *, actor_id):
+    source = DataSource.objects.select_for_update().get(pk=source.pk)
     if source.state == DataSource.RETIRED:
         raise ValueError("A retired source cannot be changed.")
     allowed = {"name", "selected_tables", "state"}
@@ -69,6 +73,9 @@ def update_source(source, changes):
             raise ValueError("A valid source name is required.")
     if "selected_tables" in changes:
         tables = selected_tables(changes["selected_tables"])
+        selected = {(item["schema"] or "public", item["name"]) for item in tables}
+        if any((p.table_schema, p.table_name) not in selected for p in source.cdc_pipelines.all()):
+            raise ValueError("CDC_TABLE_BOUND")
     if "state" in changes:
         state = changes["state"]
         if state not in (DataSource.ACTIVE, DataSource.DISABLED):
@@ -78,10 +85,29 @@ def update_source(source, changes):
     source.selected_tables = tables
     source.state = state
     source.save()
+    if state == DataSource.DISABLED:
+        for pipeline in CdcPipeline.objects.select_for_update().filter(source=source).iterator():
+            prior_desired, prior_observed = pipeline.desired_state, pipeline.observed_state
+            if pipeline.desired_state != "STOPPED":
+                pipeline.desired_state = "STOPPED"
+                if pipeline.observed_state != "RESEED_REQUIRED":
+                    pipeline.observed_state = "STOPPING"
+                pipeline.save(update_fields=["desired_state", "observed_state", "updated_at"])
+                record_command(pipeline, actor_id, "source_disabled", prior_desired, prior_observed, "CDC_ACCEPTED")
     return source
 
 
-def retire_source(source):
+@integration_atomic
+def retire_source(source, *, actor_id):
+    source = DataSource.objects.select_for_update().get(pk=source.pk)
     source.state = DataSource.RETIRED
     source.save(update_fields=["state", "updated_at"])
+    for pipeline in CdcPipeline.objects.select_for_update().filter(source=source).iterator():
+        prior_desired, prior_observed = pipeline.desired_state, pipeline.observed_state
+        if pipeline.desired_state != "STOPPED":
+            pipeline.desired_state = "STOPPED"
+            if pipeline.observed_state != "RESEED_REQUIRED":
+                pipeline.observed_state = "STOPPING"
+            pipeline.save(update_fields=["desired_state", "observed_state", "updated_at"])
+            record_command(pipeline, actor_id, "source_retired", prior_desired, prior_observed, "CDC_ACCEPTED")
     return source

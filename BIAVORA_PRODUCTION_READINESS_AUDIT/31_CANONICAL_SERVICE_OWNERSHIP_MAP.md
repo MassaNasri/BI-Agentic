@@ -9,7 +9,7 @@ Revision 3.0 · 2026-10-27 · Target **10 January 2027**. [43](43_BIAVORA_PRODUC
 | Workspace | Workspace/member/invitation | Workspace owner schema/role | Membership/role authority at every protected boundary |
 | Integration | Implemented app in Query deployment | Keep logical Integration, separate DB alias/role | Sources, encrypted credential versions/grants, configuration/transport, snapshot/CDC lifecycle; Connector/Connect control |
 | Query | Dataset, query definitions, execution | Keep Query | Dataset bindings, exact analytical allowlist, read-only bounded Query/Schema APIs; sole analytical authority |
-| Data Platform | Six ETL applications and shared library | Keep subsystem; add PostgreSQL Connect/Debezium/normalizer after G-C-LOCAL plus G-CI | Snapshot/WAL events, transforms, loader writes, scoped metadata, checkpoints/recovery |
+| Data Platform | Six ETL applications, shared library and local CDC worker modes | Keep subsystem; Connect/Debezium and CDC worker implemented, PARTIAL (50) | Snapshot/WAL events, transforms, loader writes, scoped metadata, checkpoints/recovery |
 | Semantic | Lexical helpers, no governed persistent model | Logical owner in AI/control deployment with owned schema/role | Versioned definitions/formula validation/review/publication; Query compiles/executes |
 | Modeling Agent | Missing governed proposal workflow | AI worker | Propose/explain/validate; only authorized human workflow may publish |
 | Analyst / ModelProvider | Fixed AI pipeline, fragmented providers | One durable AI orchestrator + in-process facade | Typed authorized tools, minimum schema/results, evidence/narrative, token/cost telemetry |
@@ -32,3 +32,14 @@ Presentation owns new-domain persistence; Voice owns legacy report persistence. 
 Object storage is private, tenant scoped and retention controlled. Kafka is a versioned scoped event/data plane with declared producer/consumer, ACL, ordering/replay/DLQ policy. Metering has append-only usage and reservation transitions. Secrets manager access is per workload, with separate staging/production identities.
 
 Knowledge/RAG, Proactive Monitoring Agent and Arabic & Voice Support expansion are outside January scope; no ownership row here authorizes those features. Existing dormant code is preserved. See 48 for historical plans and references.
+
+## Foundation-D implementation evidence - 2026-10-27
+
+**Foundation-D Local Engineering: PARTIAL. Production Readiness: NO-GO.** [Report 50](50_FOUNDATION_D_POSTGRESQL_CDC_IMPLEMENTATION_REPORT.md) records real PostgreSQL -> Debezium -> Kafka -> Data Platform -> ClickHouse -> authorized Query execution. Inserts, updates, deletes, replay, several restarts/outages, rotation, controlled nullable ADD, incompatible-DDL pause, tenant denial and exact reconciliation passed. Automatic Kafka recovery on pinned Debezium 3.4.3 eventually caught up but exceeded the 120-second acceptance budget; the 5,000-row snapshot race exceeded 300 seconds before eventual exact agreement. These are local test observations, not an invented production SLA. G-D remains open; CAP-14 external validation stays DEFERRED_TO_PRODUCTION_READINESS.
+
+Integration owns `integration_cdc_pipelines` and `integration_cdc_audit`; Query owns the live `Database` binding. The four worker modes remain Data Platform components with no product API or independent analytics authority (ADR-D-01 in report 50).
+
+
+## D6 final acceptance - 2026-11-16
+
+**Foundation-D: PARTIAL. G-D: BLOCKED. Production Readiness: NO-GO.** The optimized fresh 5,000-row authorized Query gate passed in 72.641 seconds (three passing runs; median 132.281 seconds), but full-pipeline broker recovery missed 120 seconds and the clean post-interruption candidate timed out. Full local regression and release CI remain incomplete. No release candidate was committed or pushed. See [report 62](62_FOUNDATION_D_FINAL_ACCEPTANCE_AND_RELEASE_REPORT.md) and root FOUNDATION_D_RESULTS.json; historical D0-D5 evidence remains valid in its stated scope.

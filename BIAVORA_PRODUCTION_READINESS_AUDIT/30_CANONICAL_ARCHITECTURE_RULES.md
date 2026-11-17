@@ -144,3 +144,14 @@ Scope/calendar precedence is defined in [43](43_BIAVORA_PRODUCT_SCOPE_AND_RELEAS
 - Kubernetes **MUST NOT** be required by fashion; choose it only with a documented workload/operations need.
 - Local Compose **MUST NOT** be represented as the production architecture.
 - Multi-region active-active **SHOULD** remain post-launch unless business/SLO evidence makes it mandatory.
+
+## Foundation-D implementation evidence - 2026-10-27
+
+**Foundation-D Local Engineering: PARTIAL. Production Readiness: NO-GO.** [Report 50](50_FOUNDATION_D_POSTGRESQL_CDC_IMPLEMENTATION_REPORT.md) records real PostgreSQL -> Debezium -> Kafka -> Data Platform -> ClickHouse -> authorized Query execution. Inserts, updates, deletes, replay, several restarts/outages, rotation, controlled nullable ADD, incompatible-DDL pause, tenant denial and exact reconciliation passed. Automatic Kafka recovery on pinned Debezium 3.4.3 eventually caught up but exceeded the 120-second acceptance budget; the 5,000-row snapshot race exceeded 300 seconds before eventual exact agreement. These are local test observations, not an invented production SLA. G-D remains open; CAP-14 external validation stays DEFERRED_TO_PRODUCTION_READINESS.
+
+CDC current-state queries MUST resolve through Query-owned views, never raw versions. Pipeline scope MUST be derived from persisted Integration identity. Public pause uses Connect STOP/RESUME with offsets and slots retained. No automatic slot drop or offset rewrite is authorized by a transient failure.
+
+
+## D6 final acceptance - 2026-11-16
+
+**Foundation-D: PARTIAL. G-D: BLOCKED. Production Readiness: NO-GO.** The optimized fresh 5,000-row authorized Query gate passed in 72.641 seconds (three passing runs; median 132.281 seconds), but full-pipeline broker recovery missed 120 seconds and the clean post-interruption candidate timed out. Full local regression and release CI remain incomplete. No release candidate was committed or pushed. See [report 62](62_FOUNDATION_D_FINAL_ACCEPTANCE_AND_RELEASE_REPORT.md) and root FOUNDATION_D_RESULTS.json; historical D0-D5 evidence remains valid in its stated scope.

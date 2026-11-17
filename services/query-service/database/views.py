@@ -1098,6 +1098,11 @@ class DatabaseDetailView(APIView):
             if database is None:
                 raise Database.DoesNotExist
             
+            if database.source_kind == 'cdc':
+                return Response(
+                    {'success': False, 'error': {'code': 'CDC_DATASET_RETAINED'},
+                     'message': 'CDC datasets are retained by the source lifecycle.'}, status=409,
+                )
             # Cleanup ClickHouse and other resources
             cleanup_results = cleanup_database(database)
             if cleanup_results['errors']:
@@ -1367,6 +1372,11 @@ class IngestionDatasetStatusView(APIView):
             return Response(
                 {'success': False, 'error': 'Ingestion job, dataset, and workspace binding not found.'},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+        if database.source_kind == 'cdc':
+            return Response(
+                {'success': False, 'error': 'CDC Dataset publication requires the CDC Loader callback.'},
+                status=status.HTTP_409_CONFLICT,
             )
         expected = str(request.data.get('expected_state') or '').strip().lower()
         requested = str(request.data.get('etl_status') or '').strip().lower()

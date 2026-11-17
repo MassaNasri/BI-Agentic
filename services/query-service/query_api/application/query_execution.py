@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from django.conf import settings
+from sqlglot import exp, parse_one
 
 from query_api.resource_policy import QueryResourcePolicy, build_workspace_query_id
 from query_api.services import (
@@ -201,6 +202,24 @@ def validate_sql_payload(
             403 if forbidden else 400,
             binding,
         )
+    if binding.source_kind == "cdc":
+        try:
+            parsed = parse_one(clean_sql, read="clickhouse")
+            technical_column = parsed is None or any(
+                column.name.lower().startswith("_cdc_") for column in parsed.find_all(exp.Column))
+        except Exception:
+            technical_column = True
+        if technical_column:
+            return (
+                _failed_payload(
+                    sql=clean_sql,
+                    error="CDC storage columns are not part of the authorized dataset.",
+                    error_code="FORBIDDEN_DATASET",
+                    extra={"workspace_id": binding.workspace_id, "dataset_id": binding.dataset_id},
+                ),
+                403,
+                binding,
+            )
     return (
         {
             "success": True,

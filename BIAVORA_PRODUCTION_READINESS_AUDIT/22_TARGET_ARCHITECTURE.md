@@ -167,3 +167,14 @@ HTTP submits/reads/cancels short control operations; Kafka transports versioned 
 Single-region managed containers/state are preferred for the two-person team; Kubernetes is not required. Use isolated staging/production, production process servers/workers, supported pinned dependencies, non-root immutable images, TLS/least-privilege identities, managed secrets/rotation, private artifact/quarantine storage, bounded resources/rates, redacted logs/metrics/traces, measurable SLOs and responder runbooks. Recover PostgreSQL/ClickHouse/Kafka/object storage/metadata/semantic/job/ledger state coherently. Prove migration/rollback and restore/RPO/RTO before launch.
 
 Notification consumes owned events/read projections rather than foreign ORM. Entitlements, immutable Metering, Billing and Payments remain distinct even within Subscription. Paid activation is disabled unless its separate real-provider gate passes. No pgvector/Knowledge plane, Proactive Monitoring Agent or Arabic/Voice expansion is part of this release; existing code remains maintained. All boxes require the tests/deployment evidence in 45 before they can be called production-ready.
+
+## Foundation-D implementation evidence - 2026-10-27
+
+**Foundation-D Local Engineering: PARTIAL. Production Readiness: NO-GO.** [Report 50](50_FOUNDATION_D_POSTGRESQL_CDC_IMPLEMENTATION_REPORT.md) records real PostgreSQL -> Debezium -> Kafka -> Data Platform -> ClickHouse -> authorized Query execution. Inserts, updates, deletes, replay, several restarts/outages, rotation, controlled nullable ADD, incompatible-DDL pause, tenant denial and exact reconciliation passed. Automatic Kafka recovery on pinned Debezium 3.4.3 eventually caught up but exceeded the 120-second acceptance budget; the 5,000-row snapshot race exceeded 300 seconds before eventual exact agreement. These are local test observations, not an invented production SLA. G-D remains open; CAP-14 external validation stays DEFERRED_TO_PRODUCTION_READINESS.
+
+The live dataset binds to a business-column-only ClickHouse view using `FINAL` before the delete predicate. Versioned tombstones are retained; arrival order and background merge timing do not choose current state. Snapshot history remains separate.
+
+
+## D6 final acceptance - 2026-11-16
+
+**Foundation-D: PARTIAL. G-D: BLOCKED. Production Readiness: NO-GO.** The optimized fresh 5,000-row authorized Query gate passed in 72.641 seconds (three passing runs; median 132.281 seconds), but full-pipeline broker recovery missed 120 seconds and the clean post-interruption candidate timed out. Full local regression and release CI remain incomplete. No release candidate was committed or pushed. See [report 62](62_FOUNDATION_D_FINAL_ACCEPTANCE_AND_RELEASE_REPORT.md) and root FOUNDATION_D_RESULTS.json; historical D0-D5 evidence remains valid in its stated scope.

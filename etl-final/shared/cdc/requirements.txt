@@ -1,0 +1,6 @@
+kafka-python==2.3.0
+requests==2.32.5
+psycopg2-binary==2.9.11
+clickhouse-connect==0.15.1
+cryptography==46.0.3
+prometheus-client==0.23.1

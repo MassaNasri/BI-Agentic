@@ -16,7 +16,7 @@ SUITES = {
         "cwd": "services/query-service",
         "commands": [
             ["-m", "pytest", "tests/test_clickhouse_credential_redaction.py", "tests/test_ingestion_callback_security.py", "tests/test_security_configuration.py", "-q"],
-            ["manage.py", "test", "integration.test_public_boundary", "--settings=service_config.sqlite_test_settings", "--verbosity", "1"],
+            ["manage.py", "test", "integration.test_public_boundary", "integration.test_cdc", "--settings=service_config.sqlite_test_settings", "--verbosity", "1"],
         ],
     },
     "visualization": {
